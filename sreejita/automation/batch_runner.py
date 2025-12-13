@@ -36,7 +36,7 @@ def run_single_file(file_path, config_path, output_root="runs"):
         failed_dir.mkdir(exist_ok=True)
         dst = failed_dir / src.name
         dst.write_bytes(src.read_bytes())
-        raise
+        raise 
 
 
 def run_batch(input_folder: str, config_path: str, output_root="runs"):
