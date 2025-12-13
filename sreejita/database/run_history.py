@@ -15,7 +15,6 @@ class RunHistoryDB:
         self._init_db()
     
     def _init_db(self) -> None:
-        """Initialize database schema."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -51,7 +50,6 @@ class RunHistoryDB:
         conn.close()
     
     def record_run(self, run_data: Dict[str, Any]) -> None:
-        """Record a run in the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -76,7 +74,6 @@ class RunHistoryDB:
         conn.close()
     
     def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve a run from history."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -99,36 +96,11 @@ class RunHistoryDB:
             }
         return None
     
-    def compare_runs(self, run_id_1: str, run_id_2: str) -> Dict[str, Any]:
-        """Compare two runs."""
-        run1 = self.get_run(run_id_1)
-        run2 = self.get_run(run_id_2)
-        
-        if not run1 or not run2:
-            return {"error": "One or both runs not found"}
-        
-        comparison = {
-            "run_1": run_id_1,
-            "run_2": run_id_2,
-            "metrics_delta": {
-                "rows_delta": run2["rows_processed"] - run1["rows_processed"],
-                "duration_delta": run2["duration_seconds"] - run1["duration_seconds"],
-                "error_delta": run2["errors"] - run1["errors"]
-            },
-            "improvement": run2["duration_seconds"] < run1["duration_seconds"]
-        }
-        
-        return comparison
-    
     def get_history(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent run history."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT * FROM runs ORDER BY created_at DESC LIMIT ?
-        """, (limit,))
-        
+        cursor.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,))
         rows = cursor.fetchall()
         conn.close()
         
