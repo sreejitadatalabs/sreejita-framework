@@ -82,7 +82,11 @@ def run_batch(input_folder: str, config_path: str, output_root="runs"):
         out_pdf = output_dir / f"{file.split('.')[0]}_report.pdf"
         log.info("Processing %s", file)
 
-        run_hybrid(str(dst), config)
+        for file in files:
+        try:
+            run_single_file(src, config_path)
+        except Exception:
+            log.warning("Skipping failed file and continuing batch")
 
     log.info("Batch run completed: %s", run_dir)
 
