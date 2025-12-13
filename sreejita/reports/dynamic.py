@@ -11,6 +11,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
 from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.insights import correlation_insights
+from sreejita.core.schema import detect_schema
+from sreejita.domains.router import apply_domain
 from sreejita.core.recommendations import generate_recommendations
 from sreejita.visuals.time_series import plot_monthly
 from sreejita.visuals.categorical import bar
@@ -25,6 +27,14 @@ def run_dynamic(input_path: str, output_path: str, config: dict):
 
     result = clean_dataframe(df_raw, [config["dataset"].get("date")])
     df = result["df"]
+
+        # Domain routing
+    df = apply_domain(df, config["domain"]["name"])
+    
+    # Schema detection & column configuration
+    schema = detect_schema(df)
+    numeric_cols = config["analysis"].get("numeric") or schema["numeric"]
+    categorical_cols = config["analysis"].get("categorical") or schema["categorical"]
 
     img_dir = "dynamic_images"
     os.makedirs(img_dir, exist_ok=True)
