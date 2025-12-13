@@ -10,6 +10,24 @@ log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
 
+def run_single_file(file_path, config_path, output_root="runs"):
+    config = load_config(config_path)
+
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = Path(output_root) / timestamp
+    input_dir = run_dir / "input"
+    output_dir = run_dir / "output"
+
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    src = Path(file_path)
+    dst = input_dir / src.name
+    dst.write_bytes(src.read_bytes())
+
+    out_pdf = output_dir / f"{src.stem}_report.pdf"
+    run_hybrid(str(dst), config)
+
 def run_batch(input_folder: str, config_path: str, output_root="runs"):
     config = load_config(config_path)
 
