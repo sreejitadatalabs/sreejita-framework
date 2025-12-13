@@ -14,6 +14,8 @@ from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.insights import correlation_insights
 from sreejita.core.recommendations import generate_recommendations
+from sreejita.core.schema import detect_schema
+from sreejita.domains.router import apply_domain
 
 from sreejita.visuals.time_series import plot_monthly
 from sreejita.visuals.distributions import hist
@@ -53,6 +55,14 @@ def run_hybrid(input_path: str, output_path: str, config: dict):
     date_col = config["dataset"].get("date")
     result = clean_dataframe(df_raw, [date_col] if date_col else None)
     df = result["df"]
+
+        # Domain routing
+    df = apply_domain(df, config["domain"]["name"])
+    
+    # Schema detection & column configuration
+    schema = detect_schema(df)
+    numeric_cols = config["analysis"].get("numeric") or schema["numeric"]
+    categorical_cols = config["analysis"].get("categorical") or schema["categorical"]
     summary = result["summary"]
 
     # 3. Prepare image directory
