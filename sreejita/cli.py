@@ -2,6 +2,22 @@ import argparse
 from sreejita.config.loader import load_config
 from sreejita.reports.hybrid import run
 
+if args.schedule:
+    from sreejita.automation.scheduler import start_scheduler
+
+    config = load_config(args.config)
+    schedule_cfg = config.get("automation", {}).get("schedule")
+
+    if not schedule_cfg:
+        raise ValueError("No schedule configuration found in config file")
+
+    start_scheduler(
+        schedule_config=schedule_cfg,
+        input_dir=args.batch,
+        config_path=args.config
+    )
+    return
+
 parser.add_argument("--batch", help="Run batch mode on folder")
 parser.add_argument(
     "--watch",
@@ -15,15 +31,11 @@ def main():
     start_watcher(args.watch, args.config)
     return
 
-    parser.add_argument("--schedule", action="store_true")
-
-    if args.schedule:
-        from sreejita.automation.scheduler import start_scheduler
-        start_scheduler(
-            config["automation"]["schedule"],
-            args.batch,
-            args.config
-        )
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Run batch processing on a schedule (cron-based)"
+    )
 
     parser = argparse.ArgumentParser("Sreejita Framework v1.2")
     parser.add_argument("input")
