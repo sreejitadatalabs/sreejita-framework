@@ -5,7 +5,7 @@ import psutil
 import os
 from typing import Dict, Any
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 @dataclass
 class Metrics:
@@ -46,7 +46,6 @@ class MetricsCollector:
         self.metrics = None
     
     def start(self, rows_count: int = 0) -> None:
-        """Start metrics collection."""
         process = psutil.Process(os.getpid())
         self.metrics = Metrics(
             start_time=time.time(),
@@ -55,7 +54,6 @@ class MetricsCollector:
         )
     
     def end(self) -> Dict[str, Any]:
-        """End metrics collection and return results."""
         if self.metrics:
             process = psutil.Process(os.getpid())
             self.metrics.end_time = time.time()
@@ -64,6 +62,5 @@ class MetricsCollector:
         return {}
     
     def record_error(self) -> None:
-        """Record an error."""
         if self.metrics:
             self.metrics.errors += 1
