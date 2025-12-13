@@ -6,3 +6,5 @@ reportlab
 python-dateutil
 pyyaml
 apscheduler
+watchdog
+psutil
