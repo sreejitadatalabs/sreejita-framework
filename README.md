@@ -2,20 +2,22 @@
 
 **Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
 
-## 🎯 Current Version: v1.2 (Domain Modules Release)
-
+## 🎯 Current Version: v1.6 (Quality Assurance & Observability Release)
 The **Sreejita Framework** is a production-ready framework that transforms raw data into clean, analyzed insights with a standard, repeatable workflow.
 
-### What's in v1.2?
-
-Core Engine + **5 Domain Modules** (Plugin Architecture)
-
+### What's in v1.6?
+Core Engine + **5 Domain Modules** + **Quality Assurance Suite** (Data Validation, Profiling, Observability)
 - ✅ **Core Engine**: Data loading, cleaning, profiling, insights
 - ✅ **Retail Domain**: Sales, inventory, customer behavior
 - ✅ **E-commerce Domain**: Conversions, cart metrics, CLV
 - ✅ **Customer Domain**: Segmentation, RFM, churn analysis
 - ✅ **Text Domain**: NLP feature analysis, sentiment
 - ✅ **Finance Domain**: P&L, ratios, volatility, forecasting
+- - ✅ **Data Quality Validator**: 6 comprehensive validation checks
+- ✅ **Data Profiler**: Statistical analysis with outlier detection
+- ✅ **Dry-Run Mode**: Preview transformations without writing
+- ✅ **Metrics Collector**: Execution time & memory tracking
+- ✅ **Run History Database**: Audit trail & run comparisons
 
 ---
 
