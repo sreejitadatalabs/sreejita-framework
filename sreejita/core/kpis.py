@@ -1,12 +1,13 @@
-def compute_kpis(df, base_metrics=None):
+def compute_kpis(df, base_kpis=None, domain_kpis=None):
     kpis = {
         "Rows": df.shape[0],
         "Columns": df.shape[1]
     }
 
-    if base_metrics:
-        for name, col in base_metrics.items():
-            if col in df.columns:
-                kpis[name] = round(df[col].sum(), 2)
+    if base_kpis:
+        kpis.update(base_kpis)
+
+    if domain_kpis:
+        kpis.update(domain_kpis)
 
     return kpis
