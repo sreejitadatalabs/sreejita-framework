@@ -89,6 +89,27 @@ sreejita-framework/
 
 ---
 
+## 📊 What Data Can This Framework Handle?
+
+Sreejita Framework supports **any structured dataset**
+(rows × columns), including:
+
+- **Retail & ecommerce transactions** - Sales, inventory, customer behavior
+- **Sales & revenue data** - Revenue metrics, sales forecasts, trends
+- **Customer metrics & segmentation outputs** - Customer profiles, RFM analysis, cohorts
+- **Marketing campaign data** - Campaign performance, engagement metrics, conversions
+- **Text analytics outputs** - Sentiment scores, topic classifications, text features
+
+### What It CANNOT Handle:
+
+⚠️ **Raw unstructured data** (text, images, audio) must be converted into **structured features** before use.
+
+- Raw text → Extract sentiment scores, embeddings, topics
+- Images → Extract features, classifications, metadata
+- Audio → Extract transcripts, emotions, speech features
+
+This design protects you from misuse and ensures data quality.
+
 ## 🏗️ Architecture: Core + Domains
 
 Instead of a monolithic framework, Sreejita uses a **plugin architecture**:
