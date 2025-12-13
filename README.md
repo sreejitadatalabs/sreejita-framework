@@ -171,6 +171,22 @@ python -m sreejita.cli -i customers.csv -o report.json -p customer --ml
 ```
 
 ---
+## Supported Data Types
+
+Sreejita Framework supports any **structured or semi-structured data**
+that can be represented as a table (rows × columns), including:
+
+- Retail & ecommerce transactions
+- Sales & revenue data
+- Customer profiles & metrics
+- Marketing campaign data
+- Text analytics outputs (sentiment, topics, scores)
+
+❌ Not supported directly:
+- Raw text (must be converted to features)
+- Images, audio, video
+- Streaming data
+-----------------
 
 ## 📈 Version Roadmap
 
