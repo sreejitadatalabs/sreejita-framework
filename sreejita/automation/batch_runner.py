@@ -29,7 +29,15 @@ def run_single_file(file_path, config_path, output_root="runs"):
     dst.write_bytes(src.read_bytes())
 
     out_pdf = output_dir / f"{src.stem}_report.pdf"
-    run_hybrid(str(dst), config)
+    try:
+        run_hybrid(str(dst), config)
+    except Exception as e:
+        failed_dir = run_dir / "failed"
+        failed_dir.mkdir(exist_ok=True)
+        dst = failed_dir / src.name
+        dst.write_bytes(src.read_bytes())
+        raise
+
 
 def run_batch(input_folder: str, config_path: str, output_root="runs"):
     config = load_config(config_path)
