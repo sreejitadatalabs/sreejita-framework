@@ -13,6 +13,12 @@ SUPPORTED_EXT = (".csv", ".xlsx")
 
 @retry(times=3, delay=5)
 
+from pathlib import Path
+from sreejita.utils.logger import get_logger
+
+log = get_logger("batch-runner")
+
+@retry(times=3, delay=5)
 def run_single_file(file_path, config_path, output_root="runs"):
     config = load_config(config_path)
 
@@ -20,6 +26,7 @@ def run_single_file(file_path, config_path, output_root="runs"):
     run_dir = Path(output_root) / timestamp
     input_dir = run_dir / "input"
     output_dir = run_dir / "output"
+    failed_dir = run_dir / "failed"
 
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -28,15 +35,25 @@ def run_single_file(file_path, config_path, output_root="runs"):
     dst = input_dir / src.name
     dst.write_bytes(src.read_bytes())
 
-    out_pdf = output_dir / f"{src.stem}_report.pdf"
     try:
+        log.info("Processing file: %s", src.name)
         run_hybrid(str(dst), config)
+        log.info("Completed file: %s", src.name)
+
     except Exception as e:
-        failed_dir = run_dir / "failed"
         failed_dir.mkdir(exist_ok=True)
-        dst = failed_dir / src.name
-        dst.write_bytes(src.read_bytes())
-        raise 
+        failed_path = failed_dir / src.name
+        failed_path.write_bytes(src.read_bytes())
+
+        log.error(
+            "File failed and moved to failed/: %s | Reason: %s",
+            src.name,
+            str(e)
+        )
+
+        # Important: do NOT crash entire batch
+        return
+ 
 
 
 def run_batch(input_folder: str, config_path: str, output_root="runs"):
