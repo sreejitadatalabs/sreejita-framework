@@ -1,15 +1,17 @@
 DEFAULT_CONFIG = {
     "dataset": {
         "date": None,
-        "sales": "sales",
-        "profit": "profit"
+        "target": None
     },
     "analysis": {
-        "categorical": [],
-        "numeric_distribution": []
+        "numeric": [],
+        "categorical": []
+    },
+    "domain": {
+        "name": "generic"
     },
     "report": {
-        "mode": "dynamic",
+        "mode": "hybrid",
         "output": "report.pdf"
     }
 }
