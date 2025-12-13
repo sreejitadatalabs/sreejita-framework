@@ -1,1 +1,9 @@
 
+domain:
+  name: retail
+
+report:
+  mode: hybrid
+
+automation:
+  output_root: runs
