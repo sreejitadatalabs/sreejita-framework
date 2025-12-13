@@ -15,6 +15,16 @@ def main():
     start_watcher(args.watch, args.config)
     return
 
+    parser.add_argument("--schedule", action="store_true")
+
+    if args.schedule:
+        from sreejita.automation.scheduler import start_scheduler
+        start_scheduler(
+            config["automation"]["schedule"],
+            args.batch,
+            args.config
+        )
+
     parser = argparse.ArgumentParser("Sreejita Framework v1.2")
     parser.add_argument("input")
     parser.add_argument("--config", required=True)
