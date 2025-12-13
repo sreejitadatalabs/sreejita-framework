@@ -4,6 +4,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from sreejita.automation.batch_runner import run_batch
+from sreejita.automation.batch_runner import run_single_file
 from sreejita.utils.logger import get_logger
 
 log = get_logger("file-watcher")
@@ -36,10 +37,7 @@ class NewFileHandler(FileSystemEventHandler):
         # Give OS time to finish writing file
         time.sleep(2)
 
-        run_batch(
-            input_folder=self.watch_dir,
-            config_path=self.config_path
-        )
+        run_single_file(path, self.config_path)
 
 
 def start_watcher(watch_dir: str, config_path: str):
