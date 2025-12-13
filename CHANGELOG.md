@@ -5,6 +5,52 @@ The project follows a practical, capability-based versioning approach.
 Not every internal milestone is released, only meaningful, stable versions.
 
 ---
+[v1.6.0] – Quality Assurance & Observability Release
+=====================================================
+
+### Added
+
+- Data Quality Validation Framework (validator.py)
+  - 6 comprehensive validation checks
+  - Schema validation and anomaly detection
+  - Detailed validation reports
+  
+- Data Profiling Engine (profiler.py)
+  - Statistical analysis per column
+  - Outlier detection (IQR method)
+  - Missing value analysis
+  
+- Metrics Collection (metrics.py)
+  - Execution time tracking
+  - Memory profiling
+  - Throughput measurement (rows/sec)
+  
+- Run History Database (run_history.py)
+  - SQLite-backed run persistence
+  - Run comparison capabilities
+  - Audit trail logging
+  
+- Dry-Run Mode (--dry-run CLI flag)
+  - Preview transformations without write
+  - Validation-only execution
+  
+- Data Profiling CLI (--profile flag)
+  - Generate statistical profiles
+  - Detect outliers and anomalies
+
+### Improved
+
+- CLI with new validation and profiling options
+- Observability for production deployments
+- Run history for debugging and comparison
+- Enterprise-grade data quality checks
+
+### Notes
+
+- Fully backward compatible with v1.5
+- New modules are independent and optional
+- Production-ready quality assurance layer
+- Zero-dependency profiling (uses NumPy/Pandas only)
 
 ## [v1.5.0] – Automation & File-Watcher Release
 ### Added
