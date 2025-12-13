@@ -1,34 +1,207 @@
-# 🌿 Sreejita Framework (v1.0)
+# 🌿 Sreejita Framework
 
-The **Sreejita Framework** is a structured, repeatable workflow for turning raw data into clean, meaningful insights.
+**Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
 
-This repository contains the **v1.0 – Foundation Release**, which focuses on:
-- Standard project structure
-- Client intake and data requirements templates
-- Data cleaning scripts (Python)
-- Exploratory Data Analysis (EDA) notebook
-- Output templates for reports and dashboards
+## 🎯 Current Version: v1.2 (Domain Modules Release)
+
+The **Sreejita Framework** is a production-ready framework that transforms raw data into clean, analyzed insights with a standard, repeatable workflow.
+
+### What's in v1.2?
+
+Core Engine + **5 Domain Modules** (Plugin Architecture)
+
+- ✅ **Core Engine**: Data loading, cleaning, profiling, insights
+- ✅ **Retail Domain**: Sales, inventory, customer behavior
+- ✅ **E-commerce Domain**: Conversions, cart metrics, CLV
+- ✅ **Customer Domain**: Segmentation, RFM, churn analysis
+- ✅ **Text Domain**: NLP feature analysis, sentiment
+- ✅ **Finance Domain**: P&L, ratios, volatility, forecasting
+
+---
+
+## 📦 Installation
+
+```bash
+git clone https://github.com/sreejitadatalabs/sreejita-framework.git
+cd sreejita-framework
+pip install -r requirements.txt
+```
+
+---
+
+## 🚀 Quick Start
+
+### Using Domain Modules
+
+```python
+from sreejita import get_domain
+import pandas as pd
+
+# Load data
+df = pd.read_csv('data.csv')
+
+# Load domain (retail, ecommerce, customer, text, finance)
+domain = get_domain('retail')
+results = domain.run(df)
+
+print(f"Domain: {results['domain']}")
+print(f"KPIs: {results['kpis']}")
+print(f"Insights: {results['insights']}")
+```
+
+### Using Core Engine
+
+```python
+from sreejita import DataCleaner, InsightGenerator
+
+cleaner = DataCleaner()
+df_clean = cleaner.clean(df)
+
+insight_gen = InsightGenerator()
+insights = insight_gen.generate(df_clean)
+```
 
 ---
 
 ## 📁 Folder Structure
 
-- `01_INTRO_AND_INTAKE/` – Client intake form, data requirements checklist
-- `02_DATA_AUDIT/` – Data audit notebook and quality checks
-- `03_DATA_PREP/` – Cleaning and validation scripts
-- `04_EDA/` – EDA notebook and visualization helpers
-- `05_OUTPUT_TEMPLATES/` – Summary report and dashboard layout references
+```
+sreejita-framework/
+├── sreejita/
+│   ├── core/              # Core engine (cleaner, insights, KPIs)
+│   ├── domains/           # Pluggable domain modules ✨ NEW IN v1.2
+│   │   ├── base.py
+│   │   ├── retail.py
+│   │   ├── ecommerce.py
+│   │   ├── customer.py
+│   │   ├── text.py
+│   │   ├── finance.py
+│   │   └── README.md
+│   ├── config/            # Configuration loader
+│   ├── utils/             # Utility functions
+│   ├── visuals/           # Visualization helpers
+│   ├── reports/           # Report generation
+│   └── __init__.py        # Main API (updated for v1.2)
+├── examples/              # Example notebooks
+├── requirements.txt
+└── README.md
+```
 
 ---
 
-## 🎯 Version Roadmap
+## 🏗️ Architecture: Core + Domains
 
-- **v1.0 – Foundation** (current)
-- **v1.5 – Automation**
-- **v2.0 – Intelligence & Dashboards**
-- **v3.0 – AI-Powered Insights**
-- **v4.0 – SaaS Platform (Future Vision)**
+Instead of a monolithic framework, Sreejita uses a **plugin architecture**:
+
+```
+┌─────────────────────────────────────────┐
+│      Sreejita Core Engine               │
+│   (Tabular data processing)             │
+└────────────┬────────────────────────────┘
+             │
+    ┌────────┴────────┬──────────┬──────────┬────────┐
+    ▼                 ▼          ▼          ▼        ▼
+┌────────┐      ┌──────────┐ ┌────────┐ ┌──────┐ ┌────────┐
+│Retail  │      │E-commerce│ │Customer│ │Text  │ │Finance │
+│Domain  │      │Domain    │ │Domain  │ │Domain│ │Domain  │
+└────────┘      └──────────┘ └────────┘ └──────┘ └────────┘
+```
+
+✅ Each domain is **independent**  
+✅ Core engine stays **stable**  
+✅ Add new domains **without modifying core**  
+✅ Domains **share consistent interface**  
 
 ---
 
-Built by **Sreejita Data Labs**.
+## 💡 Why This Architecture?
+
+| Feature | Benefit |
+|---------|----------|
+| **Plugin Pattern** | Add domains without touching core |
+| **Separation of Concerns** | Core handles data, domains add context |
+| **Type Safe** | Full type hints for IDE support |
+| **Extensible** | Create custom domains in minutes |
+| **Production-Grade** | Used in Spark, Airflow, sklearn |
+
+---
+
+## 📚 Available Domains
+
+### Retail Domain
+- Sales & revenue metrics
+- Product performance
+- Inventory insights
+- Seasonal trends
+
+### E-commerce Domain
+- Conversion rates
+- Cart metrics
+- Customer lifetime value
+- Channel attribution
+
+### Customer Domain
+- RFM analysis
+- Customer segmentation
+- Churn prediction
+- Engagement scoring
+
+### Text Domain
+- Sentiment analysis
+- Topic extraction
+- Word frequencies
+- **Note**: Expects preprocessed features, not raw text
+
+### Finance Domain
+- P&L analysis
+- Cash flow metrics
+- Financial ratios
+- Volatility & risk
+
+👉 See [sreejita/domains/README.md](sreejita/domains/README.md) for detailed domain documentation.
+
+---
+
+## 🛠️ CLI Usage
+
+```bash
+python -m sreejita.cli -i data.csv -o report.json -p retail
+python -m sreejita.cli -i orders.csv -o report.json -p ecommerce
+python -m sreejita.cli -i customers.csv -o report.json -p customer --ml
+```
+
+---
+
+## 📈 Version Roadmap
+
+| Version | Status | Features |
+|---------|--------|----------|
+| **v1.0** | ✅ Complete | Core engine, configs, utils |
+| **v1.1** | ✅ Complete | CLI, enhanced validation |
+| **v1.2** | ✅ **CURRENT** | **Domain modules (5 domains)** |
+| v1.5 | 🔜 Planned | Automation, scheduling |
+| v2.0 | 🔜 Planned | Streamlit UI, dashboards |
+| v3.0 | 🔜 Planned | AI-powered insights |
+| v4.0 | 🔜 Planned | SaaS platform |
+
+---
+
+## 🎓 Learn More
+
+- **Domains Guide**: [sreejita/domains/README.md](sreejita/domains/README.md)
+- **Core API**: [sreejita/core/](sreejita/core/)
+- **Examples**: [examples/](examples/)
+
+---
+
+## 📝 License
+
+MIT License - See LICENSE file for details
+
+---
+
+## 👨‍💻 Author
+
+Yeswanth Arasavalli  
+🔗 [Portfolio](https://yeswantharasavalli.me) | 🔗 [GitHub](https://github.com/sreejitadatalabs)  
+📧 Contact: [LinkedIn](https://linkedin.com)
