@@ -1,0 +1,4 @@
+domain:
+  name: retail
+dataset:
+  target: sales
