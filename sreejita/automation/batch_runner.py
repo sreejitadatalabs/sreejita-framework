@@ -5,10 +5,13 @@ from datetime import datetime
 from sreejita.reports.hybrid import run as run_hybrid
 from sreejita.config.loader import load_config
 from sreejita.utils.logger import get_logger
+from sreejita.automation.retry import retry
 
 log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
+
+@retry(times=3, delay=5)
 
 def run_single_file(file_path, config_path, output_root="runs"):
     config = load_config(config_path)
