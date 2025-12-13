@@ -7,6 +7,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.recommendations import generate_recommendations
+from sreejita.core.schema import detect_schema
+from sreejita.domains.router import apply_domain
 from sreejita.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -16,6 +18,14 @@ def run_executive(input_path: str, output_path: str, config: dict):
 
     df_raw = pd.read_csv(input_path) if input_path.endswith(".csv") else pd.read_excel(input_path)
     df = clean_dataframe(df_raw, [config["dataset"].get("date")])["df"]
+
+        # Domain routing
+    df = apply_domain(df, config["domain"]["name"])
+    
+    # Schema detection & column configuration
+    schema = detect_schema(df)
+    numeric_cols = config["analysis"].get("numeric") or schema["numeric"]
+    categorical_cols = config["analysis"].get("categorical") or schema["categorical"]
 
     kpis = compute_kpis(df,
                         config["dataset"].get("sales"),
