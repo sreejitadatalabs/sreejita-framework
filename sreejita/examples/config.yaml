@@ -1,0 +1,14 @@
+dataset:
+  date: order_date
+  sales: sales
+  profit: profit
+
+analysis:
+  categorical:
+    - category
+    - region
+    - segment
+
+report:
+  mode: hybrid
+  output: report.pdf
