@@ -8,8 +8,8 @@ DOMAIN_REGISTRY = {
     "generic": None
 }
 
-def apply_domain_enrichment(df, domain_name: str):
-    domain = DOMAIN_REGISTRY.get(domain_name)
+def apply_domain(df, domain_name: str):
+    domain = DOMAIN_REGISTRY.get(domain_name, None)
 
     if domain is None:
         return df
