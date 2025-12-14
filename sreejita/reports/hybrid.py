@@ -58,10 +58,16 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
 # ------------------------------
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     # Output handling
+    input_path = Path(input_path)
+
     if output_path is None:
-        output_dir = Path("reports")
+        output_dir = input_path.parent / "reports"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+        output_path = output_dir / (
+            f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
+
 
     output_path = str(output_path)  # ✅ CRITICAL FIX
 
