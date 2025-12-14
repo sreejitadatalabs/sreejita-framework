@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def clean_dataframe(df: pd.DataFrame):
+def DataCleaner(df: pd.DataFrame):
     df.columns = (
         df.columns.astype(str)
         .str.strip().str.lower()
