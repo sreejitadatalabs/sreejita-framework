@@ -7,8 +7,8 @@ from .__version__ import __version__
 
 # Core Engine
 from .core.cleaner import clean_dataframe
-from .core.insights import InsightGenerator
-from .core.kpis import KPICalculator
+from .core.insights import correlation_insights
+from .core.kpis import compute_kpis
 
 # Domain API
 from .domains import (
