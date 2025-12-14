@@ -10,7 +10,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 )
-
+from typing import Optional
 from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.insights import correlation_insights
@@ -37,7 +37,7 @@ def _header_footer(canvas, doc):
     canvas.restoreState()
 
 
-def run(input_path: str, config: dict, output_path: str | None = None):
+def run(input_path: str, config: dict, output_path: Optional[str] = None):
     if output_path is None:
         output_path = f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
