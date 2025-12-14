@@ -6,7 +6,7 @@ Universal framework for structured data analysis with pluggable domain modules.
 from .__version__ import __version__
 
 # Core Engine
-from .core.cleaner import DataCleaner
+from .core.cleaner import clean_dataframe
 from .core.insights import InsightGenerator
 from .core.kpis import KPICalculator
 
@@ -24,7 +24,7 @@ from .domains import (
 
 __all__ = [
     "__version__",
-    "DataCleaner",
+    "clean_dataframe",
     "InsightGenerator",
     "KPICalculator",
     "BaseDomain",
