@@ -10,9 +10,10 @@ from sreejita.core.kpis import compute_kpis
 from sreejita.core.recommendations import generate_recommendations
 from sreejita.core.schema import detect_schema
 from sreejita.domains.router import apply_domain
+from typing import Optional
 
 
-def run(input_path: str, config: dict, output_path: str | None = None):
+def run(input_path: str, config: dict, output_path: Optional[str] = None):
     if output_path is None:
         output_path = f"executive_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
