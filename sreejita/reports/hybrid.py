@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -34,7 +34,7 @@ def _header_footer(canvas, doc):
     canvas.drawString(
         cm,
         0.7 * cm,
-        f"Confidential • Generated {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Confidential • Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M timezone.utc')}",
     )
     canvas.restoreState()
 
