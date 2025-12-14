@@ -1,3 +1,7 @@
+![CI](https://github.com/sreejitadatalabs/sreejita-framework/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Status](https://img.shields.io/badge/status-production--ready-brightgreen)
+
 # 🌿 Sreejita Framework
 
 **Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
