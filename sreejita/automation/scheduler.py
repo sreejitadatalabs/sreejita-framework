@@ -1,10 +1,17 @@
 from apscheduler.schedulers.blocking import BlockingScheduler
+
 from sreejita.automation.batch_runner import run_batch
 from sreejita.utils.logger import get_logger
 
 log = get_logger("scheduler")
 
-def start_scheduler(schedule_config: dict, input_dir: str, config_path: str):
+
+def start_scheduler(
+    schedule_config: dict,
+    input_dir: str,
+    config_path: str,
+    output_root: str = "runs"
+):
     """
     Start time-based automation using APScheduler.
 
@@ -22,9 +29,12 @@ def start_scheduler(schedule_config: dict, input_dir: str, config_path: str):
     scheduler.add_job(
         run_batch,
         trigger="cron",
+        id="sreejita-batch-job",
+        replace_existing=True,
         kwargs={
             "input_folder": input_dir,
-            "config_path": config_path
+            "config_path": config_path,
+            "output_root": output_root
         },
         **schedule_config
     )
