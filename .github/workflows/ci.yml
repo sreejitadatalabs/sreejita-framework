@@ -28,5 +28,6 @@ jobs:
           pip install pytest pytest-cov
                     pip install -e .
       
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=sreejita --cov-report=term-missing
