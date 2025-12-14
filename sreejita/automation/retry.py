@@ -1,36 +1,50 @@
 import time
+import logging
 from functools import wraps
-from sreejita.utils.logger import get_logger
 
-log = get_logger("retry")
+logger = logging.getLogger(__name__)
+
 
 def retry(times: int = 3, delay: int = 3):
     """
     Retry decorator for automation tasks.
 
     Args:
-        times: number of attempts
-        delay: delay between retries in seconds
+        times (int): Number of retry attempts
+        delay (int): Delay in seconds between attempts
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
             for attempt in range(1, times + 1):
                 try:
-                    log.info("Attempt %s/%s for %s", attempt, times, func.__name__)
+                    logger.info(
+                        "Attempt %s/%s for %s",
+                        attempt,
+                        times,
+                        func.__name__,
+                    )
                     return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    log.error(
-                        "Attempt %s failed for %s: %s",
+                except Exception as exc:
+                    last_exception = exc
+                    logger.error(
+                        "Error on attempt %s for %s: %s",
                         attempt,
                         func.__name__,
-                        str(e)
+                        exc,
                     )
                     if attempt < times:
                         time.sleep(delay)
-            log.critical("All retries failed for %s", func.__name__)
+
+            logger.critical(
+                "All %s attempts failed for %s",
+                times,
+                func.__name__,
+            )
             raise last_exception
+
         return wrapper
+
     return decorator
