@@ -36,3 +36,4 @@ class TextDomain(BaseDomain):
         if "Avg Sentiment" in kpis:
             insights.append(f"Average Sentiment: {kpis['Avg Sentiment']:.2f}")
         return insights
+        
