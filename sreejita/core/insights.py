@@ -1,6 +1,6 @@
 import numpy as np
 
-def InsightGenerator(df, target="sales"):
+def correlation_insights(df, target="sales"):
     insights = []
     num = df.select_dtypes(include=[np.number])
 
