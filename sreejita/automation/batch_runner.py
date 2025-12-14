@@ -71,7 +71,7 @@ def run_batch(input_folder: str, config_path: str, output_root="runs"):
     log.info("Found %d input files", len(files))
 
         for file in files:
-            try:
+                try:
                         src = Path(input_folder) / file
             run_single_file(src, config_path)
         except Exception:
