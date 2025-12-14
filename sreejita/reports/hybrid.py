@@ -25,6 +25,9 @@ from sreejita.visuals.categorical import bar
 from sreejita.visuals.correlation import heatmap
 
 
+# ------------------------------
+# Header / Footer
+# ------------------------------
 def _header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
@@ -38,28 +41,35 @@ def _header_footer(canvas, doc):
     canvas.restoreState()
 
 
+# ------------------------------
+# Safe Data Loader
+# ------------------------------
 def load_dataframe(input_path: str) -> pd.DataFrame:
-    """Load CSV or Excel with encoding fallback."""
     if input_path.lower().endswith(".csv"):
         try:
             return pd.read_csv(input_path)
         except UnicodeDecodeError:
             return pd.read_csv(input_path, encoding="latin1")
-    else:
-        return pd.read_excel(input_path)
+    return pd.read_excel(input_path)
 
 
+# ------------------------------
+# Main Report Runner
+# ------------------------------
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
+    # Output handling
     if output_path is None:
         output_dir = Path("reports")
-        output_dir.mkdir(exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # Load data (FIXED)
+    output_path = str(output_path)  # ✅ CRITICAL FIX
+
+    # Load data
     df_raw = load_dataframe(input_path)
 
     # Clean
-    date_col = config["dataset"].get("date") if "dataset" in config else None
+    date_col = config.get("dataset", {}).get("date")
     result = clean_dataframe(df_raw, [date_col] if date_col else None)
     df = result["df"]
 
@@ -70,11 +80,11 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # Schema detection
     schema = detect_schema(df)
 
+    # Image output
     img_dir = Path("hybrid_images")
     img_dir.mkdir(exist_ok=True)
 
     images = {}
-
     sales_col = config.get("dataset", {}).get("sales")
 
     if date_col and sales_col in df.columns:
@@ -92,10 +102,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     images["corr"] = img_dir / "corr.png"
     heatmap(df.select_dtypes("number"), images["corr"])
 
+    # KPIs & Insights
     kpis = compute_kpis(df, sales_col, config.get("dataset", {}).get("profit"))
     insights = correlation_insights(df, sales_col)
     recs = generate_recommendations(df)
 
+    # Build PDF
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
@@ -110,6 +122,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story = [Paragraph("Hybrid Automated Data Report", title), Spacer(1, 12)]
 
+    # KPI table
     rows = []
     items = list(kpis.items())
     for i in range(0, len(items), 2):
@@ -126,10 +139,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey)]))
     story.extend([table, Spacer(1, 12)])
 
+    # Insights
     story.append(Paragraph("Insights", styles["Heading2"]))
     for i in insights:
         story.append(Paragraph(f"• {i}", styles["BodyText"]))
 
+    # Visuals
     story.append(PageBreak())
     for img in images.values():
         if img.exists():
