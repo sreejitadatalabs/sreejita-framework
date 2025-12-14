@@ -6,7 +6,49 @@
 
 **Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
 
-## 🎯 Current Version: v1.6 (Quality Assurance & Observability Release)
+**Version:** 1.7  
+**Status:** Stable (CI/CD Enabled)  
+**Maintained by:** Sreejita Data Labs
+
+Sreejita Framework is a production-grade, domain-agnostic **data analytics automation framework** designed for freelancers, consultants, and small teams. It automates data cleaning, profiling, reporting, and batch workflows with a clean CLI and robust CI/CD.
+
+---
+
+## 🚀 Key Features
+
+### Core Analytics
+- Data cleaning & normalization
+- Data quality validation
+- Profiling & metrics
+- Domain-ready architecture (retail, ecommerce, text, etc.)
+
+### Reports
+- Hybrid consulting-style PDF report
+- Executive summary report
+- Dynamic report generation
+
+### Automation (v1.5+)
+- Batch processing of folders
+- File watcher (real-time ingestion)
+- Scheduler (time-based automation)
+- Retry & failure handling
+- Deterministic run folders
+
+### CLI (v1.6+)
+- Lightweight CLI entry point
+- Supports single file, batch, watch, and schedule modes
+- Config-driven execution
+
+### Engineering Quality (v1.7)
+- Full CI/CD pipeline (GitHub Actions)
+- Test suite for CLI, domains, automation
+- Python version compatibility (3.9 – 3.12)
+- Structured logging
+
+---
+
+
+## 🎯 Version: v1.6 (Quality Assurance & Observability Release)
 The **Sreejita Framework** is a production-ready framework that transforms raw data into clean, analyzed insights with a standard, repeatable workflow.
 
 ### What's in v1.6?
@@ -17,7 +59,7 @@ Core Engine + **5 Domain Modules** + **Quality Assurance Suite** (Data Validatio
 - ✅ **Customer Domain**: Segmentation, RFM, churn analysis
 - ✅ **Text Domain**: NLP feature analysis, sentiment
 - ✅ **Finance Domain**: P&L, ratios, volatility, forecasting
-- - ✅ **Data Quality Validator**: 6 comprehensive validation checks
+- ✅ **Data Quality Validator**: 6 comprehensive validation checks
 - ✅ **Data Profiler**: Statistical analysis with outlier detection
 - ✅ **Dry-Run Mode**: Preview transformations without writing
 - ✅ **Metrics Collector**: Execution time & memory tracking
