@@ -1,3 +1,4 @@
+29
 """Sreejita Framework v1.2 - Data Analytics & Domain Modules
 
 Universal framework for structured data analysis with pluggable domain modules.
@@ -26,7 +27,7 @@ __all__ = [
     "__version__",
     "clean_dataframe",
     "InsightGenerator",
-    "KPICalculator",
+    "compute_kpis",
     "BaseDomain",
     "RetailDomain",
     "EcommerceDomain",
