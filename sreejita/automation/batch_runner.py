@@ -70,16 +70,9 @@ def run_batch(input_folder: str, config_path: str, output_root="runs"):
 
     log.info("Found %d input files", len(files))
 
-    for file in files:
-        src = Path(input_folder) / file
-        dst = input_dir / file
-        dst.write_bytes(src.read_bytes())
-
-        out_pdf = output_dir / f"{file.split('.')[0]}_report.pdf"
-        log.info("Processing %s", file)
-
         for file in files:
         try:
+                        src = Path(input_folder) / file
             run_single_file(src, config_path)
         except Exception:
             log.warning("Skipping failed file and continuing batch")
