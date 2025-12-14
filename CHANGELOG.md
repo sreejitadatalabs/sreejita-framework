@@ -4,6 +4,25 @@ All notable changes to the **Sreejita Framework** will be documented in this fil
 The project follows a practical, capability-based versioning approach.
 Not every internal milestone is released, only meaningful, stable versions.
 
+[1.8.0] – Packaging & Distribution Foundation
+==============================================================
+
+### Added
+- Modern Python packaging using `pyproject.toml`
+- Global CLI entry: `sreejita`
+- Editable install support (`pip install -e .`)
+- Version alignment across CLI, package, and build system
+
+### Fixed
+- CLI execution consistency across Python 3.9–3.12
+- Import safety during CI test runs
+
+### Notes
+- No breaking changes
+- No logic refactors
+- Foundation for PyPI release in v1.8.x
+
+  
 [v1.7.0] - Professional Quality & Developer Experience Release
 ==============================================================
 
