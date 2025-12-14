@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -16,13 +17,18 @@ COOLDOWN_SECONDS = 10
 
 
 class NewFileHandler(FileSystemEventHandler):
-    def __init__(self, watch_dir: Path, config: dict, output_root="runs"):
+    def __init__(
+        self,
+        watch_dir: Path,
+        config: dict,
+        output_root: str = "runs"
+    ) -> None:
         self.watch_dir = watch_dir
         self.config = config
         self.output_root = Path(output_root)
         self._cooldown = {}
 
-    def on_created(self, event):
+    def on_created(self, event) -> None:
         if event.is_directory:
             return
 
@@ -32,9 +38,8 @@ class NewFileHandler(FileSystemEventHandler):
             return
 
         now = time.time()
-
-        # cooldown expiry
         last_seen = self._cooldown.get(path.name)
+
         if last_seen and (now - last_seen) < COOLDOWN_SECONDS:
             return
 
@@ -47,6 +52,7 @@ class NewFileHandler(FileSystemEventHandler):
 
         timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
         run_dir = self.output_root / timestamp
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             run_single_file(path, self.config, run_dir)
@@ -63,7 +69,11 @@ class NewFileHandler(FileSystemEventHandler):
             )
 
 
-def start_watcher(watch_dir: str, config_path: str, output_root="runs"):
+def start_watcher(
+    watch_dir: str,
+    config_path: Optional[str] = None,
+    output_root: str = "runs"
+) -> None:
     watch_dir = Path(watch_dir)
 
     if not watch_dir.exists():
