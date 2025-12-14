@@ -6,7 +6,7 @@ from sreejita.reports.hybrid import run as run_hybrid
 from sreejita.config.loader import load_config
 from sreejita.utils.logger import get_logger
 from sreejita.automation.retry import retry
-
+from typing import Optional
 log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
@@ -30,7 +30,7 @@ def run_single_file(file_path: Path, config: dict, run_dir: Path):
     log.info("Completed file: %s", src.name)
 
 
-def run_batch(input_folder: str, config_path: str, output_root="runs"):
+def run_batch(input_folder: str, config_path: Optional[str], output_root="runs"):
     config = load_config(config_path)
 
     timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
