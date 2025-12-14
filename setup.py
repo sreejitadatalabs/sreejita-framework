@@ -2,8 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="sreejita-framework",
-    version="1.6.0",
-    packages=find_packages(),
+    version="1.7.0",    packages=find_packages(),
     install_requires=[
         "pandas>=2.0",
         "numpy>=1.24",
