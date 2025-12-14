@@ -1,4 +1,4 @@
-def KPICalculator(df, base_kpis=None, domain_kpis=None):
+def compute_kpis(df, base_kpis=None, domain_kpis=None):
     kpis = {
         "Rows": df.shape[0],
         "Columns": df.shape[1]
