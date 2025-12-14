@@ -5,6 +5,21 @@ The project follows a practical, capability-based versioning approach.
 Not every internal milestone is released, only meaningful, stable versions.
 
 ---
+
+## [CI/CD] - Infrastructure & Testing Improvements
+
+### Fixed
+- Fixed indentation error in batch_runner.py batch processing loop
+- Fixed syntax errors in batch_runner.py (removed duplicate imports)
+- Fixed file path handling in batch processing
+
+### Added
+- Multi-version CI/CD testing (Python 3.9, 3.10, 3.11, 3.12)
+- Automatic package installation in test environment
+- GitHub Actions workflow for automated testing
+
+---
+
 [v1.6.0] – Quality Assurance & Observability Release
 =====================================================
 
