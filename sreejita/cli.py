@@ -117,6 +117,11 @@ def main() -> int:
 
     logger.info("Processing file %s", input_path)
     run_hybrid(str(input_path), config)
+    report_path = run_hybrid(str(input_path), config)
+
+    print("\n✅ Report generated successfully")
+    print(f"📄 Report location: {report_path}")
+
     logger.info("Completed successfully")
     return 0
 
