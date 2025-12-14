@@ -1,9 +1,9 @@
 pandas
 numpy
+pyyaml
 matplotlib
 seaborn
 reportlab
-python-dateutil
-pyyaml
-apscheduler
 watchdog
+apscheduler
+scikit-learn
