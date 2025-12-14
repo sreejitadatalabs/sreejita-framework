@@ -25,9 +25,6 @@ from sreejita.visuals.categorical import bar
 from sreejita.visuals.correlation import heatmap
 
 
-# ------------------------------
-# Header / Footer
-# ------------------------------
 def _header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
@@ -36,15 +33,13 @@ def _header_footer(canvas, doc):
     canvas.drawString(
         cm,
         0.7 * cm,
-        f"Confidential • Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
     )
     canvas.restoreState()
 
 
-# ------------------------------
-# Safe Data Loader
-# ------------------------------
 def load_dataframe(input_path: str) -> pd.DataFrame:
+    input_path = str(input_path)
     if input_path.lower().endswith(".csv"):
         try:
             return pd.read_csv(input_path)
@@ -53,23 +48,16 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
     return pd.read_excel(input_path)
 
 
-# ------------------------------
-# Main Report Runner
-# ------------------------------
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
-    # Output handling
     input_path = Path(input_path)
 
+    # Output folder
     if output_path is None:
         output_dir = input_path.parent / "reports"
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-        output_path = output_dir / (
-            f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
-        )
-
-
-    output_path = str(output_path)  # ✅ CRITICAL FIX
+    output_path = str(output_path)  # 🔥 critical
 
     # Load data
     df_raw = load_dataframe(input_path)
@@ -83,14 +71,14 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if "domain" in config:
         df = apply_domain(df, config["domain"]["name"])
 
-    # Schema detection
+    # Schema
     schema = detect_schema(df)
 
-    # Image output
+    # Images
     img_dir = Path("hybrid_images")
     img_dir.mkdir(exist_ok=True)
-
     images = {}
+
     sales_col = config.get("dataset", {}).get("sales")
 
     if date_col and sales_col in df.columns:
@@ -108,7 +96,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     images["corr"] = img_dir / "corr.png"
     heatmap(df.select_dtypes("number"), images["corr"])
 
-    # KPIs & Insights
+    # KPIs & insights
     kpis = compute_kpis(df, sales_col, config.get("dataset", {}).get("profit"))
     insights = correlation_insights(df, sales_col)
     recs = generate_recommendations(df)
@@ -134,23 +122,19 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for i in range(0, len(items), 2):
         left = items[i]
         right = items[i + 1] if i + 1 < len(items) else ("", "")
-        rows.append(
-            [
-                Paragraph(f"<b>{left[0]}</b><br/>{left[1]}", styles["BodyText"]),
-                Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
-            ]
-        )
+        rows.append([
+            Paragraph(f"<b>{left[0]}</b><br/>{left[1]}", styles["BodyText"]),
+            Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
+        ])
 
     table = Table(rows, colWidths=[8 * cm, 8 * cm])
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey)]))
     story.extend([table, Spacer(1, 12)])
 
-    # Insights
     story.append(Paragraph("Insights", styles["Heading2"]))
     for i in insights:
         story.append(Paragraph(f"• {i}", styles["BodyText"]))
 
-    # Visuals
     story.append(PageBreak())
     for img in images.values():
         if img.exists():
