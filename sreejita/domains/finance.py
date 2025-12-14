@@ -40,3 +40,4 @@ class FinanceDomain(BaseDomain):
         if "Net Profit" in kpis:
             insights.append(f"Net Profit: ${kpis['Net Profit']:,.0f}")
         return insights
+        
