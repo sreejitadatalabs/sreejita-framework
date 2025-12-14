@@ -43,13 +43,13 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
 
     # Load data
     def load_dataframe(input_path: str):
-    if input_path.endswith(".csv"):
-        try:
-            return pd.read_csv(input_path)
-        except UnicodeDecodeError:
-            return pd.read_csv(input_path, encoding="latin1")
-    else:
-        return pd.read_excel(input_path)
+        if input_path.endswith(".csv"):
+            try:
+                return pd.read_csv(input_path)
+            except UnicodeDecodeError:
+                return pd.read_csv(input_path, encoding="latin1")
+        else:
+            return pd.read_excel(input_path)
 
 
     # Clean
