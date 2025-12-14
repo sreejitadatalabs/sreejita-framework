@@ -23,6 +23,9 @@ from .domains import (
     DOMAIN_REGISTRY,
 )
 
+# Machine Learning Module
+from .ml import PredictiveAnalytics, AutoML
+
 __all__ = [
     "__version__",
     "clean_dataframe",
@@ -36,4 +39,6 @@ __all__ = [
     "FinanceDomain",
     "get_domain",
     "DOMAIN_REGISTRY",
+        "PredictiveAnalytics",
+    "AutoML",
 ]
