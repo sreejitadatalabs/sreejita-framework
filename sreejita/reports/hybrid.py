@@ -51,7 +51,9 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
 
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     if output_path is None:
-        output_path = f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_dir = Path("reports")
+        output_dir.mkdir(exist_ok=True)
+        output_path = output_dir / f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
     # Load data (FIXED)
     df_raw = load_dataframe(input_path)
