@@ -11,15 +11,9 @@ log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
 
-@retry(times=3, delay=5)
-
 
 @retry(times=3, delay=5)
-def run_single_file(file_path, config_path, output_root="runs"):
-    config = load_config(config_path)
-
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir = Path(output_root) / timestamp
+def run_single_file(file_path: Path, config: dict, run_dir: Path):
     input_dir = run_dir / "input"
     output_dir = run_dir / "output"
     failed_dir = run_dir / "failed"
@@ -31,25 +25,9 @@ def run_single_file(file_path, config_path, output_root="runs"):
     dst = input_dir / src.name
     dst.write_bytes(src.read_bytes())
 
-    try:
-        log.info("Processing file: %s", src.name)
-        run_hybrid(str(dst), config)
-        log.info("Completed file: %s", src.name)
-
-    except Exception as e:
-        failed_dir.mkdir(exist_ok=True)
-        failed_path = failed_dir / src.name
-        failed_path.write_bytes(src.read_bytes())
-
-        log.error(
-            "File failed and moved to failed/: %s | Reason: %s",
-            src.name,
-            str(e)
-        )
-
-        # Important: do NOT crash entire batch
-        return
- 
+    log.info("Processing file: %s", src.name)
+    run_hybrid(str(dst), config)
+    log.info("Completed file: %s", src.name)
 
 
 def run_batch(input_folder: str, config_path: str, output_root="runs"):
@@ -57,11 +35,6 @@ def run_batch(input_folder: str, config_path: str, output_root="runs"):
 
     timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = Path(output_root) / timestamp
-    input_dir = run_dir / "input"
-    output_dir = run_dir / "output"
-
-    input_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     files = [
         f for f in os.listdir(input_folder)
@@ -71,10 +44,19 @@ def run_batch(input_folder: str, config_path: str, output_root="runs"):
     log.info("Found %d input files", len(files))
 
     for file in files:
+        src = Path(input_folder) / file
         try:
-            src = Path(input_folder) / file
-            run_single_file(src, config_path)
-        except Exception:
-            log.warning("Skipping failed file and continuing batch")
-    log.info("Batch run completed: %s", run_dir)
+            run_single_file(src, config, run_dir)
+        except Exception as e:
+            failed_dir = run_dir / "failed"
+            failed_dir.mkdir(exist_ok=True)
+            failed_path = failed_dir / src.name
+            failed_path.write_bytes(src.read_bytes())
 
+            log.error(
+                "File failed after retries: %s | Reason: %s",
+                src.name,
+                str(e)
+            )
+
+    log.info("Batch run completed: %s", run_dir)
