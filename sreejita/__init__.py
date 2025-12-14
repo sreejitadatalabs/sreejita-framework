@@ -1,10 +1,16 @@
-29
-"""Sreejita Framework v1.2 - Data Analytics & Domain Modules
+"""
+Sreejita Framework v1.7
 
-Universal framework for structured data analysis with pluggable domain modules.
+Production-grade data analytics framework with
+domain abstraction and automation support.
 """
 
 from .__version__ import __version__
+
+# Keep package init lightweight and safe
+# Heavy modules (domains, ML, automation) should be imported explicitly by users
+
+
 
 # Core Engine
 from .core.cleaner import clean_dataframe
