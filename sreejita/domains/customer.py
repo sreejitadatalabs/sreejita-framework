@@ -36,4 +36,4 @@ class CustomerDomain(BaseDomain):
             insights.append(f"Total Customers: {kpis['Total Customers']}")
         if "Average Customer Value" in kpis:
             insights.append(f"Avg Customer Value: ${kpis['Average Customer Value']:.2f}")
-        return insights
+        return insights 
