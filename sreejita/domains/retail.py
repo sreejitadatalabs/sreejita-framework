@@ -49,3 +49,4 @@ class RetailDomain(BaseDomain):
         if "Total Profit" in kpis:
             insights.append(f"Total Profit: ${kpis['Total Profit']:,.0f}")
         return insights
+        
