@@ -13,10 +13,6 @@ SUPPORTED_EXT = (".csv", ".xlsx")
 
 @retry(times=3, delay=5)
 
-from pathlib import Path
-from sreejita.utils.logger import get_logger
-
-log = get_logger("batch-runner")
 
 @retry(times=3, delay=5)
 def run_single_file(file_path, config_path, output_root="runs"):
