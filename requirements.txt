@@ -7,5 +7,3 @@ python-dateutil
 pyyaml
 apscheduler
 watchdog
-psutil
-pytest-cov
