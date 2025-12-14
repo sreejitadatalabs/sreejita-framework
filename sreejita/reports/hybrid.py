@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -10,7 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 )
-from typing import Optional
+
 from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.insights import correlation_insights
@@ -37,30 +38,34 @@ def _header_footer(canvas, doc):
     canvas.restoreState()
 
 
-def run(input_path: str, config: dict, output_path: Optional[str] = None):
+def load_dataframe(input_path: str) -> pd.DataFrame:
+    """Load CSV or Excel with encoding fallback."""
+    if input_path.lower().endswith(".csv"):
+        try:
+            return pd.read_csv(input_path)
+        except UnicodeDecodeError:
+            return pd.read_csv(input_path, encoding="latin1")
+    else:
+        return pd.read_excel(input_path)
+
+
+def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     if output_path is None:
         output_path = f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # Load data
-    def load_dataframe(input_path: str):
-        if input_path.endswith(".csv"):
-            try:
-                return pd.read_csv(input_path)
-            except UnicodeDecodeError:
-                return pd.read_csv(input_path, encoding="latin1")
-        else:
-            return pd.read_excel(input_path)
-
+    # Load data (FIXED)
+    df_raw = load_dataframe(input_path)
 
     # Clean
-    date_col = config["dataset"].get("date")
+    date_col = config["dataset"].get("date") if "dataset" in config else None
     result = clean_dataframe(df_raw, [date_col] if date_col else None)
     df = result["df"]
 
-    # Domain
-    df = apply_domain(df, config["domain"]["name"])
+    # Domain routing
+    if "domain" in config:
+        df = apply_domain(df, config["domain"]["name"])
 
-    # Schema
+    # Schema detection
     schema = detect_schema(df)
 
     img_dir = Path("hybrid_images")
@@ -68,7 +73,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
 
     images = {}
 
-    sales_col = config["dataset"].get("sales")
+    sales_col = config.get("dataset", {}).get("sales")
 
     if date_col and sales_col in df.columns:
         images["trend"] = img_dir / "trend.png"
@@ -85,16 +90,21 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
     images["corr"] = img_dir / "corr.png"
     heatmap(df.select_dtypes("number"), images["corr"])
 
-    kpis = compute_kpis(df, sales_col, config["dataset"].get("profit"))
+    kpis = compute_kpis(df, sales_col, config.get("dataset", {}).get("profit"))
     insights = correlation_insights(df, sales_col)
     recs = generate_recommendations(df)
 
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
-    doc = SimpleDocTemplate(output_path, pagesize=A4,
-                            leftMargin=2 * cm, rightMargin=2 * cm,
-                            topMargin=2.5 * cm, bottomMargin=2 * cm)
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2 * cm,
+    )
 
     story = [Paragraph("Hybrid Automated Data Report", title), Spacer(1, 12)]
 
@@ -103,10 +113,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
     for i in range(0, len(items), 2):
         left = items[i]
         right = items[i + 1] if i + 1 < len(items) else ("", "")
-        rows.append([
-            Paragraph(f"<b>{left[0]}</b><br/>{left[1]}", styles["BodyText"]),
-            Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
-        ])
+        rows.append(
+            [
+                Paragraph(f"<b>{left[0]}</b><br/>{left[1]}", styles["BodyText"]),
+                Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
+            ]
+        )
 
     table = Table(rows, colWidths=[8 * cm, 8 * cm])
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey)]))
@@ -122,3 +134,5 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
             story.append(Image(str(img), width=16 * cm, height=5 * cm))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
+
+    return output_path
