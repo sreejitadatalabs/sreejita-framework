@@ -40,3 +40,4 @@ class EcommerceDomain(BaseDomain):
         if "Total Transactions" in kpis:
             insights.append(f"Total Transactions: {kpis['Total Transactions']}")
         return insights
+        
