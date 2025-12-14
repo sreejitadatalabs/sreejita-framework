@@ -42,7 +42,15 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None):
         output_path = f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
     # Load data
-    df_raw = pd.read_csv(input_path) if input_path.endswith(".csv") else pd.read_excel(input_path)
+    def load_dataframe(input_path: str):
+    if input_path.endswith(".csv"):
+        try:
+            return pd.read_csv(input_path)
+        except UnicodeDecodeError:
+            return pd.read_csv(input_path, encoding="latin1")
+    else:
+        return pd.read_excel(input_path)
+
 
     # Clean
     date_col = config["dataset"].get("date")
