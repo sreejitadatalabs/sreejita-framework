@@ -1,5 +1,5 @@
 """
-Sreejita Framework v1.7
+Sreejita Framework v1.9
 
 Production-grade data analytics framework with
 domain abstraction and automation support.
@@ -35,7 +35,7 @@ from .ml import PredictiveAnalytics, AutoML
 __all__ = [
     "__version__",
     "clean_dataframe",
-    "InsightGenerator",
+    "correlation_insights",
     "compute_kpis",
     "BaseDomain",
     "RetailDomain",
@@ -45,6 +45,6 @@ __all__ = [
     "FinanceDomain",
     "get_domain",
     "DOMAIN_REGISTRY",
-        "PredictiveAnalytics",
+    "PredictiveAnalytics",
     "AutoML",
 ]
