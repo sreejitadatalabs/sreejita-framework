@@ -25,6 +25,9 @@ from sreejita.visuals.categorical import bar
 from sreejita.visuals.correlation import heatmap
 
 
+# -------------------------------------------------
+# Header / Footer
+# -------------------------------------------------
 def _header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
@@ -38,6 +41,9 @@ def _header_footer(canvas, doc):
     canvas.restoreState()
 
 
+# -------------------------------------------------
+# Load data
+# -------------------------------------------------
 def load_dataframe(input_path: str) -> pd.DataFrame:
     input_path = str(input_path)
     if input_path.lower().endswith(".csv"):
@@ -48,60 +54,82 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
     return pd.read_excel(input_path)
 
 
+# -------------------------------------------------
+# Main runner
+# -------------------------------------------------
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
 
-    # Output folder
+    # Output
     if output_path is None:
         output_dir = input_path.parent / "reports"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"hybrid_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = output_dir / f"Hybrid_Report_v3_1_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    output_path = str(output_path)  # 🔥 critical
+    output_path = str(output_path)
 
-    # Load data
+    # Load & clean
     df_raw = load_dataframe(input_path)
-
-    # Clean
     date_col = config.get("dataset", {}).get("date")
+
     result = clean_dataframe(df_raw, [date_col] if date_col else None)
     df = result["df"]
 
-    # Domain routing
+    # Domain routing (safe)
     if "domain" in config:
         df = apply_domain(df, config["domain"]["name"])
 
-    # Schema
+    # -------------------------------------------------
+    # SCHEMA — SINGLE SOURCE OF TRUTH
+    # -------------------------------------------------
     schema = detect_schema(df)
+    numeric_cols = schema["numeric_measures"]
+    categorical_cols = schema["categorical"]
 
-    # Images
+    # -------------------------------------------------
+    # Visuals
+    # -------------------------------------------------
     img_dir = Path("hybrid_images")
     img_dir.mkdir(exist_ok=True)
     images = {}
 
     sales_col = config.get("dataset", {}).get("sales")
 
-    if date_col and sales_col in df.columns:
+    # Time series
+    if date_col and sales_col in numeric_cols:
         images["trend"] = img_dir / "trend.png"
         plot_monthly(df, date_col, sales_col, images["trend"])
 
-    for col in schema["numeric"]:
+    # Numeric distributions
+    for col in numeric_cols:
         images[f"hist_{col}"] = img_dir / f"hist_{col}.png"
         hist(df, col, images[f"hist_{col}"])
 
-    for cat in schema["categorical"]:
+    # Categorical breakdown
+    for cat in categorical_cols:
         images[f"bar_{cat}"] = img_dir / f"bar_{cat}.png"
         bar(df, cat, images[f"bar_{cat}"])
 
-    images["corr"] = img_dir / "corr.png"
-    heatmap(df.select_dtypes("number"), images["corr"])
+    # Correlation (ONLY numeric_measures)
+    if len(numeric_cols) >= 2:
+        images["corr"] = img_dir / "corr.png"
+        heatmap(df[numeric_cols], images["corr"])
 
-    # KPIs & insights
-    kpis = compute_kpis(df, sales_col, config.get("dataset", {}).get("profit"))
-    insights = correlation_insights(df, sales_col)
+    # -------------------------------------------------
+    # KPIs, insights, recommendations
+    # -------------------------------------------------
+    kpis = compute_kpis(
+        df,
+        sales_col,
+        config.get("dataset", {}).get("profit")
+    )
+
+    insights = correlation_insights(df, target=sales_col)
     recs = generate_recommendations(df)
 
+    # -------------------------------------------------
     # Build PDF
+    # -------------------------------------------------
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
@@ -114,7 +142,10 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         bottomMargin=2 * cm,
     )
 
-    story = [Paragraph("Hybrid Automated Data Report", title), Spacer(1, 12)]
+    story = [
+        Paragraph("Hybrid Automated Data Report", title),
+        Spacer(1, 12),
+    ]
 
     # KPI table
     rows = []
@@ -131,10 +162,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey)]))
     story.extend([table, Spacer(1, 12)])
 
+    # Insights
     story.append(Paragraph("Insights", styles["Heading2"]))
     for i in insights:
         story.append(Paragraph(f"• {i}", styles["BodyText"]))
 
+    # Visual appendix
     story.append(PageBreak())
     for img in images.values():
         if img.exists():
