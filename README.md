@@ -327,11 +327,11 @@ that can be represented as a table (rows × columns), including:
 | **v1.7** | ✅ Complete |  Professional Quality & Developer Experience |
 | **v1.8** | ✅ Complete | Packaging & Distribution Foundation |
 | **v1.9.0** | ✅ Complete | Streamlit UI, dashboards |
-| **v1.9.5** | ✅ Current | **Deterministic Decision Reports** |
-| v1.9.6 | ⏭ NEXT | Narrative & Executive Safety |
-| v1.9.7 | ⏳ Later | Evidence Snapshot (visual policy) |
-| v1.9.8 | ⏳ Later | Executive Snapshot contract (full) |
-| v1.9.9 | ⏳ later | Prescriptive archetypes |
+| **v1.9.5** | ✅ Complete| Deterministic Decision Reports |
+| **v1.9.6** | ✅ Complete | Narrative & Executive Safety |
+| v1.9.7 | ✅ Complete | Evidence Snapshot (visual policy) |
+| v1.9.8 | ✅ Complete | Executive Snapshot contract (full) |
+| v1.9.9 | ✅ Current | **Prescriptive archetypes** |
 | v2.0 | 🔜 Planned | Domain Intelligence |
 | v3.0 | 🔜 Planned | AI-powered insights |
 | v4.0 | 🔜 Planned | SaaS platform |
