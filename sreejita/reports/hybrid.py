@@ -80,6 +80,15 @@ def load_dataframe(path: str) -> pd.DataFrame:
 # Evidence Snapshot Builder (FINAL)
 # -------------------------------------------------
 def build_evidence_snapshot(df, schema, config):
+    """
+    v1.9.7 FINAL:
+    Always attempts to generate 3 complementary visuals:
+    1) Trend or Distribution
+    2) Categorical Breakdown
+    3) Correlation Heatmap
+
+    Each visual is attempted independently.
+    """
     visuals = []
 
     img_dir = Path("hybrid_images").resolve()
@@ -88,30 +97,44 @@ def build_evidence_snapshot(df, schema, config):
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
 
+    # -------------------------
     # 1️⃣ Trend OR Distribution
-    if date_col in df.columns and sales_col in df.columns:
+    # -------------------------
+    trend_or_dist_added = False
+
+    # Try trend if date exists
+    if date_col and date_col in df.columns and sales_col in df.columns:
         trend_path = img_dir / "evidence_trend.png"
         plot_monthly(df, date_col, sales_col, trend_path)
+
         if trend_path.exists() and trend_path.stat().st_size > 0:
             visuals.append((
                 trend_path,
                 "Time-series trend shows how performance evolves over time, "
                 "highlighting growth patterns, seasonality, or volatility."
             ))
-    elif sales_col in df.columns:
+            trend_or_dist_added = True
+
+    # Fallback to distribution if trend not added
+    if not trend_or_dist_added and sales_col in df.columns:
         dist_path = img_dir / "evidence_distribution.png"
         hist(df, sales_col, dist_path)
+
         if dist_path.exists() and dist_path.stat().st_size > 0:
             visuals.append((
                 dist_path,
-                "Distribution plot shows spread and outliers in key performance values."
+                "Distribution plot shows the spread and outliers of key performance values, "
+                "indicating variability and risk."
             ))
 
+    # -------------------------
     # 2️⃣ Categorical Breakdown
-    if sales_col in df.columns and schema["categorical"]:
+    # -------------------------
+    if sales_col in df.columns and schema.get("categorical"):
         cat = schema["categorical"][0]
         bar_path = img_dir / "evidence_bar.png"
         bar(df, cat, bar_path)
+
         if bar_path.exists() and bar_path.stat().st_size > 0:
             visuals.append((
                 bar_path,
@@ -119,10 +142,13 @@ def build_evidence_snapshot(df, schema, config):
                 f"revealing dominant contributors."
             ))
 
+    # -------------------------
     # 3️⃣ Correlation Heatmap
-    if len(schema["numeric_measures"]) >= 2:
+    # -------------------------
+    if len(schema.get("numeric_measures", [])) >= 2:
         corr_path = img_dir / "evidence_correlation.png"
         corr_img = heatmap(df, corr_path)
+
         if corr_img and corr_img.exists() and corr_img.stat().st_size > 0:
             visuals.append((
                 corr_img,
@@ -130,7 +156,9 @@ def build_evidence_snapshot(df, schema, config):
                 "supporting cause–effect reasoning."
             ))
 
+    # Final guarantee: return up to 3 visuals, in order
     return visuals[:3]
+
 
 
 # -------------------------------------------------
