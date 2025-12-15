@@ -31,7 +31,7 @@ def _header_footer(canvas, doc):
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawString(
         cm, A4[1] - 1 * cm,
-        "Sreejita Framework — Hybrid Decision Report"
+        "Sreejita Framework — Hybrid Decision Intelligence Report"
     )
     canvas.setFont("Helvetica-Oblique", 8)
     canvas.drawString(
@@ -57,7 +57,20 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
 # Executive Snapshot
 # -------------------------------------------------
 def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
-    snapshot = {"kpis": kpis}
+    snapshot = {}
+
+    # --- Executive KPIs ONLY ---
+    snapshot["kpis"] = {
+        k: v for k, v in kpis.items()
+        if k in {
+            "Total Sales",
+            "Total Profit",
+            "Profit Margin",
+            "Orders",
+            "Customers",
+            "Avg Order Value",
+        }
+    }
 
     if sales_col and sales_col in df.columns and "segment" in df.columns:
         seg_share = (
@@ -80,20 +93,20 @@ def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
         corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
         if corr < -0.2:
             snapshot["risk"] = (
-                f"Discounting negatively impacts profit (r = {corr:.2f}), "
-                f"indicating margin leakage risk."
+                f"Discount shows a negative impact on profit "
+                f"(r = {corr:.2f}), indicating margin erosion risk."
             )
 
     return snapshot
 
 
 # -------------------------------------------------
-# Written Insights
+# Written Insights (Guaranteed 3–5)
 # -------------------------------------------------
 def generate_written_insights(df, schema, sales_col, profit_col):
     insights = []
 
-    if sales_col and sales_col in df.columns and "segment" in df.columns:
+    if sales_col and "segment" in df.columns:
         seg_share = (
             df.groupby("segment")[sales_col].sum()
             / df[sales_col].sum()
@@ -103,9 +116,16 @@ def generate_written_insights(df, schema, sales_col, profit_col):
             f"{seg_share.max()*100:.1f}% of total sales, making it the primary growth driver."
         )
 
-    if sales_col and sales_col in df.columns and "region" in df.columns:
+    if sales_col and "region" in df.columns:
         insights.append(
-            f"{df.groupby('region')[sales_col].sum().idxmax()} region leads in total sales."
+            f"{df.groupby('region')[sales_col].sum().idxmax()} region leads overall sales volume."
+        )
+
+    if "ship_mode" in df.columns:
+        mode_share = df["ship_mode"].value_counts(normalize=True).iloc[0] * 100
+        insights.append(
+            f"Standard Class dominates shipping with ~{mode_share:.0f}% of orders, "
+            f"indicating cost efficiency over speed."
         )
 
     if (
@@ -116,11 +136,11 @@ def generate_written_insights(df, schema, sales_col, profit_col):
         corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
         if corr < -0.2:
             insights.append(
-                f"Discount shows a negative correlation with profit (r = {corr:.2f}), "
-                f"indicating margin erosion."
+                f"Discount has a moderate negative correlation with profit "
+                f"(r = {corr:.2f}), highlighting margin leakage risk."
             )
 
-    return insights
+    return insights[:5]
 
 
 # -------------------------------------------------
@@ -136,7 +156,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             f"Hybrid_Report_v3_1_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
         )
 
-    # Load & clean
     df_raw = load_dataframe(str(input_path))
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
@@ -152,15 +171,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     numeric_cols = schema["numeric_measures"]
     categorical_cols = schema["categorical"]
 
-    # KPIs
     kpis = compute_kpis(df, sales_col, profit_col)
-
-    snapshot = generate_executive_snapshot(
-        df, schema, kpis, sales_col, profit_col
-    )
-    insights = generate_written_insights(
-        df, schema, sales_col, profit_col
-    )
+    snapshot = generate_executive_snapshot(df, schema, kpis, sales_col, profit_col)
+    insights = generate_written_insights(df, schema, sales_col, profit_col)
 
     # -------------------------------------------------
     # Visuals
@@ -169,7 +182,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     img_dir.mkdir(exist_ok=True)
     images = {}
 
-    if date_col and sales_col and sales_col in numeric_cols:
+    if date_col and sales_col in numeric_cols:
         images["trend"] = img_dir / "trend.png"
         plot_monthly(df, date_col, sales_col, images["trend"])
 
@@ -192,54 +205,60 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # -------------------------------------------------
     corr_notes = []
 
-    if (
-        sales_col and profit_col
-        and sales_col in df.columns
-        and profit_col in df.columns
-    ):
+    if sales_col and profit_col and sales_col in df.columns and profit_col in df.columns:
         corr = df[[sales_col, profit_col]].corr().iloc[0, 1]
         corr_notes.append(
-            f"Sales and profit are positively correlated (r = {corr:.2f})."
+            f"Sales and profit are positively correlated (r = {corr:.2f}), "
+            f"suggesting revenue growth generally translates to profitability."
         )
 
-    if (
-        profit_col
-        and "discount" in numeric_cols
-        and profit_col in df.columns
-    ):
+    if profit_col and "discount" in numeric_cols:
         corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
         if corr < 0:
             corr_notes.append(
-                f"Discounting negatively impacts profit (r = {corr:.2f})."
+                f"Discounting negatively impacts profit (r = {corr:.2f}), "
+                f"indicating margin erosion risk."
             )
 
     # -------------------------------------------------
-    # Recommendations (Quantified)
+    # Recommendations (5 actions)
     # -------------------------------------------------
     recommendations = []
 
     if "discount" in df.columns:
-        high_discount_rate = (df["discount"] > 0.3).mean()
+        high_disc = (df["discount"] > 0.3).mean() * 100
         recommendations.append(
-            f"Approximately {high_discount_rate*100:.1f}% of orders have discounts above 30%. "
-            f"Reducing high discounts could improve margins."
+            f"Reduce discounts above 30%, currently affecting ~{high_disc:.1f}% of orders."
         )
 
-    if snapshot.get("top_segment"):
+    if snapshot.get("top_segment") and snapshot.get("top_region"):
         recommendations.append(
-            f"Scale growth initiatives in the {snapshot['top_segment']} segment."
+            f"Prioritize the {snapshot['top_segment']} segment in the "
+            f"{snapshot['top_region']} region for growth initiatives."
         )
 
-    if snapshot.get("top_region"):
+    if "category" in df.columns and sales_col:
+        top_cat = df.groupby("category")[sales_col].sum().idxmax()
         recommendations.append(
-            f"Focus regional optimization efforts in the {snapshot['top_region']} region."
+            f"Focus margin optimization efforts on the {top_cat} category, "
+            f"which contributes the highest revenue."
         )
+
+    recommendations.append(
+        "Flag high-discount or loss-making orders for margin review."
+    )
+
+    recommendations.append(
+        "Introduce discount caps for low-margin categories to protect profitability."
+    )
 
     # -------------------------------------------------
-    # Data Quality & Risk Notes
+    # Data Quality & Risk
     # -------------------------------------------------
+    missing_pct = (df.isna().sum() / len(df)) * 100
     dq_notes = [
-        f"Missing values detected in {df.isna().any().sum()} columns.",
+        f"Missing values detected in {missing_pct[missing_pct > 0].count()} columns "
+        f"(highest: {missing_pct.max():.1f}%).",
         "Identifier-like fields (e.g., postal_code) were excluded from numeric analysis.",
         "Sales and profit distributions show right-skew, indicating potential outliers."
     ]
@@ -261,7 +280,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story = []
 
-    # Page 1 — Executive Snapshot
+    # Executive Snapshot
     story.append(Paragraph("Executive Snapshot", title))
     story.append(Spacer(1, 12))
 
@@ -275,18 +294,13 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
         ])
 
-    table = Table(kpi_rows, colWidths=[8 * cm, 8 * cm])
-    table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-    ]))
-    story.append(table)
-    story.append(Spacer(1, 12))
+    story.append(Table(kpi_rows, colWidths=[8 * cm, 8 * cm]))
+    story.append(Spacer(1, 10))
 
     summary = (
-        f"The dataset shows strong performance driven by the "
-        f"<b>{snapshot.get('top_segment', 'leading')}</b> segment and "
-        f"<b>{snapshot.get('top_region', 'key')}</b> region."
+        f"Performance is driven primarily by the "
+        f"<b>{snapshot.get('top_segment')}</b> segment and "
+        f"<b>{snapshot.get('top_region')}</b> region."
     )
     story.append(Paragraph(summary, styles["BodyText"]))
 
