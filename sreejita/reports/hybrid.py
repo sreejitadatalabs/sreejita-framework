@@ -20,8 +20,11 @@ from reportlab.platypus import (
 from sreejita.core.cleaner import clean_dataframe
 from sreejita.core.kpis import compute_kpis
 from sreejita.core.schema import detect_schema
-from sreejita.core.insights import correlation_insights
-from sreejita.core.recommendations import generate_recommendations
+from sreejita.core.insights import correlation_insights, generate_detailed_insights
+from sreejita.core.recommendations import (
+    generate_recommendations,
+    generate_prescriptive_recommendations,
+)
 from sreejita.domains.router import apply_domain
 
 from sreejita.visuals.correlation import heatmap
@@ -31,7 +34,7 @@ from sreejita.visuals.distributions import hist
 
 
 # -------------------------------------------------
-# Utilities
+# Helpers
 # -------------------------------------------------
 def safe(value, fallback):
     return value if value not in [None, "", "nan"] else fallback
@@ -77,7 +80,7 @@ def load_dataframe(path: str) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# Evidence Snapshot (v1.9.7 logic unchanged)
+# Evidence Snapshot (v1.9.7 logic retained)
 # -------------------------------------------------
 def build_evidence_snapshot(df, schema, config):
     visuals = []
@@ -87,7 +90,7 @@ def build_evidence_snapshot(df, schema, config):
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
 
-    # Trend OR distribution
+    # Trend OR Distribution
     if date_col and date_col in df.columns and sales_col in df.columns:
         p = img_dir / "trend.png"
         plot_monthly(df, date_col, sales_col, p)
@@ -126,7 +129,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
-        output_path = out_dir / f"Hybrid_Report_v3_1_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = out_dir / (
+            f"Hybrid_Report_v3_1_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
 
     df_raw = load_dataframe(str(input_path))
 
@@ -142,21 +147,21 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     schema = detect_schema(df)
 
     # -------------------------
-    # Intelligence (unchanged)
+    # Executive-level intelligence
     # -------------------------
     kpis = compute_kpis(df, sales_col, profit_col)
 
-    insights = enforce_exact(
+    summary_insights = enforce_exact(
         correlation_insights(df, sales_col),
         3,
         [
             "Performance is driven by a limited number of key factors.",
-            "Results vary significantly across business segments.",
+            "Results vary significantly across business dimensions.",
             "Certain metrics indicate potential efficiency risks.",
         ],
     )
 
-    recommendations = enforce_exact(
+    summary_recs = enforce_exact(
         generate_recommendations(df, sales_col, profit_col),
         3,
         [
@@ -165,6 +170,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             "Improve data completeness for future analysis.",
         ],
     )
+
+    # -------------------------
+    # v1.9.9 Expansion (NO duplication)
+    # -------------------------
+    detailed_insights = generate_detailed_insights(summary_insights)
+    prescriptive_recs = generate_prescriptive_recommendations(summary_recs)
 
     evidence = build_evidence_snapshot(df, schema, config)
 
@@ -194,37 +205,34 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story = []
 
     # =========================
-    # PAGE 1 — EXECUTIVE SNAPSHOT (v1.9.8)
+    # PAGE 1 — EXECUTIVE SNAPSHOT
     # =========================
     story.append(Paragraph("Executive Snapshot", title))
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph(
-        safe(
-            config.get("objective"),
-            "Identify key performance drivers, risks, and actionable opportunities."
-        ),
-        styles["BodyText"],
-    ))
+    story.append(
+        Paragraph(
+            safe(
+                config.get("objective"),
+                "Identify key performance drivers, risks, and actionable opportunities.",
+            ),
+            styles["BodyText"],
+        )
+    )
     story.append(Spacer(1, 12))
 
-    # KPI table
-    kpi_rows = [[k, v] for k, v in kpis.items()]
-    if not kpi_rows:
-        kpi_rows = [["Metric", "Not available"]]
-
-    table = Table(kpi_rows, colWidths=[7 * cm, 7 * cm])
+    table = Table([[k, v] for k, v in kpis.items()], colWidths=[7 * cm, 7 * cm])
     table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, "#999999")]))
     story.append(table)
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("Top 3 Key Insights", styles["Heading2"]))
-    for i in insights:
+    for i in summary_insights:
         story.append(Paragraph(f"• {i}", styles["BodyText"]))
 
     story.append(Spacer(1, 12))
     story.append(Paragraph("Top 3 Recommendations", styles["Heading2"]))
-    for r in recommendations:
+    for r in summary_recs:
         story.append(Paragraph(f"• {r}", styles["BodyText"]))
 
     story.append(PageBreak())
@@ -243,20 +251,51 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # =========================
-    # PAGE 3 — KEY INSIGHTS
+    # PAGE 3 — DETAILED INSIGHTS
     # =========================
-    story.append(Paragraph("Key Insights", styles["Heading2"]))
-    for i in insights:
-        story.append(Paragraph(f"• {i}", styles["BodyText"]))
+    story.append(Paragraph("Key Insights (Detailed Analysis)", styles["Heading2"]))
+    story.append(Spacer(1, 12))
+
+    for ins in detailed_insights:
+        story.append(
+            Paragraph(f"<b>{ins['title']}:</b> {ins['what']}", styles["BodyText"])
+        )
+        story.append(
+            Paragraph(f"<i>Why this matters:</i> {ins['why']}", styles["BodyText"])
+        )
+        story.append(
+            Paragraph(
+                f"<i>Business implication:</i> {ins['so_what']}",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 12))
 
     story.append(PageBreak())
 
     # =========================
-    # PAGE 4 — RECOMMENDATIONS
+    # PAGE 4 — PRESCRIPTIVE RECOMMENDATIONS
     # =========================
-    story.append(Paragraph("Recommendations", styles["Heading2"]))
-    for r in recommendations:
-        story.append(Paragraph(f"• {r}", styles["BodyText"]))
+    story.append(
+        Paragraph("Recommendations (Prescriptive Actions)", styles["Heading2"])
+    )
+    story.append(Spacer(1, 12))
+
+    for r in prescriptive_recs:
+        story.append(Paragraph(f"<b>Action:</b> {r['action']}", styles["BodyText"]))
+        story.append(
+            Paragraph(f"<b>Rationale:</b> {r['rationale']}", styles["BodyText"])
+        )
+        story.append(
+            Paragraph(
+                f"<b>Expected outcome:</b> {r['expected_outcome']}",
+                styles["BodyText"],
+            )
+        )
+        story.append(
+            Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"])
+        )
+        story.append(Spacer(1, 14))
 
     story.append(PageBreak())
 
