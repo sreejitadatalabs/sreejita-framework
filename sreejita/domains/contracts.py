@@ -1,28 +1,17 @@
-from abc import ABC, abstractmethod
-from typing import Dict, List, Any
+from dataclasses import dataclass
+from typing import Dict, Any
 
+
+class BaseDomainDetector:
+    """Base class for domain detectors (v1.x public API)."""
+    domain_name: str = "generic"
+
+    def detect(self, df):
+        raise NotImplementedError
+
+
+@dataclass
 class DomainDetectionResult:
-    def __init__(
-        self,
-        domain: str,
-        confidence: float,
-        signals: Dict[str, Any]
-    ):
-        self.domain = domain
-        self.confidence = round(confidence, 3)
-        self.signals = signals  # explainability payload
-
-
-class BaseDomainDetector(ABC):
-    """
-    Contract for all domain detectors.
-    """
-
-    domain_name: str
-
-    @abstractmethod
-    def detect(self, df) -> DomainDetectionResult:
-        """
-        Analyze dataset and return domain confidence + signals.
-        """
-        pass
+    domain: str
+    confidence: float
+    signals: Dict[str, Any]
