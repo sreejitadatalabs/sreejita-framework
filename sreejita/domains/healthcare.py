@@ -72,3 +72,12 @@ class HealthcareDomainDetector(BaseDomainDetector):
             confidence=score,
             signals={"matched_columns": list(matches)},
         )
+
+# v2.0 registration hook
+def register(registry):
+    registry.register(
+        name="healthcare",
+        domain_cls=HealthcareDomain,
+        detector_cls=HealthcareDomainDetector,
+    )
+
