@@ -1,20 +1,34 @@
-from sreejita.domains import retail, ecommerce, customer, text
+from typing import List
+from sreejita.domains.contracts import DomainDetectionResult
+from sreejita.domains.retail import RetailDomainDetector
+from sreejita.domains.customer import CustomerDomainDetector
+from sreejita.domains.finance import FinanceDomainDetector
+from sreejita.domains.ops import OpsDomainDetector
+from sreejita.domains.healthcare import HealthcareDomainDetector
 
-DOMAIN_REGISTRY = {
-    "retail": retail,
-    "ecommerce": ecommerce,
-    "customer": customer,
-    "text": text,
-    "generic": None
-}
 
-def apply_domain(df, domain_name: str):
-    domain = DOMAIN_REGISTRY.get(domain_name, None)
+class DomainRouter:
+    """
+    Central brain for domain detection.
+    """
 
-    if domain is None:
-        return df
+    def __init__(self):
+        self.detectors = [
+            RetailDomainDetector(),
+            CustomerDomainDetector(),
+            FinanceDomainDetector(),
+            OpsDomainDetector(),
+            HealthcareDomainDetector(),
+        ]
 
-    if hasattr(domain, "enrich"):
-        return domain.enrich(df)
+    def detect_domains(self, df) -> List[DomainDetectionResult]:
+        results = []
 
-    return df
+        for detector in self.detectors:
+            result = detector.detect(df)
+            if result.confidence > 0:
+                results.append(result)
+
+        # sort by confidence descending
+        results.sort(key=lambda x: x.confidence, reverse=True)
+        return results
