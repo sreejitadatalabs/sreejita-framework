@@ -1,14 +1,16 @@
 import pandas as pd
+import numpy as np
+from typing import Optional
 
 
 # -------------------------------------------------
-# EXISTING PUBLIC API (DO NOT BREAK)
+# PUBLIC API (v1.x STABLE)
 # -------------------------------------------------
-def correlation_insights(df: pd.DataFrame, target_col: str | None = None):
+def correlation_insights(df: pd.DataFrame, target_col: Optional[str] = None):
     """
     v1.x stable API
     Generates short, executive-level correlation insights.
-    Used across CLI, domains, reports, automation.
+    Compatible with Python 3.9+.
     """
 
     insights = []
@@ -20,19 +22,25 @@ def correlation_insights(df: pd.DataFrame, target_col: str | None = None):
     corr = numeric_df.corr()
 
     if target_col and target_col in corr.columns:
-        series = corr[target_col].drop(target_col).sort_values(key=abs, ascending=False)
-        top = series.iloc[0]
+        series = corr[target_col].drop(target_col).sort_values(
+            key=lambda x: abs(x), ascending=False
+        )
+        top_feature = series.index[0]
         insights.append(
             f"{target_col.capitalize()} is most strongly correlated with "
-            f"{series.index[0]} (r = {top:.2f})."
+            f"{top_feature} (r = {series.iloc[0]:.2f})."
         )
     else:
+        # find strongest absolute correlation (excluding self-correlation)
+        mask = np.eye(corr.shape[0], dtype=bool)
+        corr_masked = corr.mask(mask)
+
         max_pair = (
-            corr.where(~pd.np.eye(corr.shape[0], dtype=bool))
-            .abs()
+            corr_masked.abs()
             .stack()
             .idxmax()
         )
+
         insights.append(
             f"{max_pair[0]} and {max_pair[1]} show a strong relationship "
             f"(r = {corr.loc[max_pair]:.2f})."
@@ -42,13 +50,13 @@ def correlation_insights(df: pd.DataFrame, target_col: str | None = None):
 
 
 # -------------------------------------------------
-# v1.9.9 ADDITION (SAFE EXTENSION)
+# v1.9.9 EXTENSION (SAFE ADDITION)
 # -------------------------------------------------
 def generate_detailed_insights(summary_insights):
     """
     v1.9.9
     Expands executive insights into consultant-style reasoning.
-    DOES NOT replace correlation_insights.
+    Domain-agnostic, deterministic.
     """
 
     detailed = []
