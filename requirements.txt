@@ -7,3 +7,4 @@ reportlab
 watchdog
 apscheduler
 scikit-learn
+streamlit
