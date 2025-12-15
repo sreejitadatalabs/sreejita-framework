@@ -76,3 +76,4 @@ def generate_detailed_insights(summary_insights):
         })
 
     return detailed
+    
