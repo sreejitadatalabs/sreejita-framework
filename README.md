@@ -6,8 +6,8 @@
 
 **Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
 
-**Version:** 1.8  
-**Status:** Packaging & Distribution Foundation 
+**Version:** 1.9.5
+**Status:** Deterministic Decision Reports
 **Maintained by:** Sreejita Data Labs
 
 Sreejita Framework is a production-grade, domain-agnostic **data analytics automation framework** designed for freelancers, consultants, and small teams. It automates data cleaning, profiling, reporting, and batch workflows with a clean CLI and robust CI/CD.
@@ -326,7 +326,12 @@ that can be represented as a table (rows × columns), including:
 | **v1.6** | ✅ Complete | Quality Assurance & Observability |
 | **v1.7** | ✅ Complete |  Professional Quality & Developer Experience |
 | **v1.8** | ✅ Complete | Packaging & Distribution Foundation |
-| **v1.9** | ✅ Current | **Streamlit UI, dashboards** |
+| **v1.9.0** | ✅ Complete | Streamlit UI, dashboards |
+| **v1.9.5** | ✅ Current | **Deterministic Decision Reports** |
+| v1.9.6 | ⏭ NEXT | Narrative & Executive Safety |
+| v1.9.7 | ⏳ Later | Evidence Snapshot (visual policy) |
+| v1.9.8 | ⏳ Later | Executive Snapshot contract (full) |
+| v1.9.9 | ⏳ later | Prescriptive archetypes |
 | v2.0 | 🔜 Planned | Domain Intelligence |
 | v3.0 | 🔜 Planned | AI-powered insights |
 | v4.0 | 🔜 Planned | SaaS platform |
