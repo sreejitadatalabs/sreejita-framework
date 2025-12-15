@@ -78,3 +78,11 @@ class RetailDomainDetector(BaseDomainDetector):
             confidence=score,
             signals={"matched_columns": list(matches)}
         )
+
+# v2.0 registration hook
+def register(registry):
+    registry.register(
+        name="retail",
+        domain_cls=RetailDomain,
+        detector_cls=RetailDomainDetector,
+    )
