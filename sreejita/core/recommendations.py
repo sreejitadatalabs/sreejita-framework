@@ -1,9 +1,62 @@
+import pandas as pd
+
+
+# -------------------------------------------------
+# EXISTING PUBLIC API (DO NOT BREAK)
+# -------------------------------------------------
+def generate_recommendations(
+    df: pd.DataFrame,
+    sales_col: str | None = None,
+    profit_col: str | None = None,
+):
+    """
+    v1.x stable API
+    Generates short, executive-level recommendation bullets.
+    Used across CLI, automation, domains, and reports.
+    """
+
+    recommendations = []
+
+    if sales_col and profit_col and sales_col in df.columns and profit_col in df.columns:
+        margin = df[profit_col].sum() / max(df[sales_col].sum(), 1)
+
+        if margin < 0.15:
+            recommendations.append(
+                "Review pricing and discount strategies to improve profit margins."
+            )
+        else:
+            recommendations.append(
+                "Current pricing strategy appears stable with healthy margins."
+            )
+
+    if "discount" in df.columns:
+        high_discount_rate = (df["discount"] > 0.3).mean()
+        if high_discount_rate > 0.2:
+            recommendations.append(
+                "Reduce the frequency of high-discount transactions to limit margin erosion."
+            )
+
+    if df.duplicated().any():
+        recommendations.append(
+            "Improve data governance to reduce duplicate records."
+        )
+
+    if not recommendations:
+        recommendations.append(
+            "Monitor key performance metrics regularly to detect emerging risks."
+        )
+
+    return recommendations
+
+
+# -------------------------------------------------
+# v1.9.9 EXTENSION (SAFE ADDITION)
+# -------------------------------------------------
 def generate_prescriptive_recommendations(summary_recommendations):
     """
     v1.9.9
-    Converts executive summary recommendations into structured,
-    prescriptive action blocks.
-    Fully rule-based and domain-agnostic.
+    Expands executive recommendations into prescriptive,
+    action-oriented decision blocks.
     """
 
     expanded = []
@@ -20,7 +73,7 @@ def generate_prescriptive_recommendations(summary_recommendations):
         {
             "priority": "Medium",
             "outcome": "Strengthen governance and decision reliability."
-        }
+        },
     ]
 
     for idx, rec in enumerate(summary_recommendations):
@@ -29,8 +82,8 @@ def generate_prescriptive_recommendations(summary_recommendations):
         expanded.append({
             "action": rec,
             "rationale": (
-                "This recommendation directly addresses a pattern observed "
-                "in the analysis and aligns with standard operational controls."
+                "This action directly addresses an observed pattern in the data "
+                "and aligns with best-practice operational controls."
             ),
             "expected_outcome": meta["outcome"],
             "priority": meta["priority"],
