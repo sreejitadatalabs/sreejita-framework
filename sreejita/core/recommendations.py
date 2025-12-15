@@ -1,24 +1,27 @@
 import pandas as pd
+from typing import Optional
 
 
 # -------------------------------------------------
-# EXISTING PUBLIC API (DO NOT BREAK)
+# PUBLIC API (v1.x STABLE)
 # -------------------------------------------------
 def generate_recommendations(
     df: pd.DataFrame,
-    sales_col: str | None = None,
-    profit_col: str | None = None,
+    sales_col: Optional[str] = None,
+    profit_col: Optional[str] = None,
 ):
     """
     v1.x stable API
     Generates short, executive-level recommendation bullets.
-    Used across CLI, automation, domains, and reports.
+    Compatible with Python 3.9+.
     """
 
     recommendations = []
 
     if sales_col and profit_col and sales_col in df.columns and profit_col in df.columns:
-        margin = df[profit_col].sum() / max(df[sales_col].sum(), 1)
+        total_sales = df[sales_col].sum()
+        total_profit = df[profit_col].sum()
+        margin = total_profit / max(total_sales, 1)
 
         if margin < 0.15:
             recommendations.append(
