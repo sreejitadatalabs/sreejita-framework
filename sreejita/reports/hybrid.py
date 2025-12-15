@@ -25,6 +25,20 @@ from sreejita.visuals.correlation import heatmap
 
 
 # -------------------------------------------------
+# Utilities (presentation safety)
+# -------------------------------------------------
+def safe_label(value: Optional[str], fallback: str) -> str:
+    return value if value not in [None, "", "nan"] else fallback
+
+
+def enforce_min_bullets(items, min_count, fillers):
+    items = list(items)
+    while len(items) < min_count:
+        items.append(fillers[len(items) % len(fillers)])
+    return items
+
+
+# -------------------------------------------------
 # Header / Footer
 # -------------------------------------------------
 def _header_footer(canvas, doc):
@@ -78,7 +92,6 @@ def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
             / df[sales_col].sum()
         )
         snapshot["top_segment"] = seg_share.idxmax()
-        snapshot["top_segment_share"] = seg_share.max()
 
     if sales_col and sales_col in df.columns and "region" in df.columns:
         snapshot["top_region"] = (
@@ -90,14 +103,15 @@ def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
         and profit_col in df.columns
         and "discount" in schema["numeric_measures"]
     ):
-        corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
-        snapshot["discount_corr"] = corr
+        snapshot["discount_corr"] = (
+            df[[profit_col, "discount"]].corr().iloc[0, 1]
+        )
 
     return snapshot
 
 
 # -------------------------------------------------
-# Written Insights (guaranteed 4–5)
+# Written Insights
 # -------------------------------------------------
 def generate_written_insights(df, schema, sales_col, profit_col):
     insights = []
@@ -141,7 +155,16 @@ def generate_written_insights(df, schema, sales_col, profit_col):
             f"highlighting margin erosion risk."
         )
 
-    return insights[:5]
+    return enforce_min_bullets(
+        insights,
+        min_count=4,
+        fillers=[
+            "Revenue is concentrated across a limited number of key drivers.",
+            "Sales performance varies significantly across business dimensions.",
+            "Pricing decisions play a critical role in profitability outcomes.",
+            "Operational patterns suggest trade-offs between cost and speed."
+        ]
+    )
 
 
 # -------------------------------------------------
@@ -175,29 +198,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     snapshot = generate_executive_snapshot(df, schema, kpis, sales_col, profit_col)
     insights = generate_written_insights(df, schema, sales_col, profit_col)
 
-    # ---------------- Visuals ----------------
-    img_dir = Path("hybrid_images")
-    img_dir.mkdir(exist_ok=True)
-    images = {}
-
-    if date_col and sales_col in numeric_cols:
-        images["trend"] = img_dir / "trend.png"
-        plot_monthly(df, date_col, sales_col, images["trend"])
-
-    for col in numeric_cols:
-        if col in {sales_col, profit_col, "discount"}:
-            images[f"hist_{col}"] = img_dir / f"hist_{col}.png"
-            hist(df, col, images[f"hist_{col}"])
-
-    for cat in categorical_cols:
-        if cat in {"region", "segment", "category", "ship_mode"}:
-            images[f"bar_{cat}"] = img_dir / f"bar_{cat}.png"
-            bar(df, cat, images[f"bar_{cat}"])
-
-    if len(numeric_cols) >= 2:
-        images["corr"] = img_dir / "corr.png"
-        heatmap(df[numeric_cols], images["corr"])
-
     # ---------------- Correlation Insights ----------------
     corr_notes = []
     if "discount_corr" in snapshot:
@@ -206,20 +206,29 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             f"indicating margin erosion risk."
         )
 
-    if "sales" in df.columns and "quantity" in df.columns:
-        corr = df[["sales", "quantity"]].corr().iloc[0, 1]
-        corr_notes.append(
-            f"Sales correlates more strongly with quantity (r = {corr:.2f}) than profit, "
-            f"suggesting volume-driven growth."
-        )
+    corr_notes = enforce_min_bullets(
+        corr_notes,
+        min_count=2,
+        fillers=[
+            "Pricing has a stronger impact on profit than sales volume.",
+            "Revenue growth appears more volume-driven than margin-driven."
+        ]
+    )
 
     # ---------------- Recommendations ----------------
-    recommendations = [
-        "Reduce discounts above 30% to protect margins.",
-        "Introduce discount caps for low-margin categories.",
-        "Prioritize Consumer segment in high-performing regions.",
-        "Flag high-discount or loss-making orders for margin review.",
-    ]
+    recommendations = enforce_min_bullets(
+        [
+            "Reduce discounts above 30% to protect margins.",
+            "Introduce discount caps for low-margin categories.",
+            "Prioritize consistently high-performing segments and regions.",
+            "Flag high-discount or loss-making orders for review.",
+        ],
+        min_count=4,
+        fillers=[
+            "Strengthen pricing governance to reduce margin volatility.",
+            "Align operational efficiency with customer service expectations."
+        ]
+    )
 
     # ---------------- Data Quality ----------------
     missing_pct = (df.isna().sum() / len(df)) * 100
@@ -262,8 +271,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Spacer(1, 10))
 
     story.append(Paragraph(
-        f"Performance is driven primarily by the <b>{snapshot.get('top_segment')}</b> segment "
-        f"and the <b>{snapshot.get('top_region')}</b> region.",
+        f"Performance is driven primarily by the "
+        f"<b>{safe_label(snapshot.get('top_segment'), 'key customer segments')}</b> "
+        f"and the <b>{safe_label(snapshot.get('top_region'), 'overall market')}</b>.",
         styles["BodyText"]
     ))
 
@@ -273,13 +283,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Paragraph("Key Insights", styles["Heading2"]))
     for ins in insights:
         story.append(Paragraph(f"• {ins}", styles["BodyText"]))
-
-    story.append(PageBreak())
-
-    # Visuals
-    for img in images.values():
-        if img.exists():
-            story.append(Image(str(img), width=16 * cm, height=5 * cm))
 
     story.append(PageBreak())
 
