@@ -1,8 +1,11 @@
 import numpy as np
+from sreejita.core.schema import split_column_roles
 
 def correlation_insights(df, target="sales"):
     insights = []
-    num = df.select_dtypes(include=[np.number])
+    
+    roles = split_column_roles(df)
+    num_cols = roles["numeric_measures"]
 
     if target not in num.columns:
         return insights
