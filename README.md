@@ -115,24 +115,82 @@ insights = insight_gen.generate(df_clean)
 
 ```
 sreejita-framework/
-├── sreejita/
-│   ├── core/              # Core engine (cleaner, insights, KPIs)
-│   ├── domains/           # Pluggable domain modules ✨ NEW IN v1.2
-│   │   ├── base.py
-│   │   ├── retail.py
-│   │   ├── ecommerce.py
-│   │   ├── customer.py
-│   │   ├── text.py
-│   │   ├── finance.py
-│   │   └── README.md
-│   ├── config/            # Configuration loader
-│   ├── utils/             # Utility functions
-│   ├── visuals/           # Visualization helpers
-│   ├── reports/           # Report generation
-│   └── __init__.py        # Main API (updated for v1.2)
-├── examples/              # Example notebooks
-├── requirements.txt
-└── README.md
+│
+├── sreejita/                      # Core framework package
+│   ├── __init__.py
+│   ├── __version__.py             # Version control
+│   ├── cli.py                     # Command Line Interface (CLI)
+│
+│   ├── config/                    # Configuration system
+│   │   ├── __init__.py
+│   │   ├── defaults.py            # Default settings
+│   │   └── loader.py              # Load & validate config.yaml
+│
+│   ├── core/                      # Core analytics logic
+│   │   ├── __init__.py
+│   │   ├── cleaner.py             # Data cleaning & preprocessing
+│   │   ├── kpis.py                # KPI calculations
+│   │   ├── insights.py            # Insight generation (rule-based)
+│   │   ├── recommendations.py     # Business recommendations
+│   │   └── schema.py              # Schema & column-type detection
+│
+│   ├── visuals/                   # Visualization engines
+│   │   ├── __init__.py
+│   │   ├── time_series.py         # Time-based trends
+│   │   ├── distributions.py       # Numeric distributions
+│   │   ├── categorical.py         # Categorical analysis
+│   │   └── correlation.py         # Correlation heatmaps
+│
+│   ├── reports/                   # Report generators
+│   │   ├── __init__.py
+│   │   ├── hybrid.py              # Main automated PDF report
+│   │   ├── executive.py           # Executive-level summaries
+│   │   └── dynamic.py             # Config-driven reports
+│
+│   ├── automation/                # Automation & orchestration
+│   │   ├── __init__.py
+│   │   ├── batch_runner.py        # Batch processing
+│   │   ├── file_watcher.py        # Folder monitoring
+│   │   ├── scheduler.py           # Scheduled execution
+│   │   ├── retry.py               # Retry & failure handling
+│   │   └── run_metadata.py        # Run logs & metadata
+│
+│   ├── domains/                   # Domain routing (v2.x ready)
+│   │   ├── __init__.py
+│   │   ├── router.py              # Domain detection & routing
+│   │   └── retail.py              # Retail-specific logic (example)
+│
+│   └── utils/                     # Utilities
+│       ├── __init__.py
+│       └── logger.py              # Centralized logging
+│
+├── tests/                         # Automated tests (CI)
+│   ├── test_cli_smoke.py
+│   ├── test_domains_import.py
+│   ├── test_automation_import.py
+│   ├── test_batch_runner.py
+│   ├── test_file_watcher.py
+│   └── test_scheduler.py
+│
+├── reports/                       # Generated output (runtime)
+│   └── hybrid_report_YYYYMMDD.pdf
+│
+├── hybrid_images/                 # Generated charts (runtime)
+│
+├── examples/
+│   └── config.yaml                # Example configuration
+│
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                 # CI testing
+│       └── package.yml            # Build & package verification
+│
+├── pyproject.toml                 # Packaging & metadata
+├── requirements.txt               # Dependencies (if used)
+├── README.md                      # Project overview
+├── CHANGELOG.md                   # Version history
+└── LICENSE
+
 ```
 
 ---
