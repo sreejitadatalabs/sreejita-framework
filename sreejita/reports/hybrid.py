@@ -80,57 +80,54 @@ def load_dataframe(path: str) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# Evidence Snapshot — HARD GUARANTEE (v1.9.9)
+# Evidence Snapshot — VISUAL CERTAINTY GUARANTEE
 # -------------------------------------------------
 def build_evidence_snapshot(df, schema, config):
     """
-    Evidence Snapshot MUST render visible visuals.
-    Exactly 3 visuals max, correlation is mandatory.
+    Evidence Snapshot MUST show real visuals.
+    Correlation heatmap is mandatory.
+    Max 3 visuals.
     """
     visuals = []
-    img_dir = Path("hybrid_images")
+    img_dir = Path("hybrid_images").resolve()
     img_dir.mkdir(exist_ok=True)
 
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
 
     # 1️⃣ Correlation heatmap (MANDATORY)
-    corr_path = img_dir / "evidence_correlation.png"
+    corr_path = (img_dir / "evidence_correlation.png").resolve()
     heatmap(df, corr_path)
     if corr_path.exists():
-        visuals.append((
-            corr_path,
-            "Correlation heatmap showing relationships between key numeric metrics."
-        ))
+        visuals.append(
+            (corr_path, "Correlation heatmap showing relationships between key numeric metrics.")
+        )
 
     # 2️⃣ Categorical dominance
     if schema["categorical"] and sales_col in df.columns:
         cat = schema["categorical"][0]
-        bar_path = img_dir / "evidence_category.png"
+        bar_path = (img_dir / "evidence_category.png").resolve()
         bar(df, cat, bar_path)
         if bar_path.exists():
-            visuals.append((
-                bar_path,
-                f"{sales_col} distribution by {cat}."
-            ))
+            visuals.append(
+                (bar_path, f"{sales_col} distribution by {cat}.")
+            )
 
-    # 3️⃣ Trend OR Distribution (fallback safe)
+    # 3️⃣ Trend OR distribution
     if date_col and date_col in df.columns and sales_col in df.columns:
-        trend_path = img_dir / "evidence_trend.png"
+        trend_path = (img_dir / "evidence_trend.png").resolve()
         plot_monthly(df, date_col, sales_col, trend_path)
         if trend_path.exists():
-            visuals.append((
-                trend_path,
-                "Performance trend over time."
-            ))
+            visuals.append(
+                (trend_path, "Performance trend over time.")
+            )
     elif sales_col in df.columns:
-        dist_path = img_dir / "evidence_distribution.png"
+        dist_path = (img_dir / "evidence_distribution.png").resolve()
         hist(df, sales_col, dist_path)
         if dist_path.exists():
-            visuals.append((
-                dist_path,
-                "Distribution of key performance metric."
-            ))
+            visuals.append(
+                (dist_path, "Distribution of key performance metric.")
+            )
 
     return visuals[:3]
 
@@ -161,9 +158,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     schema = detect_schema(df)
 
-    # -------------------------
     # Executive intelligence
-    # -------------------------
     kpis = compute_kpis(df, sales_col, profit_col)
 
     summary_insights = enforce_exact(
@@ -190,6 +185,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     prescriptive_recs = generate_prescriptive_recommendations(summary_recs)
     evidence = build_evidence_snapshot(df, schema, config)
 
+    # HARD ASSERT — evidence must exist
+    assert len(evidence) >= 1, "Evidence Snapshot must contain at least one visual"
+
     missing_pct = (df.isna().sum() / len(df)) * 100
     dq_notes = [
         f"Missing values present in {missing_pct[missing_pct > 0].count()} columns "
@@ -198,9 +196,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         "Outliers may influence aggregate metrics.",
     ]
 
-    # -------------------------
-    # Build PDF
-    # -------------------------
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
@@ -245,7 +240,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(PageBreak())
 
-    # PAGE 2 — EVIDENCE SNAPSHOT (VISIBLE PROOF)
+    # PAGE 2 — EVIDENCE SNAPSHOT (VISUALLY CERTAIN)
     story.append(Paragraph("Evidence Snapshot (Supporting Analysis)", title))
     story.append(Spacer(1, 12))
 
@@ -253,8 +248,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         story.append(
             Image(
                 str(img_path),
-                width=15 * cm,
-                height=9 * cm,
+                width=14 * cm,
+                height=8 * cm,
                 kind="proportional",
             )
         )
@@ -286,24 +281,16 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # PAGE 4 — PRESCRIPTIVE RECOMMENDATIONS
-    story.append(
-        Paragraph("Recommendations (Prescriptive Actions)", styles["Heading2"])
-    )
+    story.append(Paragraph("Recommendations (Prescriptive Actions)", styles["Heading2"]))
     story.append(Spacer(1, 12))
 
     for r in prescriptive_recs:
         story.append(Paragraph(f"<b>Action:</b> {r['action']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Rationale:</b> {r['rationale']}", styles["BodyText"]))
         story.append(
-            Paragraph(f"<b>Rationale:</b> {r['rationale']}", styles["BodyText"])
+            Paragraph(f"<b>Expected outcome:</b> {r['expected_outcome']}", styles["BodyText"])
         )
-        story.append(
-            Paragraph(
-                f"<b>Expected outcome:</b> {r['expected_outcome']}",
-                styles["BodyText"],
-            )
-        )
-        story.append(
-            Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"]))
         story.append(Spacer(1, 14))
 
     story.append(PageBreak())
