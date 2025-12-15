@@ -1,34 +1,31 @@
-from typing import List
-from sreejita.domains.contracts import DomainDetectionResult
-from sreejita.domains.retail import RetailDomainDetector
-from sreejita.domains.customer import CustomerDomainDetector
-from sreejita.domains.finance import FinanceDomainDetector
-from sreejita.domains.ops import OpsDomainDetector
-from sreejita.domains.healthcare import HealthcareDomainDetector
+from sreejita.domains.retail import RetailDomain, RetailDomainDetector
+from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
+from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
+
+DOMAIN_DETECTORS = [
+    RetailDomainDetector(),
+    CustomerDomainDetector(),
+    FinanceDomainDetector(),
+]
+
+DOMAIN_IMPLEMENTATIONS = {
+    "retail": RetailDomain(),
+    "customer": CustomerDomain(),
+    "finance": FinanceDomain(),
+}
 
 
-class DomainRouter:
-    """
-    Central brain for domain detection.
-    """
+def detect_domain(df):
+    best = None
+    for detector in DOMAIN_DETECTORS:
+        result = detector.detect(df)
+        if best is None or result.confidence > best.confidence:
+            best = result
+    return best
 
-    def __init__(self):
-        self.detectors = [
-            RetailDomainDetector(),
-            CustomerDomainDetector(),
-            FinanceDomainDetector(),
-            OpsDomainDetector(),
-            HealthcareDomainDetector(),
-        ]
 
-    def detect_domains(self, df) -> List[DomainDetectionResult]:
-        results = []
-
-        for detector in self.detectors:
-            result = detector.detect(df)
-            if result.confidence > 0:
-                results.append(result)
-
-        # sort by confidence descending
-        results.sort(key=lambda x: x.confidence, reverse=True)
-        return results
+def apply_domain(df, domain_name: str):
+    domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
+    if domain:
+        return domain.preprocess(df)
+    return df
