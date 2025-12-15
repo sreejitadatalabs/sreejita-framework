@@ -1,33 +1,50 @@
-import streamlit as st
+# -------------------------------------------------
+# Streamlit App — Sreejita Framework v1.9
+# -------------------------------------------------
+
+import sys
+from pathlib import Path
 import os
 import uuid
+import streamlit as st
 from datetime import datetime
 
-# IMPORTANT: only import backend adapter
-from backend import run_analysis_from_ui
+# -------------------------------------------------
+# FIX: Ensure project root is in PYTHONPATH
+# (REQUIRED for Streamlit Cloud)
+# -------------------------------------------------
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# -------------------------------------------------
+# Import backend adapter ONLY
+# -------------------------------------------------
+from ui.backend import run_analysis_from_ui
 
 
-# -----------------------------
-# Page Config
-# -----------------------------
+# -------------------------------------------------
+# Page Configuration
+# -------------------------------------------------
 st.set_page_config(
     page_title="Sreejita Framework",
     page_icon="📊",
     layout="centered"
 )
 
-# -----------------------------
+# -------------------------------------------------
 # Header
-# -----------------------------
+# -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
 st.markdown("**Version:** v1.9 (Demo)")
+st.info("Demo version — optimized for small to medium datasets.")
 st.divider()
 
 
-# -----------------------------
-# Upload Section
-# -----------------------------
+# -------------------------------------------------
+# 1️⃣ Upload Dataset
+# -------------------------------------------------
 st.subheader("1️⃣ Upload Dataset")
 
 uploaded_file = st.file_uploader(
@@ -37,18 +54,18 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
     st.success(f"Uploaded: {uploaded_file.name}")
-    st.write(f"Size: {uploaded_file.size / 1024:.1f} KB")
+    st.write(f"File size: {uploaded_file.size / 1024:.1f} KB")
 
 
-# -----------------------------
-# Configuration Section (Light)
-# -----------------------------
+# -------------------------------------------------
+# 2️⃣ Configuration (Light / Placeholder)
+# -------------------------------------------------
 st.subheader("2️⃣ Configuration")
 
 domain = st.selectbox(
     "Select domain",
     options=["Auto", "Retail"],
-    help="Domain intelligence will activate in v2.0"
+    help="Domain intelligence activates in v2.0"
 )
 
 report_type = st.selectbox(
@@ -58,9 +75,9 @@ report_type = st.selectbox(
 )
 
 
-# -----------------------------
-# Run Analysis
-# -----------------------------
+# -------------------------------------------------
+# 3️⃣ Run Analysis
+# -------------------------------------------------
 st.subheader("3️⃣ Run Analysis")
 
 run_clicked = st.button("🚀 Run Analysis", type="primary")
@@ -72,32 +89,32 @@ if run_clicked:
         st.error("Please upload a dataset first.")
     else:
         with st.spinner("Running analysis..."):
-            # Create temp directory
-            os.makedirs("ui/temp", exist_ok=True)
-
-            # Save uploaded file
-            file_id = uuid.uuid4().hex[:8]
-            input_path = os.path.join(
-                "ui/temp",
-                f"{file_id}_{uploaded_file.name}"
-            )
-
-            with open(input_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-
             try:
+                # Ensure temp directory exists
+                temp_dir = Path("ui/temp")
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
+                # Save uploaded file
+                file_id = uuid.uuid4().hex[:8]
+                input_path = temp_dir / f"{file_id}_{uploaded_file.name}"
+
+                with open(input_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+
+                # Call backend adapter
                 result = run_analysis_from_ui(
-                    input_path=input_path,
+                    input_path=str(input_path),
                     domain=domain
                 )
+
             except Exception as e:
-                st.error("Analysis failed.")
+                st.error("❌ Analysis failed")
                 st.exception(e)
 
 
-# -----------------------------
-# Output Section
-# -----------------------------
+# -------------------------------------------------
+# 4️⃣ Output
+# -------------------------------------------------
 if result:
     st.divider()
     st.subheader("4️⃣ Output")
@@ -115,12 +132,10 @@ if result:
                 mime="application/pdf"
             )
 
-    # Metadata (nice for demo)
+    # Run metadata (demo-friendly)
     with st.expander("Run details"):
         st.json({
-            "rows": result.get("rows"),
-            "columns": result.get("columns"),
-            "domain": domain,
+            "domain": result.get("domain"),
             "generated_at": result.get("generated_at"),
-            "version": "1.9.0"
+            "version": result.get("version")
         })
