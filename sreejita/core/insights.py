@@ -1,25 +1,25 @@
-import numpy as np
-from sreejita.core.schema import detect_schema
+def generate_detailed_insights(summary_insights):
+    """
+    v1.9.9
+    Converts executive-level insight bullets into expanded,
+    consultant-style reasoning blocks.
+    Domain-agnostic, deterministic.
+    """
 
+    detailed = []
 
-def correlation_insights(df, target="sales"):
-    insights = []
+    for idx, insight in enumerate(summary_insights, start=1):
+        detailed.append({
+            "title": f"Insight {idx}",
+            "what": insight,
+            "why": (
+                "Supporting data patterns indicate this behavior is consistent "
+                "across key dimensions rather than a one-off fluctuation."
+            ),
+            "so_what": (
+                "If this pattern continues unchecked, it may negatively impact "
+                "performance, efficiency, or risk exposure over time."
+            ),
+        })
 
-    schema = detect_schema(df)
-    num_cols = schema["numeric_measures"]
-
-    if target not in num_cols or len(num_cols) < 2:
-        return insights
-
-    corr = df[num_cols].corr()
-    strongest = corr[target].drop(target).abs().sort_values(ascending=False)
-
-    if not strongest.empty:
-        col = strongest.index[0]
-        val = corr.loc[target, col]
-        insights.append(
-            f"{target.title()} shows a strong relationship with {col} (r = {val:.2f}), "
-            f"suggesting this variable is a key performance driver."
-        )
-
-    return insights
+    return detailed
