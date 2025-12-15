@@ -54,23 +54,24 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# Executive Snapshot
+# Executive Snapshot (SAFE)
 # -------------------------------------------------
 def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
     snapshot = {}
 
-    # --- Executive KPIs ONLY ---
-    snapshot["kpis"] = {
-        k: v for k, v in kpis.items()
-        if k in {
-            "Total Sales",
-            "Total Profit",
-            "Profit Margin",
-            "Orders",
-            "Customers",
-            "Avg Order Value",
-        }
+    EXEC_KPI_KEYS = {
+        "Total Sales",
+        "Total Profit",
+        "Profit Margin",
+        "Orders",
+        "Customers",
+        "Avg Order Value",
     }
+
+    filtered_kpis = {k: v for k, v in kpis.items() if k in EXEC_KPI_KEYS}
+
+    # 🔒 FALLBACK — never empty
+    snapshot["kpis"] = filtered_kpis if filtered_kpis else kpis
 
     if sales_col and sales_col in df.columns and "segment" in df.columns:
         seg_share = (
@@ -101,7 +102,7 @@ def generate_executive_snapshot(df, schema, kpis, sales_col, profit_col):
 
 
 # -------------------------------------------------
-# Written Insights (Guaranteed 3–5)
+# Written Insights
 # -------------------------------------------------
 def generate_written_insights(df, schema, sales_col, profit_col):
     insights = []
@@ -201,7 +202,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         heatmap(df[numeric_cols], images["corr"])
 
     # -------------------------------------------------
-    # Correlation Interpretation
+    # Correlation Insights
     # -------------------------------------------------
     corr_notes = []
 
@@ -221,7 +222,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             )
 
     # -------------------------------------------------
-    # Recommendations (5 actions)
+    # Recommendations
     # -------------------------------------------------
     recommendations = []
 
@@ -244,22 +245,17 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             f"which contributes the highest revenue."
         )
 
-    recommendations.append(
-        "Flag high-discount or loss-making orders for margin review."
-    )
-
-    recommendations.append(
-        "Introduce discount caps for low-margin categories to protect profitability."
-    )
+    recommendations.append("Flag high-discount or loss-making orders for margin review.")
+    recommendations.append("Introduce discount caps for low-margin categories.")
 
     # -------------------------------------------------
-    # Data Quality & Risk
+    # Data Quality
     # -------------------------------------------------
     missing_pct = (df.isna().sum() / len(df)) * 100
     dq_notes = [
         f"Missing values detected in {missing_pct[missing_pct > 0].count()} columns "
         f"(highest: {missing_pct.max():.1f}%).",
-        "Identifier-like fields (e.g., postal_code) were excluded from numeric analysis.",
+        "Identifier-like fields were excluded from numeric analysis.",
         "Sales and profit distributions show right-skew, indicating potential outliers."
     ]
 
@@ -294,13 +290,22 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
         ])
 
-    story.append(Table(kpi_rows, colWidths=[8 * cm, 8 * cm]))
+    if kpi_rows:
+        story.append(Table(kpi_rows, colWidths=[8 * cm, 8 * cm]))
+    else:
+        story.append(
+            Paragraph(
+                "Key performance indicators are not available for this dataset.",
+                styles["BodyText"]
+            )
+        )
+
     story.append(Spacer(1, 10))
 
     summary = (
         f"Performance is driven primarily by the "
-        f"<b>{snapshot.get('top_segment')}</b> segment and "
-        f"<b>{snapshot.get('top_region')}</b> region."
+        f"<b>{snapshot.get('top_segment', 'leading')}</b> segment and "
+        f"<b>{snapshot.get('top_region', 'key')}</b> region."
     )
     story.append(Paragraph(summary, styles["BodyText"]))
 
