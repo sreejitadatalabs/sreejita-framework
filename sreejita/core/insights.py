@@ -18,7 +18,8 @@ def correlation_insights(df, target="sales"):
         col = strongest.index[0]
         val = corr.loc[target, col]
         insights.append(
-            f"{target.title()} strongly correlates with {col} (r={val:.2f})."
+            f"{target.title()} shows a strong relationship with {col} (r = {val:.2f}), "
+            f"suggesting this variable is a key performance driver."
         )
 
     return insights
