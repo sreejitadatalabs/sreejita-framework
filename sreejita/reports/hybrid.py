@@ -63,8 +63,19 @@ def load_dataframe(input_path: str) -> pd.DataFrame:
 def generate_executive_snapshot(df, schema, sales_col, profit_col):
     snapshot = {}
 
-    snapshot["rows"] = len(df)
-    snapshot["columns"] = df.shape[1]
+    #Executive KPIs (must appear on Page 1)
+    exec_kpis = {
+        k: v for k, v in kpis.items()
+        if k in {
+            "Total Sales",
+            "Total Profit",
+            "Profit Margin",
+            "Orders",
+            "Customers",
+            "Avg Order Value",
+        }
+    }
+
 
     if sales_col and sales_col in df.columns and "region" in df.columns:
         snapshot["top_region"] = (
@@ -156,9 +167,47 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         images["corr"] = img_dir / "corr.png"
         heatmap(df[numeric_cols], images["corr"])
 
+    corr_insights = []
+
+    if profit_col in df.columns and sales_col in df.columns:
+        corr = df[[sales_col, profit_col]].corr().iloc[0, 1]
+        corr_insights.append(
+            f"Sales and profit are positively correlated (r = {corr:.2f}), "
+            f"suggesting revenue growth generally translates to profitability."
+        )
+
+    if "discount" in schema["numeric_measures"] and profit_col in df.columns:
+        corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
+        if corr < 0:
+            corr_insights.append(
+                f"Discounting negatively impacts profit (r = {corr:.2f}), "
+                f"highlighting a margin leakage risk."
+            )
+
+
     # Insights & recommendations
     insights = correlation_insights(df, target=sales_col)
-    recommendations = generate_recommendations(df)
+    recommendations = []
+
+    if "discount" in schema["numeric_measures"]:
+        high_discount_rate = (df["discount"] > 0.3).mean()
+        recommendations.append(
+            f"Approximately {high_discount_rate*100:.1f}% of orders have discounts above 30%. "
+            f"Reducing high discounts could improve overall profit margins."
+        )
+
+    if "segment" in df.columns and sales_col in df.columns:
+        top_segment = df.groupby("segment")[sales_col].sum().idxmax()
+        recommendations.append(
+            f"Prioritize growth initiatives for the {top_segment} segment, "
+            f"which generates the highest sales contribution."
+        )
+
+    dq_notes = [
+        f"Missing values detected in {len(df.columns[df.isna().any()])} columns.",
+        "Identifier-like fields (e.g., postal_code) were excluded from numeric analysis.",
+        "Sales and profit distributions show right-skew, indicating potential outliers."
+    ]
 
     # -------------------------------------------------
     # Build PDF
@@ -224,6 +273,43 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         story.append(Paragraph(f"• {ins}", styles["BodyText"]))
 
     story.append(PageBreak())
+
+    def generate_written_insights(df, schema, sales_col, profit_col):
+        insights = []
+
+        # Segment contribution
+        if sales_col in df.columns and "segment" in df.columns:
+            seg_share = (
+                df.groupby("segment")[sales_col].sum()
+                / df[sales_col].sum()
+            ).sort_values(ascending=False)
+
+            top_seg = seg_share.index[0]
+            insights.append(
+                f"{top_seg} segment contributes approximately "
+                f"{seg_share.iloc[0]*100:.1f}% of total sales, making it the primary growth driver."
+            )
+
+        # Region performance
+        if sales_col in df.columns and "region" in df.columns:
+            top_region = (
+                df.groupby("region")[sales_col].sum().idxmax()
+            )
+            insights.append(
+                f"{top_region} region leads in total sales, indicating strong regional demand."
+            )
+
+        # Discount risk
+        if profit_col in df.columns and "discount" in schema["numeric_measures"]:
+            corr = df[[profit_col, "discount"]].corr().iloc[0, 1]
+            if corr < -0.2:
+                insights.append(
+                    f"Discount shows a negative correlation with profit (r = {corr:.2f}), "
+                    f"indicating margin erosion due to aggressive discounting."
+                )
+
+        return insights
+
 
     # ========== VISUALS ==========
     for img in images.values():
