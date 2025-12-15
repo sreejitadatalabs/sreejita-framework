@@ -80,9 +80,13 @@ def load_dataframe(path: str) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# Evidence Snapshot (v1.9.7 logic retained)
+# Evidence Snapshot — HARD GUARANTEE (v1.9.9)
 # -------------------------------------------------
 def build_evidence_snapshot(df, schema, config):
+    """
+    Evidence Snapshot MUST render visible visuals.
+    Exactly 3 visuals max, correlation is mandatory.
+    """
     visuals = []
     img_dir = Path("hybrid_images")
     img_dir.mkdir(exist_ok=True)
@@ -90,32 +94,43 @@ def build_evidence_snapshot(df, schema, config):
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
 
-    # Trend OR Distribution
-    if date_col and date_col in df.columns and sales_col in df.columns:
-        p = img_dir / "trend.png"
-        plot_monthly(df, date_col, sales_col, p)
-        if p.exists():
-            visuals.append((p, "Performance trend over time."))
-    elif sales_col in df.columns:
-        p = img_dir / "distribution.png"
-        hist(df, sales_col, p)
-        if p.exists():
-            visuals.append((p, "Distribution of key performance metric."))
+    # 1️⃣ Correlation heatmap (MANDATORY)
+    corr_path = img_dir / "evidence_correlation.png"
+    heatmap(df, corr_path)
+    if corr_path.exists():
+        visuals.append((
+            corr_path,
+            "Correlation heatmap showing relationships between key numeric metrics."
+        ))
 
-    # Categorical
+    # 2️⃣ Categorical dominance
     if schema["categorical"] and sales_col in df.columns:
-        c = schema["categorical"][0]
-        p = img_dir / "bar.png"
-        bar(df, c, p)
-        if p.exists():
-            visuals.append((p, f"{sales_col} by {c}."))
+        cat = schema["categorical"][0]
+        bar_path = img_dir / "evidence_category.png"
+        bar(df, cat, bar_path)
+        if bar_path.exists():
+            visuals.append((
+                bar_path,
+                f"{sales_col} distribution by {cat}."
+            ))
 
-    # Correlation
-    if len(schema["numeric_measures"]) >= 2:
-        p = img_dir / "correlation.png"
-        heatmap(df, p)
-        if p.exists():
-            visuals.append((p, "Correlation between numeric metrics."))
+    # 3️⃣ Trend OR Distribution (fallback safe)
+    if date_col and date_col in df.columns and sales_col in df.columns:
+        trend_path = img_dir / "evidence_trend.png"
+        plot_monthly(df, date_col, sales_col, trend_path)
+        if trend_path.exists():
+            visuals.append((
+                trend_path,
+                "Performance trend over time."
+            ))
+    elif sales_col in df.columns:
+        dist_path = img_dir / "evidence_distribution.png"
+        hist(df, sales_col, dist_path)
+        if dist_path.exists():
+            visuals.append((
+                dist_path,
+                "Distribution of key performance metric."
+            ))
 
     return visuals[:3]
 
@@ -147,7 +162,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     schema = detect_schema(df)
 
     # -------------------------
-    # Executive-level intelligence
+    # Executive intelligence
     # -------------------------
     kpis = compute_kpis(df, sales_col, profit_col)
 
@@ -171,12 +186,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         ],
     )
 
-    # -------------------------
-    # v1.9.9 Expansion (NO duplication)
-    # -------------------------
     detailed_insights = generate_detailed_insights(summary_insights)
     prescriptive_recs = generate_prescriptive_recommendations(summary_recs)
-
     evidence = build_evidence_snapshot(df, schema, config)
 
     missing_pct = (df.isna().sum() / len(df)) * 100
@@ -204,12 +215,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story = []
 
-    # =========================
     # PAGE 1 — EXECUTIVE SNAPSHOT
-    # =========================
     story.append(Paragraph("Executive Snapshot", title))
     story.append(Spacer(1, 12))
-
     story.append(
         Paragraph(
             safe(
@@ -237,22 +245,26 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(PageBreak())
 
-    # =========================
-    # PAGE 2 — EVIDENCE SNAPSHOT
-    # =========================
+    # PAGE 2 — EVIDENCE SNAPSHOT (VISIBLE PROOF)
     story.append(Paragraph("Evidence Snapshot (Supporting Analysis)", title))
     story.append(Spacer(1, 12))
 
-    for img, note in evidence:
-        story.append(Image(str(img), width=15 * cm, height=9 * cm, kind="proportional"))
-        story.append(Paragraph(note, styles["BodyText"]))
+    for img_path, caption in evidence:
+        story.append(
+            Image(
+                str(img_path),
+                width=15 * cm,
+                height=9 * cm,
+                kind="proportional",
+            )
+        )
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(caption, styles["BodyText"]))
         story.append(Spacer(1, 18))
 
     story.append(PageBreak())
 
-    # =========================
     # PAGE 3 — DETAILED INSIGHTS
-    # =========================
     story.append(Paragraph("Key Insights (Detailed Analysis)", styles["Heading2"]))
     story.append(Spacer(1, 12))
 
@@ -273,9 +285,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(PageBreak())
 
-    # =========================
     # PAGE 4 — PRESCRIPTIVE RECOMMENDATIONS
-    # =========================
     story.append(
         Paragraph("Recommendations (Prescriptive Actions)", styles["Heading2"])
     )
@@ -293,15 +303,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             )
         )
         story.append(
-            Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"])
-        )
+            Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"]))
         story.append(Spacer(1, 14))
 
     story.append(PageBreak())
 
-    # =========================
-    # PAGE 5 — DATA QUALITY
-    # =========================
+    # PAGE 5 — DATA QUALITY & RISK
     story.append(Paragraph("Data Quality & Risk Notes", styles["Heading2"]))
     for d in dq_notes:
         story.append(Paragraph(f"• {d}", styles["BodyText"]))
