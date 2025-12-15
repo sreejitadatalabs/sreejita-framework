@@ -4,6 +4,21 @@ All notable changes to the **Sreejita Framework** will be documented in this fil
 The project follows a practical, capability-based versioning approach.
 Not every internal milestone is released, only meaningful, stable versions.
 
+
+## v1.9.9 — Deterministic Decision Intelligence (Final v1.x)
+
+### Highlights
+- Stable Domain + DomainDetector architecture
+- Deterministic, explainable decision intelligence
+- CI-safe, backward-compatible domain contracts
+- Executive-ready reporting pipeline
+- Robust handling of missing / partial datasets
+
+### Notes
+- v1.x is now frozen
+- All future architectural changes move to v2.0
+- ---------------
+
 [1.8.0] – Packaging & Distribution Foundation
 ==============================================================
 
