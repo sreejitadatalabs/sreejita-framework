@@ -22,10 +22,11 @@ from sreejita.domains.router import apply_domain
 from sreejita.visuals.time_series import plot_monthly
 from sreejita.visuals.categorical import bar
 from sreejita.visuals.correlation import heatmap
+from sreejita.visuals.distributions import hist
 
 
 # -------------------------------------------------
-# Utilities (Safety + Narrative)
+# Utilities
 # -------------------------------------------------
 def safe_label(value, fallback):
     return value if value not in [None, "", "nan"] else fallback
@@ -69,26 +70,7 @@ def load_dataframe(path: str) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# Executive Snapshot
-# -------------------------------------------------
-def build_executive_snapshot(df, kpis, sales_col):
-    snapshot = {"kpis": list(kpis.items())[:6]}
-
-    if sales_col and sales_col in df.columns and "segment" in df.columns:
-        snapshot["top_segment"] = (
-            df.groupby("segment")[sales_col].sum().idxmax()
-        )
-
-    if sales_col and sales_col in df.columns and "region" in df.columns:
-        snapshot["top_region"] = (
-            df.groupby("region")[sales_col].sum().idxmax()
-        )
-
-    return snapshot
-
-
-# -------------------------------------------------
-# Evidence Snapshot Builder (v1.9.7)
+# Evidence Snapshot (FIXED)
 # -------------------------------------------------
 def build_evidence_snapshot(df, schema, config):
     visuals = []
@@ -99,36 +81,47 @@ def build_evidence_snapshot(df, schema, config):
     date_col = config.get("dataset", {}).get("date")
     sales_col = config.get("dataset", {}).get("sales")
 
-    # 1️⃣ Primary Trend
-    if date_col in df.columns and sales_col in df.columns:
-        path = img_dir / "evidence_trend.png"
-        plot_monthly(df, date_col, sales_col, path)
-        visuals.append((
-            path,
-            "The time trend highlights overall performance movement, "
-            "helping identify growth patterns, seasonality, or instability."
-        ))
-
-    # 2️⃣ Primary Breakdown
-    if schema["categorical"] and sales_col in df.columns:
-        cat = schema["categorical"][0]
-        path = img_dir / "evidence_breakdown.png"
-        bar(df, cat, path)
-        visuals.append((
-            path,
-            f"The categorical breakdown shows how performance is distributed across {cat}, "
-            f"indicating concentration or diversification."
-        ))
-
-    # 3️⃣ Primary Relationship
+    # 1️⃣ Correlation Heatmap (mandatory if possible)
     if len(schema["numeric_measures"]) >= 2:
-        path = img_dir / "evidence_correlation.png"
-        heatmap(df[schema["numeric_measures"]], path)
-        visuals.append((
-            path,
-            "The correlation view reveals relationships between key metrics, "
-            "supporting cause–effect reasoning behind insights."
-        ))
+        corr_path = img_dir / "evidence_correlation.png"
+        heatmap(df[schema["numeric_measures"]], corr_path)
+        if corr_path.exists():
+            visuals.append((
+                corr_path,
+                "Correlation heatmap shows relationships between key numeric metrics, "
+                "supporting cause–effect reasoning."
+            ))
+
+    # 2️⃣ Primary Bar Chart (segment or region)
+    if sales_col in df.columns and schema["categorical"]:
+        cat = schema["categorical"][0]
+        bar_path = img_dir / "evidence_bar.png"
+        bar(df, cat, bar_path)
+        if bar_path.exists():
+            visuals.append((
+                bar_path,
+                f"Bar chart shows how {sales_col} is distributed across {cat}, "
+                f"highlighting dominant contributors."
+            ))
+
+    # 3️⃣ Trend OR Distribution
+    if date_col in df.columns and sales_col in df.columns:
+        trend_path = img_dir / "evidence_trend.png"
+        plot_monthly(df, date_col, sales_col, trend_path)
+        if trend_path.exists():
+            visuals.append((
+                trend_path,
+                "Time-series trend shows performance evolution over time, "
+                "revealing growth patterns or volatility."
+            ))
+    elif sales_col in df.columns:
+        dist_path = img_dir / "evidence_distribution.png"
+        hist(df, sales_col, dist_path)
+        if dist_path.exists():
+            visuals.append((
+                dist_path,
+                "Distribution plot highlights spread and outliers in key performance values."
+            ))
 
     return visuals[:3]
 
@@ -159,9 +152,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     schema = detect_schema(df)
 
-    # Core intelligence
     kpis = compute_kpis(df, sales_col, profit_col)
-    snapshot = build_executive_snapshot(df, kpis, sales_col)
 
     insights = enforce_min_bullets(
         correlation_insights(df, sales_col),
@@ -185,10 +176,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         ]
     )
 
-    # Evidence snapshot
     evidence = build_evidence_snapshot(df, schema, config)
 
-    # Data quality
     missing_pct = (df.isna().sum() / len(df)) * 100
     dq_notes = [
         f"Missing values present in {missing_pct[missing_pct > 0].count()} columns "
@@ -197,9 +186,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         "Outliers may influence aggregate metrics."
     ]
 
-    # -------------------------------------------------
-    # Build PDF
-    # -------------------------------------------------
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
@@ -214,57 +200,29 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story = []
 
-    # Executive Snapshot
-    story.append(Paragraph("Executive Snapshot", title))
+    story.append(Paragraph("Evidence Snapshot (Supporting Analysis)", title))
     story.append(Spacer(1, 12))
 
-    rows = []
-    for i in range(0, len(snapshot["kpis"]), 2):
-        left = snapshot["kpis"][i]
-        right = snapshot["kpis"][i + 1] if i + 1 < len(snapshot["kpis"]) else ("", "")
-        rows.append([
-            Paragraph(f"<b>{left[0]}</b><br/>{left[1]}", styles["BodyText"]),
-            Paragraph(f"<b>{right[0]}</b><br/>{right[1]}", styles["BodyText"]),
-        ])
-
-    story.append(Table(rows, colWidths=[8 * cm, 8 * cm]))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph(
-        f"Performance is driven primarily by "
-        f"<b>{safe_label(snapshot.get('top_segment'), 'key segments')}</b> "
-        f"and activity across <b>{safe_label(snapshot.get('top_region'), 'multiple regions')}</b>.",
-        styles["BodyText"]
-    ))
-
-    story.append(PageBreak())
-
-    # Evidence Snapshot
-    story.append(Paragraph("Evidence Snapshot (Supporting Analysis)", styles["Heading2"]))
     for img_path, note in evidence:
-        if img_path.exists():
-            story.append(Image(str(img_path), width=16 * cm, height=6 * cm))
-            story.append(Spacer(1, 4))
-            story.append(Paragraph(note, styles["BodyText"]))
-            story.append(Spacer(1, 12))
+        story.append(Image(str(img_path), width=16 * cm, height=6 * cm))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(note, styles["BodyText"]))
+        story.append(Spacer(1, 14))
 
     story.append(PageBreak())
 
-    # Key Insights
     story.append(Paragraph("Key Insights", styles["Heading2"]))
     for i in insights:
         story.append(Paragraph(f"• {i}", styles["BodyText"]))
 
     story.append(PageBreak())
 
-    # Recommendations
     story.append(Paragraph("Recommendations", styles["Heading2"]))
     for r in recommendations:
         story.append(Paragraph(f"• {r}", styles["BodyText"]))
 
     story.append(PageBreak())
 
-    # Data Quality
     story.append(Paragraph("Data Quality & Risk Notes", styles["Heading2"]))
     for d in dq_notes:
         story.append(Paragraph(f"• {d}", styles["BodyText"]))
