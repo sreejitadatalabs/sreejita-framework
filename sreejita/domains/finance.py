@@ -53,3 +53,12 @@ class FinanceDomainDetector(BaseDomainDetector):
             confidence=score,
             signals={"matched_columns": list(matches)}
         )
+
+# v2.0 registration hook
+def register(registry):
+    registry.register(
+        name="finance",
+        domain_cls=FinanceDomain,
+        detector_cls=FinanceDomainDetector,
+    )
+
