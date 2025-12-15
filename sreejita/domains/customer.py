@@ -48,3 +48,11 @@ class CustomerDomainDetector(BaseDomainDetector):
             confidence=score,
             signals={"matched_columns": list(matches)}
         )
+
+# v2.0 registration hook
+def register(registry):
+    registry.register(
+        name="customer",
+        domain_cls=CustomerDomain,
+        detector_cls=CustomerDomainDetector,
+    )
