@@ -13,6 +13,37 @@ from sreejita.reporting.ops.recommendations import generate_ops_recommendations
 from sreejita.reporting.healthcare.kpis import compute_healthcare_kpis
 from sreejita.reporting.healthcare.insights import generate_healthcare_insights
 from sreejita.reporting.healthcare.recommendations import generate_healthcare_recommendations
+# Customer
+from sreejita.reporting.customer.visuals import _churn_proxy_distribution_v26
+
+# Finance
+from sreejita.reporting.finance.visuals import _expense_vs_revenue_v26
+
+# Ops
+from sreejita.reporting.ops.visuals import _sla_breach_rate_plot_v26
+
+# Healthcare
+from sreejita.reporting.healthcare.visuals import _readmission_rate_plot_v26
+
+DOMAIN_VISUALS = {
+    "retail": DOMAIN_VISUALS["retail"],
+
+    "customer": {
+        "churn_proxy_rate": _churn_proxy_distribution_v26,
+    },
+
+    "finance": {
+        "expense_ratio": _expense_vs_revenue_v26,
+    },
+
+    "ops": {
+        "sla_breach_rate": _sla_breach_rate_plot_v26,
+    },
+
+    "healthcare": {
+        "readmission_rate": _readmission_rate_plot_v26,
+    },
+}
 
 
 DOMAIN_REPORT_ENGINES = {
