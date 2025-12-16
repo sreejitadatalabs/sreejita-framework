@@ -8,6 +8,9 @@ def generate_report_payload(df, decision, policy):
     if not engine:
         return None
 
+    # -------------------------
+    # KPIs / Insights / Recs
+    # -------------------------
     kpis = engine["kpis"](df)
     insights = engine["insights"](df, kpis)
     recommendations = engine["recommendations"](insights)
@@ -16,31 +19,33 @@ def generate_report_payload(df, decision, policy):
         insights = []
         recommendations = []
 
-
+    # -------------------------
+    # Visual generation
+    # -------------------------
     visuals = []
-visual_dir = Path("hybrid_images").resolve()
-visual_dir.mkdir(exist_ok=True)
+    visual_dir = Path("hybrid_images").resolve()
+    visual_dir.mkdir(exist_ok=True)
 
-visual_map = DOMAIN_VISUALS.get(domain, {})
+    visual_map = DOMAIN_VISUALS.get(domain, {})
 
-# -------------------------------------------------
-# RETAIL MINIMUM VISUAL SET (ALWAYS)
-# -------------------------------------------------
-if "__always__" in visual_map:
-    for visual_fn in visual_map["__always__"]:
-        try:
-            img_path = visual_fn(df, visual_dir)
-            if img_path:
-                visuals.append({
-                    "path": img_path,
-                    "caption": "Retail performance overview"
-                })
-        except Exception:
-            pass
+    # -------------------------------------------------
+    # MINIMUM VISUAL SET (ALWAYS)
+    # -------------------------------------------------
+    if "__always__" in visual_map:
+        for visual_fn in visual_map["__always__"]:
+            try:
+                img_path = visual_fn(df, visual_dir)
+                if img_path:
+                    visuals.append({
+                        "path": img_path,
+                        "caption": "Retail performance overview"
+                    })
+            except Exception:
+                pass
 
-    # -------------------------
-    # Insight-driven visuals
-    # -------------------------
+    # -------------------------------------------------
+    # INSIGHT-DRIVEN VISUALS (OPTIONAL)
+    # -------------------------------------------------
     for ins in insights:
         metric = ins.get("metric")
         if metric and metric in visual_map:
@@ -52,19 +57,6 @@ if "__always__" in visual_map:
                 })
             except Exception:
                 pass
-
-    # -------------------------
-    # BASELINE visual fallback
-    # -------------------------
-    if not visuals and "__baseline__" in visual_map:
-        try:
-            img_path = visual_map["__baseline__"](df, visual_dir)
-            visuals.append({
-                "path": img_path,
-                "caption": "Baseline distribution — no significant risks detected"
-            })
-        except Exception:
-            pass
 
     return {
         "domain": domain,
