@@ -18,10 +18,25 @@ def generate_report_payload(df, decision, policy):
 
 
     visuals = []
-    visual_dir = Path("hybrid_images").resolve()
-    visual_dir.mkdir(exist_ok=True)
+visual_dir = Path("hybrid_images").resolve()
+visual_dir.mkdir(exist_ok=True)
 
-    visual_map = DOMAIN_VISUALS.get(domain, {})
+visual_map = DOMAIN_VISUALS.get(domain, {})
+
+# -------------------------------------------------
+# RETAIL MINIMUM VISUAL SET (ALWAYS)
+# -------------------------------------------------
+if "__always__" in visual_map:
+    for visual_fn in visual_map["__always__"]:
+        try:
+            img_path = visual_fn(df, visual_dir)
+            if img_path:
+                visuals.append({
+                    "path": img_path,
+                    "caption": "Retail performance overview"
+                })
+        except Exception:
+            pass
 
     # -------------------------
     # Insight-driven visuals
