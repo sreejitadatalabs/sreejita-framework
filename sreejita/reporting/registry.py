@@ -1,5 +1,5 @@
 # =====================================================
-# REPORT ENGINES REGISTRY (v2.6)
+# REPORT ENGINES REGISTRY (v2.7)
 # =====================================================
 
 # -------------------------
@@ -46,9 +46,6 @@ from sreejita.reporting.healthcare.insights import generate_healthcare_insights
 from sreejita.reporting.healthcare.recommendations import generate_healthcare_recommendations
 
 
-# -------------------------
-# EXTEND REPORT ENGINES
-# -------------------------
 DOMAIN_REPORT_ENGINES.update({
     "customer": {
         "kpis": compute_customer_kpis,
@@ -72,63 +69,29 @@ DOMAIN_REPORT_ENGINES.update({
     },
 })
 
+# =====================================================
+# VISUALS REGISTRY (v2.7 — MINIMUM VISUAL SET)
+# =====================================================
 
-# =====================================================
-# VISUALS REGISTRY (v2.6)
-# =====================================================
-
-# -------------------------
-# Retail visuals (BASE)
-# -------------------------
-# =====================================================
-# VISUALS REGISTRY (v2.7.1)
-# =====================================================
 from sreejita.reporting.retail.visuals import (
     _sales_trend_v27,
     _sales_by_category_v27,
     _shipping_cost_vs_sales_v27,
-    _discount_distribution_v26,
-    _baseline_sales_distribution_v27,
 )
 
-DOMAIN_VISUALS["retail"] = {
-    "__always__": [
-        _sales_trend_v27,
-        _sales_by_category_v27,
-        _shipping_cost_vs_sales_v27,
-         _discount_distribution_v26,
-        _baseline_sales_distribution_v27
-    ]
-}
-
-
-# ---- other domains already registered earlier ----
-
-# -------------------------
-# Customer visuals
-# -------------------------
 from sreejita.reporting.customer.visuals import _churn_proxy_distribution_v26
-
-# -------------------------
-# Finance visuals
-# -------------------------
 from sreejita.reporting.finance.visuals import _expense_vs_revenue_v26
-
-# -------------------------
-# Ops visuals
-# -------------------------
 from sreejita.reporting.ops.visuals import _sla_breach_rate_plot_v26
-
-# -------------------------
-# Healthcare visuals
-# -------------------------
 from sreejita.reporting.healthcare.visuals import _readmission_rate_plot_v26
 
-
-# -------------------------
-# EXTEND VISUALS
-# -------------------------
-DOMAIN_VISUALS.update({
+DOMAIN_VISUALS = {
+    "retail": {
+        "__always__": [
+            _sales_trend_v27,          # WHAT happened
+            _sales_by_category_v27,    # WHERE happened
+            _shipping_cost_vs_sales_v27,  # WHY happened
+        ]
+    },
     "customer": {
         "churn_proxy_rate": _churn_proxy_distribution_v26,
     },
@@ -141,4 +104,4 @@ DOMAIN_VISUALS.update({
     "healthcare": {
         "readmission_rate": _readmission_rate_plot_v26,
     },
-})
+}
