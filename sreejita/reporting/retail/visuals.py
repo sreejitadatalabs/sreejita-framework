@@ -44,10 +44,88 @@ def baseline_sales_distribution(df, output_path: Path):
     plt.close()
     return output_path
 
+from pathlib import Path
+import matplotlib.pyplot as plt
+
 
 # =====================================================
-# INTERNAL v2.6 / v2.7 HELPERS
+# PUBLIC VISUALS (CI SAFE)
 # =====================================================
+
+def sales_trend(df, output_path: Path, date_col="order_date", sales_col="sales"):
+    """
+    WHAT happened — sales trend over time
+    """
+    if date_col not in df.columns:
+        return None
+
+    data = df.copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    monthly = data.groupby(data[date_col].dt.to_period("M"))[sales_col].sum()
+
+    plt.figure(figsize=(6, 4))
+    monthly.plot()
+    plt.title("Sales Trend Over Time")
+    plt.ylabel("Sales")
+    plt.xlabel("Month")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    return output_path
+
+
+def sales_by_category(df, output_path: Path, category_col="category", sales_col="sales"):
+    """
+    WHERE it happened — sales concentration
+    """
+    if category_col not in df.columns:
+        return None
+
+    agg = df.groupby(category_col)[sales_col].sum().sort_values(ascending=False)
+
+    plt.figure(figsize=(6, 4))
+    agg.plot(kind="bar")
+    plt.title("Sales by Category")
+    plt.ylabel("Sales")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    return output_path
+
+
+def shipping_cost_vs_sales(df, output_path: Path):
+    """
+    WHY it happened — cost efficiency
+    """
+    if not {"sales", "shipping_cost"}.issubset(df.columns):
+        return None
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(df["sales"], df["shipping_cost"], alpha=0.4)
+    plt.xlabel("Sales")
+    plt.ylabel("Shipping Cost")
+    plt.title("Shipping Cost vs Sales")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    return output_path
+
+
+# =====================================================
+# INTERNAL v2.7 HELPERS (USED BY REGISTRY)
+# =====================================================
+
+def _sales_trend_v27(df, output_dir: Path):
+    return sales_trend(df, output_dir / "sales_trend.png")
+
+
+def _sales_by_category_v27(df, output_dir: Path):
+    return sales_by_category(df, output_dir / "sales_by_category.png")
+
+
+def _shipping_cost_vs_sales_v27(df, output_dir: Path):
+    return shipping_cost_vs_sales(df, output_dir / "shipping_cost_vs_sales.png")
+
 
 def _shipping_cost_vs_sales_v26(df, output_dir: Path):
     return shipping_cost_vs_sales(df, output_dir / "shipping_cost_vs_sales.png")
