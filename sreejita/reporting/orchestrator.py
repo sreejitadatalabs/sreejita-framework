@@ -1,60 +1,69 @@
 from pathlib import Path
+from datetime import datetime
 from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES, DOMAIN_VISUALS
 
 
 def generate_report_payload(df, decision, policy):
     domain = decision.selected_domain
+
     engine = DOMAIN_REPORT_ENGINES.get(domain)
     if not engine:
         return None
 
     # -------------------------
-    # KPIs / Insights / Recs
+    # KPIs (MANDATORY)
     # -------------------------
     kpis = engine["kpis"](df)
-    insights = engine["insights"](df, kpis)
-    recommendations = engine["recommendations"](insights)
 
-    if not kpis:
+    # -------------------------
+    # INSIGHTS (FIXED)
+    # -------------------------
+    insights_fn = engine.get("insights")
+    if insights_fn:
+        try:
+            # ✅ PASS KPIs INTO INSIGHTS
+            insights = insights_fn(df, kpis)
+        except TypeError:
+            # Backward compatibility (v1 insights)
+            insights = insights_fn(df)
+    else:
         insights = []
+
+    # -------------------------
+    # RECOMMENDATIONS
+    # -------------------------
+    recs_fn = engine.get("recommendations")
+    if recs_fn:
+        try:
+            recommendations = recs_fn(df, kpis, insights)
+        except TypeError:
+            recommendations = recs_fn(df)
+    else:
         recommendations = []
 
     # -------------------------
-    # Visual generation
+    # VISUALS
     # -------------------------
     visuals = []
-    visual_dir = Path("hybrid_images").resolve()
-    visual_dir.mkdir(exist_ok=True)
+    visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
 
-    visual_map = DOMAIN_VISUALS.get(domain, {})
+    output_dir = Path("hybrid_images")
+    output_dir.mkdir(exist_ok=True)
 
-    # -------------------------------------------------
-    # MINIMUM VISUAL SET (ALWAYS)
-    # -------------------------------------------------
-    if "__always__" in visual_map:
-        captions = [
-            "Sales trend over time (What happened)",
-            "Sales contribution by category (Where it happened)",
-            "Shipping cost vs sales relationship (Why it happened)",
-        ]
-
-        for visual_fn, caption in zip(visual_map["__always__"], captions):
-            try:
-                img_path = visual_fn(df, visual_dir)
-                if img_path:
-                    visuals.append({
-                        "path": img_path,
-                        "caption": caption
-                    })
-            except Exception:
-                pass
+    for hook in visual_hooks:
+        path = hook(df, output_dir)
+        if path:
+            visuals.append({
+                "path": path,
+                "caption": hook.__doc__ or ""
+            })
 
     return {
+        "generated_at": datetime.utcnow().isoformat(),
         "domain": domain,
-        "domain_confidence": decision.confidence,
-        "policy_status": policy.status if policy else None,
         "kpis": kpis,
-        "insights": insights,
+        "insights": insights,          # 🔥 NOW POPULATED
         "recommendations": recommendations,
         "visuals": visuals,
+        "policy": policy.status,
     }
