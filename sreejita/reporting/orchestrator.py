@@ -12,18 +12,18 @@ def generate_report_payload(df, decision, policy):
     insights = engine["insights"](df, kpis)
     recommendations = engine["recommendations"](insights)
 
-    # -----------------------------
-    # Insight-driven visuals
-    # -----------------------------
     visuals = []
     visual_dir = Path("hybrid_images").resolve()
     visual_dir.mkdir(exist_ok=True)
 
     visual_map = DOMAIN_VISUALS.get(domain, {})
 
+    # -------------------------
+    # Insight-driven visuals
+    # -------------------------
     for ins in insights:
         metric = ins.get("metric")
-        if metric in visual_map:
+        if metric and metric in visual_map:
             try:
                 img_path = visual_map[metric](df, visual_dir)
                 visuals.append({
@@ -31,7 +31,20 @@ def generate_report_payload(df, decision, policy):
                     "caption": ins["title"]
                 })
             except Exception:
-                pass  # visual failure must not break report
+                pass
+
+    # -------------------------
+    # BASELINE visual fallback
+    # -------------------------
+    if not visuals and "__baseline__" in visual_map:
+        try:
+            img_path = visual_map["__baseline__"](df, visual_dir)
+            visuals.append({
+                "path": img_path,
+                "caption": "Baseline distribution — no significant risks detected"
+            })
+        except Exception:
+            pass
 
     return {
         "domain": domain,
