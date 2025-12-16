@@ -30,7 +30,11 @@ def run_analysis_from_ui(
     # -----------------------------
     try:
         if input_path.suffix.lower() == ".csv":
-            df = pd.read_csv(input_path)
+            try:
+                df = pd.read_csv(input_path, encoding="utf-8")
+            except UnicodeDecodeError:
+                df = pd.read_csv(input_path, encoding="latin1")
+
         else:
             df = pd.read_excel(input_path)
 
