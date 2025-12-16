@@ -1,0 +1,5 @@
+decision_engine:
+  observers:
+    - type: console
+    - type: file
+      path: decision_audit.jsonl
