@@ -8,3 +8,4 @@ watchdog
 apscheduler
 scikit-learn
 streamlit
+openpyxl
