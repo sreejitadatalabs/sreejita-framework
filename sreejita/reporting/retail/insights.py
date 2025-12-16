@@ -1,12 +1,12 @@
 # =====================================================
-# Retail Threshold-Based Insights — v2.7 (FINAL)
+# Retail Threshold-Based Insights — v2.8
 # =====================================================
 
 def generate_retail_insights(df, kpis):
-    insights = []   # ✅ ALWAYS initialize list
+    insights = []
 
     # -------------------------
-    # Shipping Cost Ratio
+    # 1. Shipping Cost Ratio
     # -------------------------
     ratio = kpis.get("shipping_cost_ratio")
     if ratio is not None:
@@ -31,7 +31,7 @@ def generate_retail_insights(df, kpis):
         })
 
     # -------------------------
-    # Profit Margin
+    # 2. Profit Margin Health
     # -------------------------
     margin = kpis.get("profit_margin")
     if margin is not None:
@@ -52,7 +52,34 @@ def generate_retail_insights(df, kpis):
             "value": f"{margin*100:.1f}%",
             "what": f"Overall profit margin is {margin*100:.1f}%.",
             "why": msg,
-            "so_what": "Low margins limit reinvestment and growth capacity.",
+            "so_what": "Margin pressure limits reinvestment and growth capacity.",
         })
 
-    return insights   # ✅ GUARANTEED LIST
+    # -------------------------
+    # 3. Category Concentration
+    # -------------------------
+    if "category" in df.columns and "sales" in df.columns:
+        totals = df.groupby("category")["sales"].sum()
+        top_share = totals.max() / totals.sum()
+
+        if top_share <= 0.40:
+            level = "GOOD"
+            msg = "Revenue is well diversified across categories."
+        elif top_share <= 0.55:
+            level = "WARNING"
+            msg = "Revenue shows moderate concentration risk."
+        else:
+            level = "RISK"
+            msg = "Revenue is highly dependent on a single category."
+
+        insights.append({
+            "metric": "category_concentration",
+            "level": level,
+            "title": "Category Revenue Concentration",
+            "value": f"{top_share*100:.1f}%",
+            "what": f"The top category contributes {top_share*100:.1f}% of total sales.",
+            "why": msg,
+            "so_what": "High concentration increases exposure to category-specific shocks.",
+        })
+
+    return insights
