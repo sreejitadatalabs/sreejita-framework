@@ -248,13 +248,23 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # ---------------- PAGE 2 ----------------
+    s# ---------------- PAGE 2 ----------------
     story.append(Paragraph("Evidence Snapshot", title))
-    for img, cap in visuals:
-        story.append(Image(str(img), width=14 * cm, height=8 * cm))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(cap, styles["BodyText"]))
-        story.append(Spacer(1, 18))
-    story.append(PageBreak())
+
+    if visuals:
+        for img, cap in visuals:
+            story.append(Image(str(img), width=14 * cm, height=8 * cm))
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(cap, styles["BodyText"]))
+            story.append(Spacer(1, 18))
+    else:
+        story.append(
+            Paragraph(
+                "No anomalies detected. Baseline performance visuals shown.",
+                styles["BodyText"]
+            )
+        )
+
 
     # ---------------- PAGE 3 ----------------
     story.append(Paragraph("Key Insights", title))
