@@ -1,12 +1,9 @@
-from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES
+from pathlib import Path
+from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES, DOMAIN_VISUALS
 
 
 def generate_report_payload(df, decision, policy):
-    """
-    v2.6 Orchestrator
-    """
     domain = decision.selected_domain
-
     engine = DOMAIN_REPORT_ENGINES.get(domain)
     if not engine:
         return None
@@ -15,12 +12,33 @@ def generate_report_payload(df, decision, policy):
     insights = engine["insights"](df, kpis)
     recommendations = engine["recommendations"](insights)
 
+    # -----------------------------
+    # Insight-driven visuals
+    # -----------------------------
+    visuals = []
+    visual_dir = Path("hybrid_images").resolve()
+    visual_dir.mkdir(exist_ok=True)
+
+    visual_map = DOMAIN_VISUALS.get(domain, {})
+
+    for ins in insights:
+        metric = ins.get("metric")
+        if metric in visual_map:
+            try:
+                img_path = visual_map[metric](df, visual_dir)
+                visuals.append({
+                    "path": img_path,
+                    "caption": ins["title"]
+                })
+            except Exception:
+                pass  # visual failure must not break report
+
     return {
         "domain": domain,
         "domain_confidence": decision.confidence,
         "policy_status": policy.status if policy else None,
-
         "kpis": kpis,
         "insights": insights,
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "visuals": visuals,
     }
