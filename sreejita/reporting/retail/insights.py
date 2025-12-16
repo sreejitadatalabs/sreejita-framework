@@ -1,37 +1,58 @@
+# =====================================================
+# Retail Threshold-Based Insights — v2.7 (FINAL)
+# =====================================================
+
 def generate_retail_insights(df, kpis):
-    insights = []
+    insights = []   # ✅ ALWAYS initialize list
 
-    # Shipping cost insight
-    if "shipping_cost_ratio" in kpis:
-        ratio = kpis["shipping_cost_ratio"]
+    # -------------------------
+    # Shipping Cost Ratio
+    # -------------------------
+    ratio = kpis.get("shipping_cost_ratio")
+    if ratio is not None:
+        if ratio <= 0.09:
+            level = "GOOD"
+            msg = "Shipping costs are within the optimal range."
+        elif ratio <= 0.11:
+            level = "WARNING"
+            msg = "Shipping costs exceed the recommended threshold."
+        else:
+            level = "RISK"
+            msg = "Shipping costs are critically high."
 
-        if ratio > 0.15:
-            insights.append({
-                "title": "Shipping costs are eroding margins",
-                "severity": "high",
-                "evidence": f"Shipping cost ratio is {ratio:.2%}",
-                "metric": "shipping_cost_ratio"
-            })
-
-    # Discount insight
-    if "average_discount" in kpis:
-        disc = kpis["average_discount"]
-
-        if disc > 0.20:
-            insights.append({
-                "title": "High discounting may impact profitability",
-                "severity": "medium",
-                "evidence": f"Average discount rate is {disc:.2%}",
-                "metric": "average_discount"
-            })
-
-    # Fallback insight (important)
-    if not insights:
         insights.append({
-            "title": "No critical operational risks detected",
-            "severity": "low",
-            "evidence": "All monitored retail KPIs are within expected ranges",
-            "metric": "overall_health"
+            "metric": "shipping_cost_ratio",
+            "level": level,
+            "title": "Shipping Cost Efficiency",
+            "value": f"{ratio*100:.1f}%",
+            "what": f"Shipping costs account for {ratio*100:.1f}% of total sales.",
+            "why": msg,
+            "so_what": "Elevated shipping costs directly reduce profit margins.",
         })
 
-    return insights
+    # -------------------------
+    # Profit Margin
+    # -------------------------
+    margin = kpis.get("profit_margin")
+    if margin is not None:
+        if margin >= 0.12:
+            level = "GOOD"
+            msg = "Profit margins are healthy."
+        elif margin >= 0.09:
+            level = "WARNING"
+            msg = "Profit margins are under pressure."
+        else:
+            level = "RISK"
+            msg = "Profit margins are critically low."
+
+        insights.append({
+            "metric": "profit_margin",
+            "level": level,
+            "title": "Profitability Health",
+            "value": f"{margin*100:.1f}%",
+            "what": f"Overall profit margin is {margin*100:.1f}%.",
+            "why": msg,
+            "so_what": "Low margins limit reinvestment and growth capacity.",
+        })
+
+    return insights   # ✅ GUARANTEED LIST
