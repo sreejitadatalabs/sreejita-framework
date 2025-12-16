@@ -77,13 +77,25 @@ def _header_footer(canvas, doc):
 # =========================================================
 # DATA LOADER
 # =========================================================
-def load_dataframe(path: str) -> pd.DataFrame:
-    if path.lower().endswith(".csv"):
+
+def load_dataframe(path):
+    if path.suffix.lower() == ".csv":
         try:
-            return pd.read_csv(path)
+            return pd.read_csv(path, encoding="utf-8")
         except UnicodeDecodeError:
             return pd.read_csv(path, encoding="latin1")
-    return pd.read_excel(path)
+
+    elif path.suffix.lower() in [".xls", ".xlsx"]:
+        try:
+            return pd.read_excel(path)
+        except ImportError as e:
+            raise RuntimeError(
+                "Excel support requires 'openpyxl'. "
+                "Install it with: pip install openpyxl"
+            ) from e
+
+    else:
+        raise ValueError("Unsupported file type")
 
 
 # =========================================================
