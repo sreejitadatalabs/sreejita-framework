@@ -200,12 +200,20 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for k, v in kpis.items():
         key = k.replace("_", " ").title()
 
-        if "ratio" in k or "margin" in k:
+        key_lower = k.lower()
+
+        if "ratio" in key_lower or "margin" in key_lower:
             val = fmt_percent(v)
+
+        elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
+            val = f"{int(v):,}"
+
         elif isinstance(v, (int, float)):
             val = fmt_currency(v)
+
         else:
             val = str(v)
+
 
         formatted_kpis.append([key, val])
 
