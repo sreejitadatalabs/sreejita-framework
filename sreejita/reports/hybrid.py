@@ -232,19 +232,18 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
 
     # ================= PAGE 4 =================
-    story.append(Paragraph("Recommendations", title))
+    story.append(Paragraph("Recommendations", styles["Heading2"]))
     story.append(Spacer(1, 12))
 
-    for r in recs:
-        story.append(Paragraph(f"<b>Action:</b> {r.get('action','')}", styles["BodyText"]))
-        story.append(Paragraph(f"<b>Priority:</b> {r.get('priority','')}", styles["BodyText"]))
-        story.append(
-            Paragraph(
-                f"<b>Expected Impact:</b> {r.get('expected_impact','')}",
-                styles["BodyText"],
-            )
-        )
-        story.append(Spacer(1, 12))
+    for r in recommendations:
+        story.append(Paragraph(f"<b>Action:</b> {r['action']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Priority:</b> {r['priority']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Expected Impact:</b> {r['expected_impact']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Timeline:</b> {r['timeline']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Owner:</b> {r['owner']}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Success Metric:</b> {r['success_metric']}", styles["BodyText"]))
+        story.append(Paragraph(f"<i>Rationale:</i> {r['rationale']}", styles["BodyText"]))
+        story.append(Spacer(1, 14))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return str(output_path)
