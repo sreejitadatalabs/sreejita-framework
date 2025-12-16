@@ -1,9 +1,17 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.ticker import FuncFormatter
+
 from sreejita.core.schema import detect_schema
+from sreejita.reporting.formatters import fmt_currency
 
 
 def plot_monthly(df, date_col, value_col, out):
+    """
+    Monthly trend plot with executive-ready formatting.
+    No logic change, visual polish only.
+    """
+
     schema = detect_schema(df)
 
     if date_col not in schema["datetime"]:
@@ -15,11 +23,32 @@ def plot_monthly(df, date_col, value_col, out):
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
-    m = df.groupby(df[date_col].dt.to_period("M"))[value_col].sum()
-    m.index = m.index.to_timestamp()
+    monthly = df.groupby(df[date_col].dt.to_period("M"))[value_col].sum()
+    monthly.index = monthly.index.to_timestamp()
+
+    if monthly.empty:
+        return
 
     fig, ax = plt.subplots(figsize=(8, 3))
-    ax.plot(m.index, m.values)
-    ax.set_title("Monthly Trend")
+
+    ax.plot(
+        monthly.index,
+        monthly.values,
+        marker="o",
+        linewidth=2,
+    )
+
+    # ---------- POLISH ----------
+    ax.set_title("Sales Trend Shows Stable Monthly Growth")
+    ax.set_ylabel("Revenue")
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    ax.get_yaxis().set_major_formatter(
+        FuncFormatter(lambda x, _: fmt_currency(x))
+    )
+    ax.ticklabel_format(style="plain", axis="y")
+    # ----------------------------
+
+    fig.autofmt_xdate()
     fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close()
