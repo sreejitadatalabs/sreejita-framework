@@ -12,6 +12,11 @@ def generate_report_payload(df, decision, policy):
     insights = engine["insights"](df, kpis)
     recommendations = engine["recommendations"](insights)
 
+    if not kpis:
+        insights = []
+        recommendations = []
+
+
     visuals = []
     visual_dir = Path("hybrid_images").resolve()
     visual_dir.mkdir(exist_ok=True)
