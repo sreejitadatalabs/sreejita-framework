@@ -32,29 +32,20 @@ def generate_report_payload(df, decision, policy):
     # MINIMUM VISUAL SET (ALWAYS)
     # -------------------------------------------------
     if "__always__" in visual_map:
-        for visual_fn in visual_map["__always__"]:
+        captions = [
+            "Sales trend over time (What happened)",
+            "Sales contribution by category (Where it happened)",
+            "Shipping cost vs sales relationship (Why it happened)",
+        ]
+
+        for visual_fn, caption in zip(visual_map["__always__"], captions):
             try:
                 img_path = visual_fn(df, visual_dir)
                 if img_path:
                     visuals.append({
                         "path": img_path,
-                        "caption": "Retail performance overview"
+                        "caption": caption
                     })
-            except Exception:
-                pass
-
-    # -------------------------------------------------
-    # INSIGHT-DRIVEN VISUALS (OPTIONAL)
-    # -------------------------------------------------
-    for ins in insights:
-        metric = ins.get("metric")
-        if metric and metric in visual_map:
-            try:
-                img_path = visual_map[metric](df, visual_dir)
-                visuals.append({
-                    "path": img_path,
-                    "caption": ins["title"]
-                })
             except Exception:
                 pass
 
