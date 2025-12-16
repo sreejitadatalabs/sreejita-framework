@@ -212,6 +212,25 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(PageBreak())
 
+    # =====================================================
+    # INSIGHT SUMMARY (EXECUTIVE)
+    # =====================================================
+    
+    warning_count = sum(1 for i in insights if i.get("level") == "WARNING")
+    risk_count = sum(1 for i in insights if i.get("level") == "RISK")
+
+    summary_lines = [
+        f"• {warning_count} WARNING(s) detected" if warning_count else "• No WARNINGS detected",
+        f"• {risk_count} RISK(s) detected" if risk_count else "• No CRITICAL RISKS detected",
+    ]
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("<b>Insight Summary</b>", styles["Heading3"]))
+
+    for line in summary_lines:
+        story.append(Paragraph(line, styles["BodyText"]))
+
+
     # ================= PAGE 4 =================
     story.append(Paragraph("Recommendations", title))
     story.append(Spacer(1, 12))
