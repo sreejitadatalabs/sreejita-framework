@@ -213,6 +213,10 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     evidence = build_evidence_snapshot(df, schema, config)
 
+    if v26_payload and v26_payload.get("visuals"):
+        for v in v26_payload["visuals"]:
+            evidence.append((v["path"], v["caption"]))
+
     missing_pct = (df.isna().sum() / len(df)) * 100
     dq_notes = [
         f"Missing values detected in {missing_pct[missing_pct > 0].count()} columns (highest: {missing_pct.max():.1f}%).",
