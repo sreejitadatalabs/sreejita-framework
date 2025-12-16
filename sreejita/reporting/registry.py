@@ -80,17 +80,25 @@ DOMAIN_REPORT_ENGINES.update({
 # -------------------------
 # Retail visuals (BASE)
 # -------------------------
+# =====================================================
+# VISUALS REGISTRY (v2.7.1)
+# =====================================================
+
 from sreejita.reporting.retail.visuals import (
     _shipping_cost_vs_sales_v26,
     _discount_distribution_v26,
+    _baseline_sales_distribution_v27,
 )
 
 DOMAIN_VISUALS = {
     "retail": {
         "shipping_cost_ratio": _shipping_cost_vs_sales_v26,
         "average_discount": _discount_distribution_v26,
-    }
+        "__baseline__": _baseline_sales_distribution_v27,
+    },
 }
+
+# ---- other domains already registered earlier ----
 
 # -------------------------
 # Customer visuals
