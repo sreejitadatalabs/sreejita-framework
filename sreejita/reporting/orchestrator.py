@@ -19,15 +19,13 @@ def generate_report_payload(df, decision, policy):
     # INSIGHTS (FIXED)
     # -------------------------
     insights_fn = engine.get("insights")
+    insights = []
+
     if insights_fn:
         try:
-            # ✅ PASS KPIs INTO INSIGHTS
-            insights = insights_fn(df, kpis)
+            insights = insights_fn(df, kpis) or []   # ✅ force list
         except TypeError:
-            # Backward compatibility (v1 insights)
-            insights = insights_fn(df)
-    else:
-        insights = []
+            insights = insights_fn(df) or []
 
     # -------------------------
     # RECOMMENDATIONS
