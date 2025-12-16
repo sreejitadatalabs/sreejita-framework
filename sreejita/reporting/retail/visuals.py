@@ -44,21 +44,18 @@ def baseline_sales_distribution(df, output_path: Path):
     plt.close()
     return output_path
 
-from pathlib import Path
-import matplotlib.pyplot as plt
-
-
-# =====================================================
-# PUBLIC VISUALS (CI SAFE)
-# =====================================================
-
-def sales_trend(df, output_path: Path,
-                date_col="order_date",
-                sales_col="sales"):
+def sales_trend(df, output_path: Path, sales_col="sales"):
     """
-    WHAT happened — Monthly sales trend
+    WHAT happened — Monthly sales trend (auto date detection)
     """
-    if date_col not in df.columns or sales_col not in df.columns:
+
+    # ---- auto-detect date column ----
+    date_candidates = [
+        "order_date", "Order Date", "date", "Date", "transaction_date"
+    ]
+    date_col = next((c for c in date_candidates if c in df.columns), None)
+
+    if not date_col or sales_col not in df.columns:
         return None
 
     data = df[[date_col, sales_col]].copy()
