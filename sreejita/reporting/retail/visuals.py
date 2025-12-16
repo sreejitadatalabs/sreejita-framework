@@ -1,123 +1,97 @@
-import numpy as np
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
 # =====================================================
-# Retail Threshold-Based Insights (v2.7)
+# WHAT happened — Sales Trend
 # =====================================================
+def sales_trend(df, output_path: Path, sales_col="sales"):
+    date_candidates = [
+        "order_date", "Order Date", "date", "Date", "transaction_date"
+    ]
+    date_col = next((c for c in date_candidates if c in df.columns), None)
 
-def generate_retail_insights(df, kpis):
-    insights = []
+    if not date_col or sales_col not in df.columns:
+        return None
 
-    # -------------------------
-    # 1. Shipping Cost Ratio
-    # -------------------------
-    shipping_ratio = kpis.get("shipping_cost_ratio")
+    data = df[[date_col, sales_col]].copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data.dropna(subset=[date_col])
 
-    if shipping_ratio is not None:
-        if shipping_ratio <= 0.09:
-            level = "GOOD"
-            msg = "Shipping costs are well controlled."
-        elif shipping_ratio <= 0.11:
-            level = "WARNING"
-            msg = "Shipping costs are slightly above the optimal range."
-        else:
-            level = "RISK"
-            msg = "Shipping costs are materially impacting margins."
+    if data.empty:
+        return None
 
-        insights.append({
-            "metric": "shipping_cost_ratio",
-            "level": level,
-            "value": round(shipping_ratio * 100, 2),
-            "title": "Shipping Cost Efficiency",
-            "what": f"Shipping costs account for {shipping_ratio:.1%} of total sales.",
-            "why": msg,
-            "so_what": "High shipping costs directly reduce profitability.",
-        })
+    monthly = (
+        data
+        .set_index(date_col)
+        .resample("M")[sales_col]
+        .sum()
+    )
 
-    # -------------------------
-    # 2. Profit Margin
-    # -------------------------
-    profit_margin = kpis.get("profit_margin")
+    plt.figure(figsize=(7, 4))
+    plt.plot(monthly.index, monthly.values, marker="o")
+    plt.title("Sales Trend Over Time")
+    plt.xlabel("Month")
+    plt.ylabel("Total Sales")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
 
-    if profit_margin is not None:
-        if profit_margin >= 0.12:
-            level = "GOOD"
-            msg = "Profit margins are healthy."
-        elif profit_margin >= 0.09:
-            level = "WARNING"
-            msg = "Profit margins are under mild pressure."
-        else:
-            level = "RISK"
-            msg = "Profit margins are critically low."
+    return output_path
 
-        insights.append({
-            "metric": "profit_margin",
-            "level": level,
-            "value": round(profit_margin * 100, 2),
-            "title": "Profitability Health",
-            "what": f"Overall profit margin is {profit_margin:.1%}.",
-            "why": msg,
-            "so_what": "Sustained margin pressure limits reinvestment capacity.",
-        })
 
-    # -------------------------
-    # 3. Average Order Value (AOV)
-    # -------------------------
-    aov = kpis.get("average_order_value")
-    target_aov = kpis.get("target_aov", aov)
+# =====================================================
+# WHERE it happened — Sales by Category
+# =====================================================
+def sales_by_category(df, output_path: Path,
+                      category_col="category", sales_col="sales"):
+    if category_col not in df.columns or sales_col not in df.columns:
+        return None
 
-    if aov and target_aov:
-        delta_pct = (aov - target_aov) / target_aov
+    agg = df.groupby(category_col)[sales_col].sum().sort_values(ascending=False)
 
-        if delta_pct >= 0:
-            level = "GOOD"
-            msg = "Average order value meets or exceeds expectations."
-        elif delta_pct >= -0.05:
-            level = "WARNING"
-            msg = "Average order value is slightly below target."
-        else:
-            level = "RISK"
-            msg = "Average order value is significantly below target."
+    plt.figure(figsize=(6, 4))
+    agg.plot(kind="bar")
+    plt.title("Sales by Category")
+    plt.ylabel("Sales")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
 
-        insights.append({
-            "metric": "average_order_value",
-            "level": level,
-            "value": round(aov, 2),
-            "title": "Order Value Performance",
-            "what": f"Average order value is ${aov:,.2f}.",
-            "why": msg,
-            "so_what": "Lower order values reduce revenue leverage per transaction.",
-        })
+    return output_path
 
-    # -------------------------
-    # 4. Category Concentration
-    # -------------------------
-    if "category" in df.columns and "sales" in df.columns:
-        cat_sales = (
-            df.groupby("category")["sales"].sum()
-            .sort_values(ascending=False)
-        )
 
-        top_share = cat_sales.iloc[0] / cat_sales.sum()
+# =====================================================
+# WHY it happened — Shipping Cost vs Sales
+# =====================================================
+def shipping_cost_vs_sales(df, output_path: Path):
+    if not {"sales", "shipping_cost"}.issubset(df.columns):
+        return None
 
-        if top_share <= 0.40:
-            level = "GOOD"
-            msg = "Revenue is well diversified across categories."
-        elif top_share <= 0.55:
-            level = "WARNING"
-            msg = "Revenue shows moderate concentration risk."
-        else:
-            level = "RISK"
-            msg = "Revenue is highly dependent on a single category."
+    plt.figure(figsize=(6, 4))
+    plt.scatter(df["sales"], df["shipping_cost"], alpha=0.4)
+    plt.xlabel("Sales")
+    plt.ylabel("Shipping Cost")
+    plt.title("Shipping Cost vs Sales")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
 
-        insights.append({
-            "metric": "category_concentration",
-            "level": level,
-            "value": round(top_share * 100, 2),
-            "title": "Category Revenue Concentration",
-            "what": f"Top category contributes {top_share:.1%} of total sales.",
-            "why": msg,
-            "so_what": "High concentration increases exposure to category-specific shocks.",
-        })
+    return output_path
 
-    return insights
+
+# =====================================================
+# INTERNAL REGISTRY HOOKS (⚠️ REQUIRED)
+# =====================================================
+def _sales_trend_v27(df, output_dir: Path):
+    return sales_trend(df, output_dir / "sales_trend.png")
+
+
+def _sales_by_category_v27(df, output_dir: Path):
+    return sales_by_category(df, output_dir / "sales_by_category.png")
+
+
+def _shipping_cost_vs_sales_v27(df, output_dir: Path):
+    return shipping_cost_vs_sales(df, output_dir / "shipping_cost_vs_sales.png")
