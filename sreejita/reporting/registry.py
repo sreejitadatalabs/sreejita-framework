@@ -1,52 +1,53 @@
 # =====================================================
-# REPORT ENGINES REGISTRY (v2.7)
+# REPORT ENGINE REGISTRY — v2.7
 # =====================================================
 
 # -------------------------
-# Retail (BASE — MUST BE FIRST)
+# RETAIL (v2.7 — THRESHOLD-BASED)
 # -------------------------
 from sreejita.reporting.retail.kpis import compute_retail_kpis
 from sreejita.reporting.retail.insights import generate_retail_insights
 from sreejita.reporting.retail.recommendations import generate_retail_recommendations
 
-DOMAIN_REPORT_ENGINES = {
-    "retail": {
-        "kpis": compute_retail_kpis,
-        "insights": generate_retail_insights,
-        "recommendations": generate_retail_recommendations,
-    }
-}
-
 # -------------------------
-# Customer
+# CUSTOMER
 # -------------------------
 from sreejita.reporting.customer.kpis import compute_customer_kpis
 from sreejita.reporting.customer.insights import generate_customer_insights
 from sreejita.reporting.customer.recommendations import generate_customer_recommendations
 
 # -------------------------
-# Finance
+# FINANCE
 # -------------------------
 from sreejita.reporting.finance.kpis import compute_finance_kpis
 from sreejita.reporting.finance.insights import generate_finance_insights
 from sreejita.reporting.finance.recommendations import generate_finance_recommendations
 
 # -------------------------
-# Ops
+# OPS
 # -------------------------
 from sreejita.reporting.ops.kpis import compute_ops_kpis
 from sreejita.reporting.ops.insights import generate_ops_insights
 from sreejita.reporting.ops.recommendations import generate_ops_recommendations
 
 # -------------------------
-# Healthcare
+# HEALTHCARE
 # -------------------------
 from sreejita.reporting.healthcare.kpis import compute_healthcare_kpis
 from sreejita.reporting.healthcare.insights import generate_healthcare_insights
 from sreejita.reporting.healthcare.recommendations import generate_healthcare_recommendations
 
 
-DOMAIN_REPORT_ENGINES.update({
+# =====================================================
+# DOMAIN → ENGINE MAP
+# =====================================================
+
+DOMAIN_REPORT_ENGINES = {
+    "retail": {
+        "kpis": compute_retail_kpis,
+        "insights": generate_retail_insights,  # ✅ THRESHOLD-BASED
+        "recommendations": generate_retail_recommendations,
+    },
     "customer": {
         "kpis": compute_customer_kpis,
         "insights": generate_customer_insights,
@@ -67,41 +68,23 @@ DOMAIN_REPORT_ENGINES.update({
         "insights": generate_healthcare_insights,
         "recommendations": generate_healthcare_recommendations,
     },
-})
+}
 
 # =====================================================
-# VISUALS REGISTRY (v2.7 — MINIMUM VISUAL SET)
+# VISUAL REGISTRY (unchanged)
 # =====================================================
-
 from sreejita.reporting.retail.visuals import (
     _sales_trend_v27,
     _sales_by_category_v27,
     _shipping_cost_vs_sales_v27,
 )
 
-from sreejita.reporting.customer.visuals import _churn_proxy_distribution_v26
-from sreejita.reporting.finance.visuals import _expense_vs_revenue_v26
-from sreejita.reporting.ops.visuals import _sla_breach_rate_plot_v26
-from sreejita.reporting.healthcare.visuals import _readmission_rate_plot_v26
-
 DOMAIN_VISUALS = {
     "retail": {
         "__always__": [
-            _sales_trend_v27,          # WHAT happened
-            _sales_by_category_v27,    # WHERE happened
-            _shipping_cost_vs_sales_v27,  # WHY happened
+            _sales_trend_v27,           # WHAT happened
+            _sales_by_category_v27,     # WHERE happened
+            _shipping_cost_vs_sales_v27 # WHY happened
         ]
-    },
-    "customer": {
-        "churn_proxy_rate": _churn_proxy_distribution_v26,
-    },
-    "finance": {
-        "expense_ratio": _expense_vs_revenue_v26,
-    },
-    "ops": {
-        "sla_breach_rate": _sla_breach_rate_plot_v26,
-    },
-    "healthcare": {
-        "readmission_rate": _readmission_rate_plot_v26,
-    },
+    }
 }
