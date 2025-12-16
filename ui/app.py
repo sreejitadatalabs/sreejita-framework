@@ -1,5 +1,5 @@
 # -------------------------------------------------
-# Streamlit App — Sreejita Framework v1.9
+# Streamlit App — Sreejita Framework (Hybrid Demo)
 # -------------------------------------------------
 
 import sys
@@ -7,11 +7,9 @@ from pathlib import Path
 import os
 import uuid
 import streamlit as st
-from datetime import datetime
 
 # -------------------------------------------------
 # FIX: Ensure project root is in PYTHONPATH
-# (REQUIRED for Streamlit Cloud)
 # -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -37,8 +35,8 @@ st.set_page_config(
 # -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
-st.markdown("**Version:** v1.9 (Demo)")
-st.info("Demo version — optimized for small to medium datasets.")
+st.markdown("**Version:** UI v1.9 / Engine v2.4")
+st.info("Demo build — v1 report stability with v2 intelligence (shadow mode).")
 st.divider()
 
 
@@ -58,14 +56,14 @@ if uploaded_file:
 
 
 # -------------------------------------------------
-# 2️⃣ Configuration (Light / Placeholder)
+# 2️⃣ Configuration
 # -------------------------------------------------
 st.subheader("2️⃣ Configuration")
 
 domain = st.selectbox(
     "Select domain",
     options=["Auto", "Retail"],
-    help="Domain intelligence activates in v2.0"
+    help="Auto domain detection powered by v2.4 engine"
 )
 
 report_type = st.selectbox(
@@ -90,7 +88,7 @@ if run_clicked:
     else:
         with st.spinner("Running analysis..."):
             try:
-                # Ensure temp directory exists
+                # Temp directory
                 temp_dir = Path("ui/temp")
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,7 +99,7 @@ if run_clicked:
                 with open(input_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                # Call backend adapter
+                # Run backend
                 result = run_analysis_from_ui(
                     input_path=str(input_path),
                     domain=domain
@@ -132,10 +130,22 @@ if result:
                 mime="application/pdf"
             )
 
-    # Run metadata (demo-friendly)
+    # -----------------------------
+    # v2 Intelligence Preview
+    # -----------------------------
+    with st.expander("🧠 Decision Intelligence (v2.4 preview)"):
+        st.json({
+            "selected_domain": result.get("domain"),
+            "confidence": result.get("domain_confidence"),
+            "rules_applied": result.get("decision_rules"),
+            "fingerprint": result.get("decision_fingerprint"),
+        })
+
+    # -----------------------------
+    # Run metadata
+    # -----------------------------
     with st.expander("Run details"):
         st.json({
-            "domain": result.get("domain"),
             "generated_at": result.get("generated_at"),
             "version": result.get("version")
         })
