@@ -174,7 +174,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Paragraph("Key Insights (Threshold-Based)", title))
     story.append(Spacer(1, 12))
 
-    if insights:
+    if insights and isinstance(insights, list):
+
         for ins in insights:
             level = ins.get("level", "INFO")
             title_txt = ins.get("title", "Insight")
