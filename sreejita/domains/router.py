@@ -4,6 +4,7 @@ from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
 
 from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
+from sreejita.core.fingerprint import dataframe_fingerprint
 
 # ------------------------
 # Domain detectors
@@ -36,20 +37,21 @@ def register_observer(observer: DecisionObserver):
 
 
 # ------------------------
-# Domain decision (v2.3)
+# Domain decision (v2.4)
 # ------------------------
 
 def decide_domain(df) -> DecisionExplanation:
     results = []
 
+    # 1️⃣ Run all detectors
     for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
         results.append(result)
 
-    # Sort by confidence
+    # 2️⃣ Sort by confidence
     results.sort(key=lambda r: r.confidence, reverse=True)
 
-    # No valid domain detected
+    # 3️⃣ Build decision object
     if not results or results[0].confidence <= 0:
         decision = DecisionExplanation(
             decision_type="domain_detection",
@@ -77,9 +79,10 @@ def decide_domain(df) -> DecisionExplanation:
             ]
         )
 
-    # ------------------------
-    # OBSERVABILITY HOOK
-    # ------------------------
+    # 4️⃣ Attach fingerprint (v2.4 replay guarantee)
+    decision.fingerprint = dataframe_fingerprint(df)
+
+    # 5️⃣ Observability hooks
     for observer in _OBSERVERS:
         observer.record(decision)
 
