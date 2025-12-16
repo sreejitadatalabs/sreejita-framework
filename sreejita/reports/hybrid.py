@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from sreejita.reporting.formatters import fmt_currency, fmt_percent
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -194,7 +195,21 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Paragraph(f"Policy Status: {policy.status}", styles["BodyText"]))
     story.append(Spacer(1, 12))
 
-    kpi_table = Table(list(kpis.items()), colWidths=[7 * cm, 7 * cm])
+    formatted_kpis = []
+
+    for k, v in kpis.items():
+        key = k.replace("_", " ").title()
+
+        if "ratio" in k or "margin" in k:
+            val = fmt_percent(v)
+        elif isinstance(v, (int, float)):
+            val = fmt_currency(v)
+        else:
+            val = str(v)
+
+        formatted_kpis.append([key, val])
+
+    kpi_table = Table(formatted_kpis, colWidths=[7 * cm, 7 * cm])
     kpi_table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, "#999999")]))
     story.append(kpi_table)
     story.append(PageBreak())
