@@ -266,9 +266,52 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
 
     # ---------------- PAGE 3 ----------------
-    story.append(Paragraph("Key Insights", title))
-    render_insight_cards(story, insights[:5], styles)
-    story.append(PageBreak())
+    # =====================================================
+# PAGE 3 — THRESHOLD-BASED KEY INSIGHTS
+# =====================================================
+story.append(Paragraph("Key Insights (Threshold-Based)", styles["Heading2"]))
+story.append(Spacer(1, 12))
+
+if insights:
+    for ins in insights:
+        level = ins.get("level", "INFO")
+        title = ins.get("title", "Insight")
+        value = ins.get("value", "")
+        what = ins.get("what", "")
+        why = ins.get("why", "")
+        so_what = ins.get("so_what", "")
+
+        # Color by severity
+        if level == "RISK":
+            color = "red"
+            icon = "🔴"
+        elif level == "WARNING":
+            color = "orange"
+            icon = "⚠️"
+        else:
+            color = "green"
+            icon = "🟢"
+
+        story.append(
+            Paragraph(
+                f"<b>{icon} [{level}] {title}</b>"
+                + (f" — {value}" if value != "" else ""),
+                styles["BodyText"],
+            )
+        )
+        story.append(Paragraph(f"<i>What we observed:</i> {what}", styles["BodyText"]))
+        story.append(Paragraph(f"<i>Why this matters:</i> {why}", styles["BodyText"]))
+        story.append(
+            Paragraph(f"<i>Business implication:</i> {so_what}", styles["BodyText"])
+        )
+        story.append(Spacer(1, 14))
+else:
+    story.append(
+        Paragraph(
+            "No material operational risks detected based on defined thresholds.",
+            styles["BodyText"],
+        )
+    )
 
     # ---------------- PAGE 4 ----------------
     story.append(Paragraph("Recommendations", title))
