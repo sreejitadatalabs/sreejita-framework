@@ -248,7 +248,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # ---------------- PAGE 2 ----------------
-    s# ---------------- PAGE 2 ----------------
     story.append(Paragraph("Evidence Snapshot", title))
 
     if visuals:
