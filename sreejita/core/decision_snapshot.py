@@ -9,4 +9,5 @@ def decision_to_dict(decision: DecisionExplanation) -> dict:
         "signals": decision.signals,
         "rules_applied": decision.rules_applied,
         "timestamp": decision.timestamp,
+        "fingerprint": getattr(decision, "fingerprint", None),
     }
