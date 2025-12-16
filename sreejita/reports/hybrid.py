@@ -85,7 +85,7 @@ def load_dataframe(path: Path):
 
 
 # =====================================================
-# MAIN PIPELINE — v2.7
+# MAIN PIPELINE — v2.8.1
 # =====================================================
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
@@ -120,12 +120,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if payload:
         kpis = payload["kpis"]
         insights = payload["insights"]
-        recs = payload["recommendations"]
+        recommendations = payload["recommendations"]
         visuals = [(v["path"], v["caption"]) for v in payload.get("visuals", [])]
     else:
         kpis = compute_kpis(df, sales_col, profit_col)
         insights = [{"title": t, "level": "INFO"} for t in correlation_insights(df, sales_col)]
-        recs = generate_recommendations(df, sales_col, profit_col)
+        recommendations = generate_recommendations(df, sales_col, profit_col)
         visuals = []
 
     # -------------------------
@@ -175,7 +175,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Spacer(1, 12))
 
     if insights and isinstance(insights, list):
-
         for ins in insights:
             level = ins.get("level", "INFO")
             title_txt = ins.get("title", "Insight")
@@ -189,7 +188,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             story.append(
                 Paragraph(
                     f"<b>{icon} [{level}] {title_txt}</b>"
-                    + (f" — {value}" if value != "" else ""),
+                    + (f" — {value}" if value else ""),
                     styles["BodyText"],
                 )
             )
@@ -211,25 +210,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         )
 
     story.append(PageBreak())
-
-    # =====================================================
-    # INSIGHT SUMMARY (EXECUTIVE)
-    # =====================================================
-    
-    warning_count = sum(1 for i in insights if i.get("level") == "WARNING")
-    risk_count = sum(1 for i in insights if i.get("level") == "RISK")
-
-    summary_lines = [
-        f"• {warning_count} WARNING(s) detected" if warning_count else "• No WARNINGS detected",
-        f"• {risk_count} RISK(s) detected" if risk_count else "• No CRITICAL RISKS detected",
-    ]
-
-    story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Insight Summary</b>", styles["Heading3"]))
-
-    for line in summary_lines:
-        story.append(Paragraph(line, styles["BodyText"]))
-
 
     # ================= PAGE 4 =================
     story.append(Paragraph("Recommendations", styles["Heading2"]))
