@@ -52,25 +52,39 @@ import matplotlib.pyplot as plt
 # PUBLIC VISUALS (CI SAFE)
 # =====================================================
 
-def sales_trend(df, output_path: Path, date_col="order_date", sales_col="sales"):
+def sales_trend(df, output_path: Path,
+                date_col="order_date",
+                sales_col="sales"):
     """
-    WHAT happened — sales trend over time
+    WHAT happened — Monthly sales trend
     """
-    if date_col not in df.columns:
+    if date_col not in df.columns or sales_col not in df.columns:
         return None
 
-    data = df.copy()
+    data = df[[date_col, sales_col]].copy()
     data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
-    monthly = data.groupby(data[date_col].dt.to_period("M"))[sales_col].sum()
+    data = data.dropna(subset=[date_col])
 
-    plt.figure(figsize=(6, 4))
-    monthly.plot()
+    if data.empty:
+        return None
+
+    monthly = (
+        data
+        .set_index(date_col)
+        .resample("M")[sales_col]
+        .sum()
+    )
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(monthly.index, monthly.values, marker="o")
     plt.title("Sales Trend Over Time")
-    plt.ylabel("Sales")
     plt.xlabel("Month")
+    plt.ylabel("Total Sales")
+    plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
+
     return output_path
 
 
