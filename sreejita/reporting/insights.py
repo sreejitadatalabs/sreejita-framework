@@ -1,18 +1,28 @@
-def retail_insights(df, kpis):
+def generate_retail_insights(df, kpis):
     insights = []
 
-    if kpis["shipping_cost_ratio"] > 0.15:
+    if "shipping_cost_ratio" in kpis and kpis["shipping_cost_ratio"] > 0.15:
         insights.append({
             "title": "Shipping costs are eroding margins",
+            "severity": "high",
             "evidence": f"Shipping cost ratio is {kpis['shipping_cost_ratio']:.2%}",
-            "severity": "high"
+            "metric": "shipping_cost_ratio"
         })
 
-    if kpis["discount_rate"] > 0.2:
+    if "average_discount" in kpis and kpis["average_discount"] > 0.20:
         insights.append({
             "title": "High discounting may impact profitability",
-            "evidence": f"Average discount rate is {kpis['discount_rate']:.2%}",
-            "severity": "medium"
+            "severity": "medium",
+            "evidence": f"Average discount rate is {kpis['average_discount']:.2%}",
+            "metric": "average_discount"
+        })
+
+    if not insights:
+        insights.append({
+            "title": "No critical operational risks detected",
+            "severity": "low",
+            "evidence": "All monitored KPIs are within expected ranges",
+            "metric": "overall_health"
         })
 
     return insights
