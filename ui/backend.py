@@ -37,8 +37,8 @@ def run_analysis_from_ui(
         decision = decide_domain(df)
 
     except Exception as e:
-        # v2 must NEVER break v1 demo
-        decision = None
+        raise RuntimeError("v2 decision engine failed") from e
+
 
     # -----------------------------
     # v1.9 Report Generation
