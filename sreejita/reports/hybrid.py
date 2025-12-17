@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from sreejita.reporting.formatters import fmt_currency, fmt_percent
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -17,9 +18,8 @@ from reportlab.platypus import (
     Image,
 )
 
-from sreejita.reporting.formatters import fmt_currency, fmt_percent
 from sreejita.reporting.orchestrator import generate_report_payload
-from sreejita.domains.router import decide_domain
+from sreejita.domains.router import decide_domain, apply_domain
 from sreejita.policy.engine import PolicyEngine
 from sreejita.core.cleaner import clean_dataframe
 
@@ -32,33 +32,23 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     risks = sum(1 for i in insights if i.get("level") == "RISK")
     total_sales = kpis.get("total_sales", 0)
 
-    # ---- Compute Quick Wins range ONCE ----
-    low, high = 0.0, 0.0
+    low, high = 0, 0
     for r in recommendations:
         impact = r.get("expected_impact", "")
-        if not isinstance(impact, str):
-            continue
-
-        cleaned = (
-            impact.replace("$", "")
-            .replace(",", "")
-            .replace("–", "-")
-            .replace("—", "-")
-        )
-
-        nums = []
-        for token in cleaned.split():
-            try:
-                nums.append(float(token))
-            except ValueError:
-                continue
-
-        if len(nums) == 1:
-            low += nums[0]
-            high += nums[0]
-        elif len(nums) >= 2:
-            low += nums[0]
-            high += nums[1]
+        if "$" in impact:
+            nums = (
+                impact.replace("$", "")
+                .replace(",", "")
+                .replace("–", "-")
+                .split()
+            )
+            vals = [float(v) for v in nums if v.replace(".", "").isdigit()]
+            if len(vals) == 1:
+                low += vals[0]
+                high += vals[0]
+            elif len(vals) >= 2:
+                low += vals[0]
+                high += vals[1]
 
     box = ParagraphStyle(
         "exec_box",
@@ -69,27 +59,21 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     )
 
     story.append(Paragraph("<b>EXECUTIVE BRIEF (1-MINUTE READ)</b>", box))
-    story.append(Paragraph(f"💰 Revenue Status: {fmt_currency(total_sales)}", box))
-    story.append(
-        Paragraph(
-            f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)",
-            box,
-        )
-    )
+    story.append(Paragraph(f"💰 Revenue Status: ${total_sales:,.0f}", box))
+    story.append(Paragraph(f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)", box))
 
     if high > 0:
-        if abs(low - high) < 1:
+        if low == high:
             story.append(
                 Paragraph(
-                    f"💡 Available Quick Wins: {fmt_currency(high)} annually",
+                    f"💡 Available Quick Wins: ${high:,.0f} annually",
                     box,
                 )
             )
         else:
             story.append(
                 Paragraph(
-                    f"💡 Available Quick Wins: "
-                    f"{fmt_currency(low)} – {fmt_currency(high)} annually",
+                    f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
                     box,
                 )
             )
@@ -106,13 +90,13 @@ def render_data_quality_scorecard(story, styles, df):
     total_cells = df.shape[0] * df.shape[1]
     missing_cells = df.isna().sum().sum()
 
-    completeness_pct = (
-        (1 - missing_cells / total_cells) * 100 if total_cells else 100.0
-    )
+    completeness = 1 - (missing_cells / total_cells) if total_cells else 1
+    completeness_pct = completeness * 100
 
     accuracy_pct = 99.5
     freshness_pct = 99.0
     validity_pct = 100.0
+
     overall = (completeness_pct + accuracy_pct + freshness_pct + validity_pct) / 4
 
     story.append(Paragraph("Data Quality Assessment", styles["Heading2"]))
@@ -144,8 +128,7 @@ def render_report_metadata(story, styles, df, input_path):
     story.append(Paragraph(f"Records Analyzed: {len(df):,}", styles["BodyText"]))
     story.append(
         Paragraph(
-            f"Generated At: "
-            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            f"Generated At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
             styles["BodyText"],
         )
     )
@@ -160,9 +143,7 @@ def _header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawString(
-        cm,
-        A4[1] - 1 * cm,
-        "Sreejita Framework — Hybrid Decision Intelligence Report",
+        cm, A4[1] - 1 * cm, "Sreejita Framework — Hybrid Decision Intelligence Report"
     )
     canvas.setFont("Helvetica-Oblique", 8)
     canvas.drawString(
@@ -182,19 +163,11 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
-        output_path = out_dir / (
-            f"Hybrid_Report_v3_2_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
-        )
+        output_path = out_dir / f"Hybrid_Report_v3_2_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # ---- Load data (CSV + Excel safe) ----
-    if input_path.suffix.lower() in [".xls", ".xlsx"]:
-        df_raw = pd.read_excel(input_path)
-    else:
-        df_raw = pd.read_csv(input_path, encoding="latin1")
-
+    df_raw = pd.read_csv(input_path, encoding="latin1")
     df = clean_dataframe(df_raw)["df"]
 
-    # ---- Domain & Policy ----
     decision = decide_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
 
@@ -225,34 +198,36 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # ================= PAGE 1 =================
     story.append(Paragraph("Executive Snapshot", title))
     story.append(Spacer(1, 12))
-    story.append(
-        Paragraph(f"Detected Domain: {decision.selected_domain}", styles["BodyText"])
-    )
-    story.append(
-        Paragraph(f"Confidence: {decision.confidence:.2f}", styles["BodyText"])
-    )
+    story.append(Paragraph(f"Detected Domain: {decision.selected_domain}", styles["BodyText"]))
+    story.append(Paragraph(f"Confidence: {decision.confidence:.2f}", styles["BodyText"]))
     story.append(Paragraph(f"Policy Status: {policy.status}", styles["BodyText"]))
     story.append(Spacer(1, 12))
 
     formatted_kpis = []
-    for k, v in kpis.items():
-        label = k.replace("_", " ").title()
-        kl = k.lower()
 
-        if "ratio" in kl or "margin" in kl or "discount" in kl:
+    for k, v in kpis.items():
+        key = k.replace("_", " ").title()
+
+        key_lower = k.lower()
+
+        if "ratio" in key_lower or "margin" in key_lower or "discount" in key_lower:
             val = fmt_percent(v)
-        elif "count" in kl or "orders" in kl or "records" in kl:
+
+        elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
             val = f"{int(v):,}"
+
         elif isinstance(v, (int, float)):
             val = fmt_currency(v)
+
         else:
             val = str(v)
 
-        formatted_kpis.append([label, val])
 
-    table = Table(formatted_kpis, colWidths=[7 * cm, 7 * cm])
-    table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, "#999999")]))
-    story.append(table)
+        formatted_kpis.append([key, val])
+
+    kpi_table = Table(formatted_kpis, colWidths=[7 * cm, 7 * cm])
+    kpi_table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, "#999999")]))
+    story.append(kpi_table)
     story.append(PageBreak())
 
     # ================= PAGE 2 =================
@@ -281,10 +256,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for r in recommendations:
         for k, v in r.items():
             story.append(
-                Paragraph(
-                    f"<b>{k.replace('_',' ').title()}:</b> {v}",
-                    styles["BodyText"],
-                )
+                Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", styles["BodyText"])
             )
         story.append(Spacer(1, 14))
 
