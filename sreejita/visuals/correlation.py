@@ -1,13 +1,23 @@
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
-from .formatters import thousands_formatter
 
-def shipping_vs_sales(df, sales_col, ship_col, category_col, out: Path):
+def _k_formatter(x, _):
+    return f"${x/1_000:.0f}K"
+
+def shipping_vs_sales_visual(df, output_dir: Path):
+    sales_col = next((c for c in df.columns if "sales" in c.lower()), None)
+    ship_col = next((c for c in df.columns if "ship" in c.lower()), None)
+    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
+
+    if not sales_col or not ship_col or not cat_col:
+        return None
+
+    out = output_dir / "shipping_vs_sales.png"
+
     plt.figure(figsize=(7, 4))
-
-    for cat in df[category_col].unique():
-        subset = df[df[category_col] == cat]
+    for cat in df[cat_col].dropna().unique():
+        subset = df[df[cat_col] == cat]
         plt.scatter(
             subset[sales_col],
             subset[ship_col],
@@ -16,18 +26,20 @@ def shipping_vs_sales(df, sales_col, ship_col, category_col, out: Path):
         )
 
     plt.title(
-        "Shipping Cost Increases with Sales Volume (Category-Specific Patterns)",
-        fontsize=11,
+        "Shipping Cost Rises with Sales Volume (Category Patterns)",
         weight="bold"
     )
     plt.xlabel("Sales")
     plt.ylabel("Shipping Cost")
 
     ax = plt.gca()
-    ax.xaxis.set_major_formatter(FuncFormatter(thousands_formatter))
-    ax.yaxis.set_major_formatter(FuncFormatter(thousands_formatter))
-
+    ax.ticklabel_format(style="plain", axis="both")
+    ax.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
     plt.legend()
+
     plt.tight_layout()
     plt.savefig(out, dpi=120)
     plt.close()
+
+    return out
