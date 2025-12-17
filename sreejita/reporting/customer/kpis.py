@@ -2,29 +2,17 @@
 Customer Domain KPIs
 --------------------
 Customer-specific KPI calculations.
-No dependency on core KPI helpers (Retail-safe).
+Fully self-contained (Retail-safe).
 """
 
 from typing import Dict, Any
 import pandas as pd
 
-from sreejita.core.validator import require_columns
 from sreejita.reporting.formatter import format_kpi_value
 
 
 # ---------------------------------------------------------------------
-# Input Schema Contract
-# ---------------------------------------------------------------------
-
-REQUIRED_COLUMNS = [
-    "customer_id",
-    "transaction_date",
-    "revenue",
-]
-
-
-# ---------------------------------------------------------------------
-# Local Safe Helpers (Domain-Scoped)
+# Local Helpers
 # ---------------------------------------------------------------------
 
 def _safe_divide(numerator: float, denominator: float) -> float | None:
@@ -39,6 +27,12 @@ def _percentage(value: float | None) -> float | None:
     return value * 100
 
 
+def _validate_columns(df: pd.DataFrame, required: list[str]):
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+
 # ---------------------------------------------------------------------
 # KPI Computation
 # ---------------------------------------------------------------------
@@ -48,16 +42,17 @@ def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     Compute all Customer KPIs.
     """
 
-    require_columns(df, REQUIRED_COLUMNS)
+    _validate_columns(
+        df,
+        ["customer_id", "transaction_date", "revenue"]
+    )
 
     df = df.copy()
     df["transaction_date"] = pd.to_datetime(df["transaction_date"])
 
     total_customers = df["customer_id"].nunique()
 
-    active_customers = (
-        df[df["revenue"] > 0]["customer_id"].nunique()
-    )
+    active_customers = df[df["revenue"] > 0]["customer_id"].nunique()
 
     repeat_customers = (
         df.groupby("customer_id")
@@ -75,10 +70,7 @@ def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
         total_customers
     )
 
-    purchase_frequency = _safe_divide(
-        len(df),
-        total_customers
-    )
+    purchase_frequency = _safe_divide(len(df), total_customers)
 
     return {
         "total_customers": _kpi("Total Customers", total_customers),
