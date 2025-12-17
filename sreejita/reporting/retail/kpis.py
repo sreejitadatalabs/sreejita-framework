@@ -1,9 +1,10 @@
 import pandas as pd
+from typing import Optional
 
 
-def _auto_detect_sales_column(df: pd.DataFrame) -> str | None:
+def _auto_detect_sales_column(df: pd.DataFrame) -> Optional[str]:
     """
-    Heuristic-based sales column detection (deterministic).
+    Deterministic heuristic to detect a sales/revenue column.
     """
     candidates = [
         "sales",
