@@ -105,7 +105,7 @@ def run(
     # -------------------------------
     # INTELLIGENCE PAYLOAD
     # -------------------------------
-    payload = generate_report_payload(df, decision, policy)
+    payload = generate_report_payload(df, decision, policy, config)
 
     kpis = payload.get("kpis", {})
     insights = payload.get("insights", [])
