@@ -73,18 +73,16 @@ DOMAIN_REPORT_ENGINES = {
 # =====================================================
 # VISUAL REGISTRY (unchanged)
 # =====================================================
-from sreejita.reporting.retail.visuals import (
-    _sales_trend_v27,
-    _sales_by_category_v27,
-    _shipping_cost_vs_sales_v27,
-)
+from sreejita.visuals.time_series import sales_trend_visual
+from sreejita.visuals.categorical import category_sales_visual
+from sreejita.visuals.correlation import shipping_vs_sales_visual
 
 DOMAIN_VISUALS = {
     "retail": {
         "__always__": [
-            _sales_trend_v27,           # WHAT happened
-            _sales_by_category_v27,     # WHERE happened
-            _shipping_cost_vs_sales_v27 # WHY happened
+            sales_trend_visual,
+            category_sales_visual,
+            shipping_vs_sales_visual,
         ]
     }
 }
