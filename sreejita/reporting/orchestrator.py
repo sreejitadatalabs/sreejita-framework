@@ -11,19 +11,19 @@ def generate_report_payload(df, decision, policy):
         return None
 
     # -------------------------
-    # KPIs (MANDATORY)
+    # KPIs
     # -------------------------
     kpis = engine["kpis"](df)
 
     # -------------------------
-    # INSIGHTS (FIXED)
+    # INSIGHTS
     # -------------------------
     insights_fn = engine.get("insights")
     insights = []
 
     if insights_fn:
         try:
-            insights = insights_fn(df, kpis) or []   # ✅ force list
+            insights = insights_fn(df, kpis) or []
         except TypeError:
             insights = insights_fn(df) or []
 
@@ -40,7 +40,7 @@ def generate_report_payload(df, decision, policy):
         recommendations = []
 
     # -------------------------
-    # VISUALS
+    # VISUALS (ADAPTER SAFE)
     # -------------------------
     visuals = []
     visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
@@ -49,18 +49,25 @@ def generate_report_payload(df, decision, policy):
     output_dir.mkdir(exist_ok=True)
 
     for hook in visual_hooks:
-        path = hook(df, output_dir)
+        try:
+            path = hook(df, output_dir)
+        except Exception:
+            # HARD SAFETY: visuals must never break report
+            continue
+
         if path:
-            visuals.append({
-                "path": path,
-                "caption": hook.__doc__ or ""
-            })
+            visuals.append(
+                {
+                    "path": path,
+                    "caption": hook.__doc__ or "",
+                }
+            )
 
     return {
         "generated_at": datetime.utcnow().isoformat(),
         "domain": domain,
         "kpis": kpis,
-        "insights": insights,          # 🔥 NOW POPULATED
+        "insights": insights,
         "recommendations": recommendations,
         "visuals": visuals,
         "policy": policy.status,
