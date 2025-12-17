@@ -1,9 +1,9 @@
 # =====================================================
-# REPORT ENGINE REGISTRY — v2.7
+# REPORT ENGINE REGISTRY — v2.8.2
 # =====================================================
 
 # -------------------------
-# RETAIL (v2.7 — THRESHOLD-BASED)
+# RETAIL (v2.8 — THRESHOLD-BASED)
 # -------------------------
 from sreejita.reporting.retail.kpis import compute_retail_kpis
 from sreejita.reporting.retail.insights import generate_retail_insights
@@ -45,7 +45,7 @@ from sreejita.reporting.healthcare.recommendations import generate_healthcare_re
 DOMAIN_REPORT_ENGINES = {
     "retail": {
         "kpis": compute_retail_kpis,
-        "insights": generate_retail_insights,  # ✅ THRESHOLD-BASED
+        "insights": generate_retail_insights,
         "recommendations": generate_retail_recommendations,
     },
     "customer": {
@@ -71,20 +71,21 @@ DOMAIN_REPORT_ENGINES = {
 }
 
 # =====================================================
-# VISUAL REGISTRY (unchanged)
+# VISUAL REGISTRY — v2.8.2 (POLISHED)
 # =====================================================
-from sreejita.reporting.retail.visuals import (
-    _sales_trend_v27,
-    _sales_by_category_v27,
-    _shipping_cost_vs_sales_v27,
-)
+
+from sreejita.visuals.time_series import plot_monthly
+from sreejita.visuals.categorical import bar
+from sreejita.visuals.correlation import heatmap, shipping_cost_vs_sales
+
 
 DOMAIN_VISUALS = {
     "retail": {
         "__always__": [
-            _sales_trend_v27,           # WHAT happened
-            _sales_by_category_v27,     # WHERE happened
-            _shipping_cost_vs_sales_v27 # WHY happened
+            plot_monthly,             # WHAT happened (trend)
+            bar,                      # WHERE happened (category)
+            shipping_cost_vs_sales,   # WHY happened (cost vs value)
+            heatmap,                  # RELATIONSHIPS (correlation)
         ]
     }
 }
