@@ -39,10 +39,10 @@ def plot_monthly(df, date_col, value_col, out):
     )
 
     # ---------- POLISH ----------
-    trend = "Upward" if monthly.values[-1] > monthly.values[0] else "Flat"
+    trend = "upward" if monthly.values[-1] > monthly.values[0] else "flat or declining"
 
     ax.set_title(
-    f"Sales Trend is {trend} Over the Observed Period"
+    f"Sales show a {trend} trend over the observed period"
     )
 
     ax.set_ylabel("Revenue")
