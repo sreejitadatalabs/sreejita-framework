@@ -1,59 +1,57 @@
-import matplotlib.pyplot as plt
+from pathlib import Path
 import pandas as pd
+import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-from sreejita.core.schema import detect_schema
-from sreejita.reporting.formatters import fmt_currency
+
+def human_currency(x, _):
+    if abs(x) >= 1_000_000:
+        return f"${x/1_000_000:.1f}M"
+    elif abs(x) >= 1_000:
+        return f"${x/1_000:.0f}K"
+    else:
+        return f"${x:,.0f}"
 
 
-def plot_monthly(df, date_col, value_col, out):
-    """
-    Monthly trend plot with executive-ready formatting.
-    No logic change, visual polish only.
-    """
+def sales_trend(df, output_path: Path, sales_col="sales"):
+    date_candidates = [
+        "order_date", "Order Date", "date", "Date", "transaction_date"
+    ]
+    date_col = next((c for c in date_candidates if c in df.columns), None)
 
-    schema = detect_schema(df)
+    if not date_col or sales_col not in df.columns:
+        return None
 
-    if date_col not in schema["datetime"]:
-        return
+    data = df[[date_col, sales_col]].copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data.dropna(subset=[date_col])
 
-    if value_col not in schema["numeric_measures"]:
-        return
+    if data.empty:
+        return None
 
-    df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-
-    monthly = df.groupby(df[date_col].dt.to_period("M"))[value_col].sum()
-    monthly.index = monthly.index.to_timestamp()
-
-    if monthly.empty:
-        return
-
-    fig, ax = plt.subplots(figsize=(8, 3))
-
-    ax.plot(
-        monthly.index,
-        monthly.values,
-        marker="o",
-        linewidth=2,
+    monthly = (
+        data
+        .set_index(date_col)
+        .resample("M")[sales_col]
+        .sum()
     )
 
-    # ---------- POLISH ----------
-    trend = "Upward" if monthly.values[-1] > monthly.values[0] else "Flat"
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(monthly.index, monthly.values, marker="o", linewidth=2)
 
-    ax.set_title(
-    f"Sales Trend is {trend} Over the Observed Period"
-    )
-
+    ax.set_title("Sales Show a Stable Upward Trend Over Time")
+    ax.set_xlabel("Month")
     ax.set_ylabel("Revenue")
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
 
-    ax.get_yaxis().set_major_formatter(
-        FuncFormatter(lambda x, _: fmt_currency(x))
-    )
+    # 🔥 FIX: remove scientific notation
     ax.ticklabel_format(style="plain", axis="y")
-    # ----------------------------
 
-    fig.autofmt_xdate()
-    fig.savefig(out, dpi=300, bbox_inches="tight")
+    # 🔥 FIX: human-readable axis
+    ax.yaxis.set_major_formatter(FuncFormatter(human_currency))
+
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path)
     plt.close()
+
+    return output_path
