@@ -1,41 +1,33 @@
-import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
-from sreejita.core.schema import detect_schema
+from matplotlib.ticker import FuncFormatter
+from .formatters import thousands_formatter
 
+def shipping_vs_sales(df, sales_col, ship_col, category_col, out: Path):
+    plt.figure(figsize=(7, 4))
 
-def heatmap(df, out):
-    """
-    Guaranteed-safe heatmap renderer.
-    Saves a non-empty PNG usable by ReportLab.
-    """
-    schema = detect_schema(df)
-    num_cols = schema["numeric_measures"]
+    for cat in df[category_col].unique():
+        subset = df[df[category_col] == cat]
+        plt.scatter(
+            subset[sales_col],
+            subset[ship_col],
+            alpha=0.4,
+            label=cat
+        )
 
-    if len(num_cols) < 2:
-        return None
-
-    corr_df = df[num_cols].corr()
-
-    out = Path(out).resolve()
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    sns.heatmap(
-        corr_df,
-        annot=True,
-        fmt=".2f",
-        cmap="coolwarm",
-        center=0,
-        ax=ax
+    plt.title(
+        "Shipping Cost Increases with Sales Volume (Category-Specific Patterns)",
+        fontsize=11,
+        weight="bold"
     )
-    ax.set_title("Correlation Matrix")
+    plt.xlabel("Sales")
+    plt.ylabel("Shipping Cost")
 
-    fig.tight_layout()
-    fig.savefig(str(out), dpi=300)
-    plt.close(fig)
+    ax = plt.gca()
+    ax.xaxis.set_major_formatter(FuncFormatter(thousands_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(thousands_formatter))
 
-    # 🔒 HARD GUARANTEE
-    if out.exists() and out.stat().st_size > 0:
-        return out
-
-    return None
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out, dpi=120)
+    plt.close()
