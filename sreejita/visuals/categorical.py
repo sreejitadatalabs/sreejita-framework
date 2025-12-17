@@ -1,47 +1,48 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
 
-def _m_formatter(x, _):
-    return f"${x/1_000_000:.1f}M"
 
-def category_sales_visual(df, output_dir: Path):
-    cat_col = next(
-        (c for c in df.columns if "category" in c.lower()),
-        None
-    )
-    sales_col = next(
-        (c for c in df.columns if "sales" in c.lower()),
-        None
-    )
+def _k_formatter(x, _):
+    return f"${x/1_000:.0f}K"
 
-    if not cat_col or not sales_col:
+
+def sales_trend_visual(df, output_dir: Path):
+    date_col = next((c for c in df.columns if "date" in c.lower()), None)
+    sales_col = next((c for c in df.columns if "sales" in c.lower()), None)
+
+    if not date_col or not sales_col:
         return None
 
-    agg = (
-        df.groupby(cat_col)[sales_col]
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    monthly = (
+        df.dropna(subset=[date_col])
+        .groupby(df[date_col].dt.to_period("M"))[sales_col]
         .sum()
-        .sort_values(ascending=False)
     )
 
-    if agg.empty:
+    if monthly.empty:
         return None
 
-    out = output_dir / "category_sales.png"
+    out = output_dir / "sales_trend.png"
 
     plt.figure(figsize=(7, 4))
-    agg.plot(kind="bar", color="#4C72B0")
+    plt.plot(monthly.index.to_timestamp(), monthly.values, marker="o")
+
+    growth = (monthly.iloc[-1] - monthly.iloc[0]) / monthly.iloc[0]
+    direction = "UP" if growth >= 0 else "DOWN"
 
     plt.title(
-        f"{agg.index[0]} Drives {agg.iloc[0]/agg.sum():.0%} of Revenue",
+        f"Sales Trending {direction} ({growth:.1%} change)",
         weight="bold"
     )
-    plt.ylabel("Revenue")
+    plt.ylabel("Monthly Sales")
 
     ax = plt.gca()
-    ax.ticklabel_format(style="plain", axis="y")
-    ax.yaxis.set_major_formatter(FuncFormatter(_m_formatter))
-    plt.xticks(rotation=20)
+    ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    ax.grid(alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(out, dpi=120)
