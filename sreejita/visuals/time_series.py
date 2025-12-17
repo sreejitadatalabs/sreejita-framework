@@ -1,57 +1,30 @@
-from pathlib import Path
-import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 from matplotlib.ticker import FuncFormatter
+from .formatters import thousands_formatter
 
+def plot_monthly(df, date_col, value_col, out: Path):
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col])
+    monthly = df.groupby(df[date_col].dt.to_period("M"))[value_col].sum()
+    monthly.index = monthly.index.to_timestamp()
 
-def human_currency(x, _):
-    if abs(x) >= 1_000_000:
-        return f"${x/1_000_000:.1f}M"
-    elif abs(x) >= 1_000:
-        return f"${x/1_000:.0f}K"
-    else:
-        return f"${x:,.0f}"
+    plt.figure(figsize=(7, 4))
+    plt.plot(monthly.index, monthly.values, marker="o")
 
+    growth = (monthly.iloc[-1] - monthly.iloc[0]) / monthly.iloc[0]
 
-def sales_trend(df, output_path: Path, sales_col="sales"):
-    date_candidates = [
-        "order_date", "Order Date", "date", "Date", "transaction_date"
-    ]
-    date_col = next((c for c in date_candidates if c in df.columns), None)
-
-    if not date_col or sales_col not in df.columns:
-        return None
-
-    data = df[[date_col, sales_col]].copy()
-    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
-    data = data.dropna(subset=[date_col])
-
-    if data.empty:
-        return None
-
-    monthly = (
-        data
-        .set_index(date_col)
-        .resample("M")[sales_col]
-        .sum()
+    plt.title(
+        f"Sales Trending {'UP' if growth > 0 else 'DOWN'} ({growth:.1%} change)",
+        fontsize=11,
+        weight="bold"
     )
+    plt.ylabel("Monthly Sales")
+    plt.xlabel("Month")
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(monthly.index, monthly.values, marker="o", linewidth=2)
+    ax = plt.gca()
+    ax.yaxis.set_major_formatter(FuncFormatter(thousands_formatter))
 
-    ax.set_title("Sales Show a Stable Upward Trend Over Time")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Revenue")
-
-    # 🔥 FIX: remove scientific notation
-    ax.ticklabel_format(style="plain", axis="y")
-
-    # 🔥 FIX: human-readable axis
-    ax.yaxis.set_major_formatter(FuncFormatter(human_currency))
-
-    ax.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(out, dpi=120)
     plt.close()
-
-    return output_path
