@@ -45,7 +45,7 @@ def generate_report_payload(df, decision, policy, config):
             recommendations = recs_fn(df, kpis, insights)
 
     # -------------------------
-    # VISUALS (OPTIONAL)
+    # VISUALS (OPTIONAL, SAFE)
     # -------------------------
     visuals = []
     visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
@@ -54,12 +54,20 @@ def generate_report_payload(df, decision, policy, config):
     output_dir.mkdir(exist_ok=True)
 
     for hook in visual_hooks:
-        path = hook(df, output_dir, config)
+        try:
+            # v2.7+ hook signature
+            path = hook(df, output_dir, config)
+        except TypeError:
+            # backward compatibility (v2.5 / v2.6 visuals)
+            path = hook(df, output_dir)
+
         if path:
-            visuals.append({
-                "path": path,
-                "caption": hook.__doc__ or ""
-            })
+            visuals.append(
+                {
+                    "path": path,
+                    "caption": hook.__doc__ or "",
+                }
+            )
 
     return {
         "generated_at": datetime.utcnow().isoformat(),
