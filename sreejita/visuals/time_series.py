@@ -45,5 +45,4 @@ def sales_trend_visual(df, output_dir: Path):
     plt.tight_layout()
     plt.savefig(out, dpi=120)
     plt.close()
-
     return out
