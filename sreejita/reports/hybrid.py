@@ -81,6 +81,12 @@ def run(
 
     input_path = Path(input_path)
 
+    # -------------------------------
+    # Ensure config safety (UI / CLI)
+    # -------------------------------
+    config = config or {}
+    config.setdefault("dataset", {})
+
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
@@ -103,7 +109,7 @@ def run(
         df = apply_domain(df, config["domain"]["name"])
 
     # -------------------------------
-    # INTELLIGENCE PAYLOAD
+    # INTELLIGENCE PAYLOAD (CONFIG PASSED)
     # -------------------------------
     payload = generate_report_payload(df, decision, policy, config)
 
@@ -118,12 +124,12 @@ def run(
     visuals = []
     img_dir = Path(output_path).parent
 
-    sales_col = config.get("dataset", {}).get("sales", "sales")
+    sales_col = config.get("dataset", {}).get("sales")
     date_col = config.get("dataset", {}).get("date")
-    shipping_col = config.get("dataset", {}).get("shipping", "shipping_cost")
+    shipping_col = config.get("dataset", {}).get("shipping")
 
     # 1️⃣ Sales trend
-    if date_col:
+    if sales_col and date_col:
         trend_path = img_dir / "sales_trend.png"
         plot_monthly(df, date_col, sales_col, trend_path)
         if trend_path.exists():
@@ -135,24 +141,25 @@ def run(
     if cat_path.exists():
         visuals.append((str(cat_path), "Revenue contribution by category."))
 
-    # 3️⃣ Shipping vs Sales scatter (visual polish)
-    scatter_path = img_dir / "shipping_cost_vs_sales.png"
-    try:
-        shipping_cost_vs_sales(
-            df=df,
-            sales_col=sales_col,
-            shipping_col=shipping_col,
-            out=scatter_path,
-        )
-        if scatter_path.exists() and scatter_path.stat().st_size > 0:
-            visuals.append(
-                (
-                    str(scatter_path),
-                    "Shipping cost efficiency varies by product category.",
-                )
+    # 3️⃣ Shipping vs Sales scatter
+    if sales_col and shipping_col:
+        scatter_path = img_dir / "shipping_cost_vs_sales.png"
+        try:
+            shipping_cost_vs_sales(
+                df=df,
+                sales_col=sales_col,
+                shipping_col=shipping_col,
+                out=scatter_path,
             )
-    except Exception:
-        pass  # polish visuals must never break report
+            if scatter_path.exists() and scatter_path.stat().st_size > 0:
+                visuals.append(
+                    (
+                        str(scatter_path),
+                        "Shipping cost efficiency varies by product category.",
+                    )
+                )
+        except Exception:
+            pass  # visual polish must never break report
 
     # =====================================================
     # PDF BUILD
@@ -194,8 +201,11 @@ def run(
 
     story.append(Spacer(1, 16))
 
-    # KPI TABLE (SEMANTIC)
+    # =====================================================
+    # KPI TABLE (SEMANTIC FORMATTING)
+    # =====================================================
     formatted_kpis = []
+
     for k, v in kpis.items():
         key = k.replace("_", " ").title()
         kl = k.lower()
@@ -244,7 +254,12 @@ def run(
     story.append(Paragraph("RECOMMENDATIONS", styles["Heading2"]))
     for r in recommendations:
         story.append(Paragraph(f"<b>Action:</b> {r.get('action')}", styles["BodyText"]))
-        story.append(Paragraph(f"<b>Impact:</b> {fmt_currency(r.get('impact'))}", styles["BodyText"]))
+        story.append(
+            Paragraph(
+                f"<b>Impact:</b> {fmt_currency(r.get('impact'))}",
+                styles["BodyText"],
+            )
+        )
         story.append(Paragraph(f"<b>Timeline:</b> {r.get('timeline')}", styles["BodyText"]))
         story.append(Spacer(1, 12))
 
@@ -261,7 +276,7 @@ def run(
     story.append(
         Paragraph(
             f"""
-            Report Version: v3.2 (Retail v2.8.2)<br/>
+            Report Version: v3.2 (Retail v2.8.3)<br/>
             Dataset: {input_path.name}<br/>
             Records Analyzed: {len(df):,}<br/>
             Generated At: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
