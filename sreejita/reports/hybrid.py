@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from sreejita.reporting.formatters import fmt_currency, fmt_percent
+from sreejita.visuals.correlation import shipping_cost_vs_sales
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
