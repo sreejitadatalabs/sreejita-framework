@@ -8,8 +8,8 @@ from sreejita.reporting.formatters import fmt_currency
 
 def plot_monthly(df, date_col, value_col, out):
     """
-    Monthly trend plot with insight-driven title.
-    Deterministic, no thresholds.
+    Monthly trend plot with executive-grade visual polish.
+    Insight-driven, deterministic, PDF-readable.
     """
 
     schema = detect_schema(df)
@@ -36,24 +36,44 @@ def plot_monthly(df, date_col, value_col, out):
         monthly.values,
         marker="o",
         linewidth=2,
+        color="#1f77b4",  # consistent blue
     )
 
-    # ---------- INSIGHT-DRIVEN TITLE ----------
-    trend = "upward" if monthly.values[-1] > monthly.values[0] else "flat or declining"
+    # -------------------------------
+    # INSIGHT-DRIVEN TITLE (D1)
+    # -------------------------------
+    trend = (
+        "upward"
+        if monthly.values[-1] > monthly.values[0]
+        else "flat or declining"
+    )
 
     ax.set_title(
-        f"Overall performance shows a {trend} trend over the observed period"
+        f"Overall performance shows a {trend} trend over the observed period",
+        fontsize=11,
+        pad=10,
     )
-    # -----------------------------------------
 
-    ax.set_ylabel("Value")
+    # -------------------------------
+    # SEMANTIC AXIS LABELS (D3)
+    # -------------------------------
+    ax.set_xlabel("Time Period")
+    ax.set_ylabel("Total Order Value ($)")
+
+    # -------------------------------
+    # FORMATTING & READABILITY (D2, D4)
+    # -------------------------------
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     ax.get_yaxis().set_major_formatter(
         FuncFormatter(lambda x, _: fmt_currency(x))
     )
+
+    # Disable scientific notation everywhere
+    ax.ticklabel_format(style="plain", axis="x")
     ax.ticklabel_format(style="plain", axis="y")
 
     fig.autofmt_xdate()
+    fig.tight_layout()
     fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close()
