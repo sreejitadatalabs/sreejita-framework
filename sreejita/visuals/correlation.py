@@ -3,40 +3,42 @@ from pathlib import Path
 from matplotlib.ticker import FuncFormatter
 
 
-def _m_formatter(x, _):
-    return f"${x/1_000_000:.1f}M"
+def _k_formatter(x, _):
+    return f"${x/1_000:.0f}K"
 
 
-def category_sales_visual(df, output_dir: Path):
-    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
+def shipping_vs_sales_visual(df, output_dir: Path):
     sales_col = next((c for c in df.columns if "sales" in c.lower()), None)
+    ship_col = next((c for c in df.columns if "ship" in c.lower()), None)
+    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
 
-    if not cat_col or not sales_col:
+    if not sales_col or not ship_col or not cat_col:
         return None
 
-    agg = (
-        df.groupby(cat_col)[sales_col]
-        .sum()
-        .sort_values(ascending=False)
-    )
-
-    if agg.empty:
-        return None
-
-    out = output_dir / "category_sales.png"
+    out = output_dir / "shipping_vs_sales.png"
 
     plt.figure(figsize=(7, 4))
-    agg.plot(kind="bar", color="#4C72B0")
+
+    for cat in df[cat_col].dropna().unique():
+        subset = df[df[cat_col] == cat]
+        plt.scatter(
+            subset[sales_col],
+            subset[ship_col],
+            alpha=0.4,
+            label=cat
+        )
 
     plt.title(
-        f"{agg.index[0]} Drives {agg.iloc[0]/agg.sum():.0%} of Revenue",
+        "Shipping Cost Increases with Sales Volume (Category Patterns)",
         weight="bold"
     )
-    plt.ylabel("Revenue")
+    plt.xlabel("Sales")
+    plt.ylabel("Shipping Cost")
 
     ax = plt.gca()
-    ax.yaxis.set_major_formatter(FuncFormatter(_m_formatter))
-    plt.xticks(rotation=20)
+    ax.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    plt.legend()
 
     plt.tight_layout()
     plt.savefig(out, dpi=120)
