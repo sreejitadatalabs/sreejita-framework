@@ -1,30 +1,49 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
-from .formatters import thousands_formatter
 
-def plot_monthly(df, date_col, value_col, out: Path):
+def _k_formatter(x, _):
+    return f"${x/1_000:.0f}K"
+
+def sales_trend_visual(df, output_dir: Path):
+    date_col = next(
+        (c for c in df.columns if "date" in c.lower()),
+        None
+    )
+    sales_col = next(
+        (c for c in df.columns if "sales" in c.lower()),
+        None
+    )
+
+    if not date_col or not sales_col:
+        return None
+
     df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col])
-    monthly = df.groupby(df[date_col].dt.to_period("M"))[value_col].sum()
-    monthly.index = monthly.index.to_timestamp()
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    monthly = (
+        df.dropna(subset=[date_col])
+        .groupby(df[date_col].dt.to_period("M"))[sales_col]
+        .sum()
+    )
+
+    if monthly.empty:
+        return None
+
+    out = output_dir / "sales_trend.png"
 
     plt.figure(figsize=(7, 4))
-    plt.plot(monthly.index, monthly.values, marker="o")
-
-    growth = (monthly.iloc[-1] - monthly.iloc[0]) / monthly.iloc[0]
-
-    plt.title(
-        f"Sales Trending {'UP' if growth > 0 else 'DOWN'} ({growth:.1%} change)",
-        fontsize=11,
-        weight="bold"
-    )
+    plt.plot(monthly.index.to_timestamp(), monthly.values, marker="o")
+    plt.title("Sales Trend Shows Stable Monthly Performance", weight="bold")
     plt.ylabel("Monthly Sales")
-    plt.xlabel("Month")
 
     ax = plt.gca()
-    ax.yaxis.set_major_formatter(FuncFormatter(thousands_formatter))
+    ax.ticklabel_format(style="plain", axis="y")
+    ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    ax.grid(alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(out, dpi=120)
     plt.close()
+
+    return out
