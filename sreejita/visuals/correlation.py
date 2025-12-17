@@ -39,39 +39,3 @@ def heatmap(df, out):
         return out
 
     return None
-
-def shipping_cost_vs_sales(df, sales_col, shipping_col, out):
-    """
-    Scatter plot: Shipping Cost vs Sales
-    Visual polish only (v2.8.2)
-    """
-
-    schema = detect_schema(df)
-
-    if sales_col not in schema["numeric_measures"]:
-        return
-    if shipping_col not in schema["numeric_measures"]:
-        return
-
-    # Optional category coloring
-    category_col = schema["categorical"][0] if schema["categorical"] else None
-
-    plt.figure(figsize=(6, 4))
-
-    sns.scatterplot(
-        data=df,
-        x=sales_col,
-        y=shipping_col,
-        hue=category_col,
-        alpha=0.4,      # transparency to show density
-        s=35,           # marker size
-        edgecolor=None,
-    )
-
-    plt.title("Shipping Cost Efficiency Varies by Product Category")
-    plt.xlabel("Sales Value")
-    plt.ylabel("Shipping Cost")
-
-    plt.tight_layout()
-    plt.savefig(out, dpi=300)
-    plt.close()
