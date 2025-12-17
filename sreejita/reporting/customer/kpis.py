@@ -2,13 +2,11 @@
 Customer Domain KPIs
 --------------------
 Customer-specific KPI calculations.
-Fully self-contained (Retail-safe).
+Fully self-contained and import-safe.
 """
 
 from typing import Dict, Any
 import pandas as pd
-
-from sreejita.reporting.formatter import format_kpi_value
 
 
 # ---------------------------------------------------------------------
@@ -33,15 +31,23 @@ def _validate_columns(df: pd.DataFrame, required: list[str]):
         raise ValueError(f"Missing required columns: {missing}")
 
 
+def _format(value: Any, unit: str | None = None, currency: bool = False) -> str:
+    if value is None:
+        return "N/A"
+    if currency:
+        return f"${value:,.2f}"
+    if unit == "%":
+        return f"{value:.1f}%"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return str(value)
+
+
 # ---------------------------------------------------------------------
 # KPI Computation
 # ---------------------------------------------------------------------
 
 def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
-    """
-    Compute all Customer KPIs.
-    """
-
     _validate_columns(
         df,
         ["customer_id", "transaction_date", "revenue"]
@@ -51,7 +57,6 @@ def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     df["transaction_date"] = pd.to_datetime(df["transaction_date"])
 
     total_customers = df["customer_id"].nunique()
-
     active_customers = df[df["revenue"] > 0]["customer_id"].nunique()
 
     repeat_customers = (
@@ -122,10 +127,6 @@ def _kpi(
     return {
         "label": label,
         "value": value,
-        "formatted": format_kpi_value(
-            value,
-            unit=unit,
-            currency=currency
-        ),
+        "formatted": _format(value, unit=unit, currency=currency),
         "unit": unit,
     }
