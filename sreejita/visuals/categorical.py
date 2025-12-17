@@ -1,25 +1,49 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
-from .formatters import millions_formatter
 
-def bar(df, category_col, value_col, out: Path):
-    agg = df.groupby(category_col)[value_col].sum().sort_values(ascending=False)
+def _k_formatter(x, _):
+    return f"${x/1_000:.0f}K"
+
+def sales_trend_visual(df, output_dir: Path):
+    date_col = next(
+        (c for c in df.columns if "date" in c.lower()),
+        None
+    )
+    sales_col = next(
+        (c for c in df.columns if "sales" in c.lower()),
+        None
+    )
+
+    if not date_col or not sales_col:
+        return None
+
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    monthly = (
+        df.dropna(subset=[date_col])
+        .groupby(df[date_col].dt.to_period("M"))[sales_col]
+        .sum()
+    )
+
+    if monthly.empty:
+        return None
+
+    out = output_dir / "sales_trend.png"
 
     plt.figure(figsize=(7, 4))
-    bars = plt.bar(agg.index, agg.values)
-
-    plt.title(
-        f"{agg.index[0]} Drives {agg.iloc[0]/agg.sum():.1%} of Total Revenue",
-        fontsize=11,
-        weight="bold"
-    )
-    plt.ylabel("Revenue")
+    plt.plot(monthly.index.to_timestamp(), monthly.values, marker="o")
+    plt.title("Sales Trend Shows Stable Monthly Performance", weight="bold")
+    plt.ylabel("Monthly Sales")
 
     ax = plt.gca()
-    ax.yaxis.set_major_formatter(FuncFormatter(millions_formatter))
-    ax.tick_params(axis="x", rotation=20)
+    ax.ticklabel_format(style="plain", axis="y")
+    ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
+    ax.grid(alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(out, dpi=120)
     plt.close()
+
+    return out
