@@ -63,12 +63,20 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     story.append(Paragraph(f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)", box))
 
     if high > 0:
-        story.append(
-            Paragraph(
-                f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
+        if low == high:
+            story.append(
+                Paragraph(
+                    f"💡 Available Quick Wins: ${high:,.0f} annually",
                 box,
+                )
             )
-        )
+        else:
+            story.append(
+                Paragraph(
+                    f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
+                box,
+                )
+            )
 
     story.append(Paragraph("✅ Data Quality: EXCELLENT (~99% confidence)", box))
     story.append(Paragraph("🎯 Next Step: Initiate shipping audit (5–7 days)", box))
