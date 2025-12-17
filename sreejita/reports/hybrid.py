@@ -67,14 +67,14 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
             story.append(
                 Paragraph(
                     f"💡 Available Quick Wins: ${high:,.0f} annually",
-                box,
+                    box,
                 )
             )
         else:
             story.append(
                 Paragraph(
                     f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
-                box,
+                    box,
                 )
             )
 
