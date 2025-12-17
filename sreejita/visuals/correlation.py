@@ -2,8 +2,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
 
+
 def _k_formatter(x, _):
     return f"${x/1_000:.0f}K"
+
 
 def shipping_vs_sales_visual(df, output_dir: Path):
     sales_col = next((c for c in df.columns if "sales" in c.lower()), None)
@@ -16,6 +18,7 @@ def shipping_vs_sales_visual(df, output_dir: Path):
     out = output_dir / "shipping_vs_sales.png"
 
     plt.figure(figsize=(7, 4))
+
     for cat in df[cat_col].dropna().unique():
         subset = df[df[cat_col] == cat]
         plt.scatter(
@@ -26,14 +29,13 @@ def shipping_vs_sales_visual(df, output_dir: Path):
         )
 
     plt.title(
-        "Shipping Cost Rises with Sales Volume (Category Patterns)",
+        "Shipping Cost Increases with Sales Volume (Category Patterns)",
         weight="bold"
     )
     plt.xlabel("Sales")
     plt.ylabel("Shipping Cost")
 
     ax = plt.gca()
-    ax.ticklabel_format(style="plain", axis="both")
     ax.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
     plt.legend()
