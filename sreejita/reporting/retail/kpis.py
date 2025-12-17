@@ -1,80 +1,53 @@
-import pandas as pd
-from typing import Optional
-
-
-def _auto_detect_sales_column(df: pd.DataFrame) -> Optional[str]:
+def compute_retail_kpis(df):
     """
-    Deterministic heuristic to detect a sales/revenue column.
+    Domain-aware Retail KPIs (v2.8)
+    Deterministic, target-aware, executive-ready
     """
-    candidates = [
-        "sales",
-        "revenue",
-        "order_value",
-        "total_sales",
-        "amount",
-    ]
-
-    lower_cols = {c.lower(): c for c in df.columns}
-
-    for key in candidates:
-        if key in lower_cols:
-            return lower_cols[key]
-
-    return None
-
-
-def compute_retail_kpis(df: pd.DataFrame, config: dict):
-    """
-    Compute core Retail KPIs.
-
-    Priority:
-    1. Config-defined columns
-    2. Deterministic auto-detection
-    """
-
-    dataset_cfg = config.get("dataset", {}) if config else {}
-
-    sales_col = dataset_cfg.get("sales")
-    profit_col = dataset_cfg.get("profit")
-    shipping_col = dataset_cfg.get("shipping_cost")
 
     # -------------------------
-    # SALES COLUMN (MANDATORY)
+    # Core columns
     # -------------------------
-    if not sales_col or sales_col not in df.columns:
-        sales_col = _auto_detect_sales_column(df)
+    sales = df["sales"]
+    shipping = df.get("shipping_cost")
+    discount = df.get("discount")
+    profit = df.get("profit")
 
-    if not sales_col:
-        raise KeyError(
-            "Unable to detect sales column. "
-            "Please specify dataset.sales in config."
-        )
-
-    sales = df[sales_col]
-
+    # -------------------------
+    # Base KPIs
+    # -------------------------
     kpis = {
+        # Scale metrics
         "total_sales": float(sales.sum()),
         "order_count": int(len(df)),
+
+        # Efficiency metrics
         "average_order_value": float(sales.mean()),
     }
 
     # -------------------------
-    # OPTIONAL: PROFIT
+    # Shipping Cost Ratio
     # -------------------------
-    if profit_col and profit_col in df.columns:
-        profit = df[profit_col]
-        kpis["total_profit"] = float(profit.sum())
-        kpis["profit_margin"] = (
-            float(profit.sum() / sales.sum()) if sales.sum() else 0.0
-        )
+    if shipping is not None:
+        shipping_ratio = shipping.sum() / sales.sum()
+        kpis["shipping_cost_ratio"] = float(shipping_ratio)
+
+        # Target (context)
+        kpis["target_shipping_cost_ratio"] = 0.09
 
     # -------------------------
-    # OPTIONAL: SHIPPING
+    # Profit Margin
     # -------------------------
-    if shipping_col and shipping_col in df.columns:
-        shipping = df[shipping_col]
-        kpis["shipping_cost_ratio"] = (
-            float(shipping.sum() / sales.sum()) if sales.sum() else 0.0
-        )
+    if profit is not None:
+        profit_margin = profit.sum() / sales.sum()
+        kpis["profit_margin"] = float(profit_margin)
+
+        # Target (context)
+        kpis["target_profit_margin"] = 0.12
+
+    # -------------------------
+    # Discount Behavior
+    # -------------------------
+    if discount is not None:
+        kpis["average_discount"] = float(discount.mean())
 
     return kpis
