@@ -8,8 +8,8 @@ from sreejita.reporting.formatters import fmt_currency
 
 def plot_monthly(df, date_col, value_col, out):
     """
-    Monthly trend plot with executive-ready formatting.
-    No logic change, visual polish only.
+    Monthly trend plot with insight-driven title.
+    Deterministic, no thresholds.
     """
 
     schema = detect_schema(df)
@@ -38,21 +38,21 @@ def plot_monthly(df, date_col, value_col, out):
         linewidth=2,
     )
 
-    # ---------- POLISH ----------
+    # ---------- INSIGHT-DRIVEN TITLE ----------
     trend = "upward" if monthly.values[-1] > monthly.values[0] else "flat or declining"
 
     ax.set_title(
-    f"Sales show a {trend} trend over the observed period"
+        f"Overall performance shows a {trend} trend over the observed period"
     )
+    # -----------------------------------------
 
-    ax.set_ylabel("Revenue")
+    ax.set_ylabel("Value")
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     ax.get_yaxis().set_major_formatter(
         FuncFormatter(lambda x, _: fmt_currency(x))
     )
     ax.ticklabel_format(style="plain", axis="y")
-    # ----------------------------
 
     fig.autofmt_xdate()
     fig.savefig(out, dpi=300, bbox_inches="tight")
