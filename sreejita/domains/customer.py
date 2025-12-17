@@ -9,11 +9,29 @@ class CustomerDomain(BaseDomain):
     name = "customer"
     description = "Customer analytics domain"
 
+    # -------------------------
+    # Validation / Preprocess
+    # -------------------------
+
     def validate_data(self, df: pd.DataFrame) -> bool:
         return isinstance(df, pd.DataFrame) and "customer_id" in df.columns
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         return df
+
+    # -------------------------
+    # REQUIRED ABSTRACT METHODS
+    # -------------------------
+
+    def calculate_kpis(self, df: pd.DataFrame):
+        # 🔥 Lazy import — SAFE
+        from sreejita.reporting.customer.kpis import compute_customer_kpis
+        return compute_customer_kpis(df)
+
+    def generate_insights(self, df: pd.DataFrame, kpis):
+        # 🔥 Lazy import — SAFE
+        from sreejita.reporting.customer.insights import generate_customer_insights
+        return generate_customer_insights(df, kpis)
 
 
 class CustomerDomainDetector(BaseDomainDetector):
