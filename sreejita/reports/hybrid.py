@@ -2,7 +2,6 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from sreejita.reporting.formatters import fmt_currency, fmt_percent
 
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -18,8 +17,9 @@ from reportlab.platypus import (
     Image,
 )
 
+from sreejita.reporting.formatters import fmt_currency, fmt_percent
 from sreejita.reporting.orchestrator import generate_report_payload
-from sreejita.domains.router import decide_domain, apply_domain
+from sreejita.domains.router import decide_domain
 from sreejita.policy.engine import PolicyEngine
 from sreejita.core.cleaner import clean_dataframe
 
@@ -32,23 +32,26 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     risks = sum(1 for i in insights if i.get("level") == "RISK")
     total_sales = kpis.get("total_sales", 0)
 
-    low, high = 0, 0
+    # -----------------------------------------
+    # Aggregate Expected Impact (STRUCTURED)
+    # -----------------------------------------
+    low_total = 0.0
+    high_total = 0.0
+
     for r in recommendations:
-        impact = r.get("expected_impact", "")
-        if "$" in impact:
-            nums = (
-                impact.replace("$", "")
-                .replace(",", "")
-                .replace("–", "-")
-                .split()
-            )
-            vals = [float(v) for v in nums if v.replace(".", "").isdigit()]
-            if len(vals) == 1:
-                low += vals[0]
-                high += vals[0]
-            elif len(vals) >= 2:
-                low += vals[0]
-                high += vals[1]
+        impact = r.get("expected_impact")
+        if not impact:
+            continue
+
+        # Range-based impact
+        if isinstance(impact, dict) and "low" in impact and "high" in impact:
+            low_total += float(impact["low"])
+            high_total += float(impact["high"])
+
+        # Single-value impact
+        elif isinstance(impact, dict) and "value" in impact:
+            low_total += float(impact["value"])
+            high_total += float(impact["value"])
 
     box = ParagraphStyle(
         "exec_box",
@@ -59,21 +62,30 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     )
 
     story.append(Paragraph("<b>EXECUTIVE BRIEF (1-MINUTE READ)</b>", box))
-    story.append(Paragraph(f"💰 Revenue Status: ${total_sales:,.0f}", box))
-    story.append(Paragraph(f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)", box))
+    story.append(Paragraph(f"💰 Revenue Status: {fmt_currency(total_sales)}", box))
+    story.append(
+        Paragraph(
+            f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)",
+            box,
+        )
+    )
 
-    if high > 0:
-        if low == high:
+    # -----------------------------------------
+    # Render Available Quick Wins (LOW → HIGH)
+    # -----------------------------------------
+    if high_total > 0:
+        if low_total == high_total:
             story.append(
                 Paragraph(
-                    f"💡 Available Quick Wins: ${high:,.0f} annually",
+                    f"💡 Available Quick Wins: {fmt_currency(high_total)} annually",
                     box,
                 )
             )
         else:
             story.append(
                 Paragraph(
-                    f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
+                    f"💡 Available Quick Wins: "
+                    f"{fmt_currency(low_total)} – {fmt_currency(high_total)} annually",
                     box,
                 )
             )
@@ -143,7 +155,9 @@ def _header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawString(
-        cm, A4[1] - 1 * cm, "Sreejita Framework — Hybrid Decision Intelligence Report"
+        cm,
+        A4[1] - 1 * cm,
+        "Sreejita Framework — Hybrid Decision Intelligence Report",
     )
     canvas.setFont("Helvetica-Oblique", 8)
     canvas.drawString(
@@ -163,7 +177,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
-        output_path = out_dir / f"Hybrid_Report_v3_2_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = out_dir / (
+            f"Hybrid_Report_v3_2_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
 
     df_raw = pd.read_csv(input_path, encoding="latin1")
     df = clean_dataframe(df_raw)["df"]
@@ -198,8 +214,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # ================= PAGE 1 =================
     story.append(Paragraph("Executive Snapshot", title))
     story.append(Spacer(1, 12))
-    story.append(Paragraph(f"Detected Domain: {decision.selected_domain}", styles["BodyText"]))
-    story.append(Paragraph(f"Confidence: {decision.confidence:.2f}", styles["BodyText"]))
+    story.append(
+        Paragraph(f"Detected Domain: {decision.selected_domain}", styles["BodyText"])
+    )
+    story.append(
+        Paragraph(f"Confidence: {decision.confidence:.2f}", styles["BodyText"])
+    )
     story.append(Paragraph(f"Policy Status: {policy.status}", styles["BodyText"]))
     story.append(Spacer(1, 12))
 
@@ -207,21 +227,16 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     for k, v in kpis.items():
         key = k.replace("_", " ").title()
-
         key_lower = k.lower()
 
         if "ratio" in key_lower or "margin" in key_lower or "discount" in key_lower:
             val = fmt_percent(v)
-
         elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
             val = f"{int(v):,}"
-
         elif isinstance(v, (int, float)):
             val = fmt_currency(v)
-
         else:
             val = str(v)
-
 
         formatted_kpis.append([key, val])
 
@@ -243,7 +258,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for ins in insights:
         story.append(
             Paragraph(
-                f"[{ins['level']}] {ins['title']} — {ins.get('value','')}",
+                f"[{ins['level']}] {ins['title']} — {ins.get('value', '')}",
                 styles["BodyText"],
             )
         )
@@ -256,7 +271,10 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for r in recommendations:
         for k, v in r.items():
             story.append(
-                Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", styles["BodyText"])
+                Paragraph(
+                    f"<b>{k.replace('_',' ').title()}:</b> {v}",
+                    styles["BodyText"],
+                )
             )
         story.append(Spacer(1, 14))
 
