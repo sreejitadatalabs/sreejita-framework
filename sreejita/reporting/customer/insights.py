@@ -1,13 +1,11 @@
 """
 Customer Domain Insights
 ------------------------
-Rule-based, executive-grade insights derived from customer KPIs.
-Retail-style grammar, customer semantics.
+Rule-based customer insights.
+Retail-parity implementation (dict-based).
 """
 
 from typing import Dict, List, Any
-
-from sreejita.core.insights import Insight
 from sreejita.core.decision_snapshot import DecisionSnapshot
 
 
@@ -18,19 +16,8 @@ from sreejita.core.decision_snapshot import DecisionSnapshot
 def generate_insights(
     kpis: Dict[str, Dict[str, Any]],
     snapshot: DecisionSnapshot | None = None
-) -> List[Insight]:
-    """
-    Generate customer insights from KPI outputs.
-
-    Args:
-        kpis: Output from reporting.customer.kpis.compute_customer_kpis
-        snapshot: Optional DecisionSnapshot for trend-based insights
-
-    Returns:
-        List[Insight]
-    """
-
-    insights: List[Insight] = []
+) -> List[Dict[str, Any]]:
+    insights: List[Dict[str, Any]] = []
 
     insights.extend(_volume_insights(kpis))
     insights.extend(_churn_retention_insights(kpis, snapshot))
@@ -43,49 +30,36 @@ def generate_insights(
 # Insight Groups
 # ---------------------------------------------------------------------
 
-def _volume_insights(kpis: Dict[str, Dict[str, Any]]) -> List[Insight]:
+def _volume_insights(kpis: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     insights = []
 
     total = _val(kpis, "total_customers")
     new = _val(kpis, "new_customers")
     repeat = _val(kpis, "repeat_customers")
 
-    if total is not None and total > 0:
-        insights.append(
-            Insight(
-                title="Established Customer Base",
-                description=f"The business currently serves {int(total)} customers.",
-                impact="Neutral",
-                confidence="High",
-                domain="customer"
-            )
-        )
+    if total:
+        insights.append(_insight(
+            title="Established Customer Base",
+            description=f"The business currently serves {int(total)} customers.",
+            impact="Neutral",
+            confidence="High"
+        ))
 
-    if new is not None and new == 0:
-        insights.append(
-            Insight(
-                title="Customer Acquisition Stalled",
-                description="No new customers were acquired in the current period, which may constrain future growth.",
-                impact="Negative",
-                confidence="High",
-                domain="customer"
-            )
-        )
+    if new == 0:
+        insights.append(_insight(
+            title="Customer Acquisition Stalled",
+            description="No new customers were acquired in the current period.",
+            impact="Negative",
+            confidence="High"
+        ))
 
-    if (
-        repeat is not None
-        and total
-        and repeat / total < 0.30
-    ):
-        insights.append(
-            Insight(
-                title="Weak Repeat Engagement",
-                description="Less than 30% of customers are returning, indicating low repeat engagement.",
-                impact="Negative",
-                confidence="Medium",
-                domain="customer"
-            )
-        )
+    if total and repeat and repeat / total < 0.30:
+        insights.append(_insight(
+            title="Weak Repeat Engagement",
+            description="Less than 30% of customers are returning.",
+            impact="Negative",
+            confidence="Medium"
+        ))
 
     return insights
 
@@ -93,98 +67,72 @@ def _volume_insights(kpis: Dict[str, Dict[str, Any]]) -> List[Insight]:
 def _churn_retention_insights(
     kpis: Dict[str, Dict[str, Any]],
     snapshot: DecisionSnapshot | None
-) -> List[Insight]:
+) -> List[Dict[str, Any]]:
     insights = []
 
     churn = _val(kpis, "churn_rate")
     retention = _val(kpis, "retention_rate")
 
-    if churn is not None and churn > 20:
-        insights.append(
-            Insight(
-                title="Elevated Customer Churn",
-                description=f"Customer churn is {churn:.1f}%, exceeding healthy thresholds.",
-                impact="Negative",
-                confidence="High",
-                domain="customer"
-            )
-        )
+    if churn and churn > 20:
+        insights.append(_insight(
+            title="Elevated Customer Churn",
+            description=f"Customer churn is {churn:.1f}%, above healthy levels.",
+            impact="Negative",
+            confidence="High"
+        ))
 
-    if retention is not None and retention >= 75:
-        insights.append(
-            Insight(
-                title="Healthy Customer Retention",
-                description=f"Retention remains strong at {retention:.1f}%, indicating stable engagement.",
-                impact="Positive",
-                confidence="High",
-                domain="customer"
-            )
-        )
+    if retention and retention >= 75:
+        insights.append(_insight(
+            title="Healthy Customer Retention",
+            description=f"Retention is strong at {retention:.1f}%.",
+            impact="Positive",
+            confidence="High"
+        ))
 
-    # Trend-based insight (snapshot-aware)
     if snapshot and snapshot.has_kpi("churn_rate"):
-        previous = snapshot.get_kpi("churn_rate")
-        if previous is not None and churn is not None:
-            delta = churn - previous
-            if delta > 5:
-                insights.append(
-                    Insight(
-                        title="Customer Churn Increasing",
-                        description=f"Churn increased by {delta:.1f}% compared to the previous period.",
-                        impact="Negative",
-                        confidence="Medium",
-                        domain="customer"
-                    )
-                )
+        prev = snapshot.get_kpi("churn_rate")
+        if prev and churn and churn - prev > 5:
+            insights.append(_insight(
+                title="Customer Churn Increasing",
+                description="Churn has increased significantly compared to last period.",
+                impact="Negative",
+                confidence="Medium"
+            ))
 
     return insights
 
 
 def _value_behavior_insights(
     kpis: Dict[str, Dict[str, Any]]
-) -> List[Insight]:
+) -> List[Dict[str, Any]]:
     insights = []
 
     avg_value = _val(kpis, "average_customer_value")
-    frequency = _val(kpis, "purchase_frequency")
+    freq = _val(kpis, "purchase_frequency")
 
-    if avg_value is not None and avg_value < 100:
-        insights.append(
-            Insight(
-                title="Low Average Customer Value",
-                description="Average customer value is low, suggesting opportunities for upselling or bundling.",
-                impact="Negative",
-                confidence="Medium",
-                domain="customer"
-            )
-        )
+    if avg_value and avg_value < 100:
+        insights.append(_insight(
+            title="Low Average Customer Value",
+            description="Customer value is relatively low.",
+            impact="Negative",
+            confidence="Medium"
+        ))
 
-    if frequency is not None and frequency < 1.5:
-        insights.append(
-            Insight(
-                title="Infrequent Customer Purchases",
-                description="Customers are purchasing infrequently, indicating weak ongoing engagement.",
-                impact="Negative",
-                confidence="Medium",
-                domain="customer"
-            )
-        )
+    if freq and freq < 1.5:
+        insights.append(_insight(
+            title="Infrequent Customer Purchases",
+            description="Customers purchase infrequently.",
+            impact="Negative",
+            confidence="Medium"
+        ))
 
-    if (
-        avg_value is not None
-        and frequency is not None
-        and avg_value >= 500
-        and frequency >= 3
-    ):
-        insights.append(
-            Insight(
-                title="High-Value Engaged Customer Segment",
-                description="A segment of customers shows both high value and frequent engagement.",
-                impact="Positive",
-                confidence="High",
-                domain="customer"
-            )
-        )
+    if avg_value and freq and avg_value >= 500 and freq >= 3:
+        insights.append(_insight(
+            title="High-Value Engaged Customers",
+            description="A high-value, high-engagement customer segment exists.",
+            impact="Positive",
+            confidence="High"
+        ))
 
     return insights
 
@@ -194,7 +142,19 @@ def _value_behavior_insights(
 # ---------------------------------------------------------------------
 
 def _val(kpis: Dict[str, Dict[str, Any]], key: str) -> Any:
-    """
-    Safe extractor for raw KPI values.
-    """
     return kpis.get(key, {}).get("value")
+
+
+def _insight(
+    title: str,
+    description: str,
+    impact: str,
+    confidence: str
+) -> Dict[str, Any]:
+    return {
+        "title": title,
+        "description": description,
+        "impact": impact,
+        "confidence": confidence,
+        "domain": "customer"
+    }
