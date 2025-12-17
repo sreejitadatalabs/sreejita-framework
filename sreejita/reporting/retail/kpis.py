@@ -1,53 +1,46 @@
-def compute_retail_kpis(df):
+import pandas as pd
+
+
+def compute_retail_kpis(df: pd.DataFrame, config: dict):
     """
-    Domain-aware Retail KPIs (v2.8)
-    Deterministic, target-aware, executive-ready
+    Compute core Retail KPIs.
+
+    Expected config structure:
+    config:
+      dataset:
+        sales: <column name>
+        profit: <column name> (optional)
+        shipping_cost: <column name> (optional)
     """
 
-    # -------------------------
-    # Core columns
-    # -------------------------
-    sales = df["sales"]
-    shipping = df.get("shipping_cost")
-    discount = df.get("discount")
-    profit = df.get("profit")
+    dataset_cfg = config.get("dataset", {})
 
-    # -------------------------
-    # Base KPIs
-    # -------------------------
+    sales_col = dataset_cfg.get("sales")
+    profit_col = dataset_cfg.get("profit")
+    shipping_col = dataset_cfg.get("shipping_cost")
+
+    if not sales_col or sales_col not in df.columns:
+        raise KeyError(
+            f"Configured sales column '{sales_col}' not found in dataset"
+        )
+
+    sales = df[sales_col]
+
     kpis = {
-        # Scale metrics
         "total_sales": float(sales.sum()),
         "order_count": int(len(df)),
-
-        # Efficiency metrics
         "average_order_value": float(sales.mean()),
     }
 
-    # -------------------------
-    # Shipping Cost Ratio
-    # -------------------------
-    if shipping is not None:
-        shipping_ratio = shipping.sum() / sales.sum()
-        kpis["shipping_cost_ratio"] = float(shipping_ratio)
+    # Optional profit KPIs
+    if profit_col and profit_col in df.columns:
+        profit = df[profit_col]
+        kpis["total_profit"] = float(profit.sum())
+        kpis["profit_margin"] = float(profit.sum() / sales.sum()) if sales.sum() else 0.0
 
-        # Target (context)
-        kpis["target_shipping_cost_ratio"] = 0.09
-
-    # -------------------------
-    # Profit Margin
-    # -------------------------
-    if profit is not None:
-        profit_margin = profit.sum() / sales.sum()
-        kpis["profit_margin"] = float(profit_margin)
-
-        # Target (context)
-        kpis["target_profit_margin"] = 0.12
-
-    # -------------------------
-    # Discount Behavior
-    # -------------------------
-    if discount is not None:
-        kpis["average_discount"] = float(discount.mean())
+    # Optional shipping KPIs
+    if shipping_col and shipping_col in df.columns:
+        shipping = df[shipping_col]
+        kpis["shipping_cost_ratio"] = float(shipping.sum() / sales.sum()) if sales.sum() else 0.0
 
     return kpis
