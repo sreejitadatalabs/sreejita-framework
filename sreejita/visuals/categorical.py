@@ -8,7 +8,7 @@ from sreejita.reporting.formatters import fmt_currency
 
 def bar(df, col, out):
     """
-    Category bar chart with currency formatting and insight-driven title.
+    Category bar chart with insight-driven title.
     """
 
     schema = detect_schema(df)
@@ -19,7 +19,7 @@ def bar(df, col, out):
     if not schema["numeric_measures"]:
         return
 
-    # Use first numeric measure (usually sales)
+    # Use first numeric measure (usually sales/revenue)
     value_col = schema["numeric_measures"][0]
 
     data = (
@@ -44,18 +44,19 @@ def bar(df, col, out):
         palette="Blues_r",
     )
 
-    # ---------- POLISH ----------
+    # ---------- INSIGHT-DRIVEN TITLE ----------
     ax.set_title(
-        f"{top_category} Drives {top_share:.1f}% of Total Revenue"
+        f"{top_category} contributes the largest share of total value ({top_share:.1f}%)"
     )
-    ax.set_xlabel("Revenue")
-    ax.set_ylabel("Category")
+    # ----------------------------------------
+
+    ax.set_xlabel("Value")
+    ax.set_ylabel(col)
 
     ax.get_xaxis().set_major_formatter(
         FuncFormatter(lambda x, _: fmt_currency(x))
     )
     ax.ticklabel_format(style="plain", axis="x")
-    # ----------------------------
 
     fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close()
