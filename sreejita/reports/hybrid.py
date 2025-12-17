@@ -202,7 +202,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
         key_lower = k.lower()
 
-        if "ratio" in key_lower or "margin" in key_lower:
+        if "ratio" in key_lower or "margin" in key_lower or "discount" in key_lower:
             val = fmt_percent(v)
 
         elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
