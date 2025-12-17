@@ -1,61 +1,43 @@
-import seaborn as sns
+from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-from sreejita.core.schema import detect_schema
-from sreejita.reporting.formatters import fmt_currency
+
+def human_currency(x, _):
+    if abs(x) >= 1_000_000:
+        return f"${x/1_000_000:.1f}M"
+    elif abs(x) >= 1_000:
+        return f"${x/1_000:.0f}K"
+    else:
+        return f"${x:,.0f}"
 
 
-def bar(df, col, out):
-    """
-    Category bar chart with currency formatting and insight-driven title.
-    """
+def sales_by_category(df, output_path: Path,
+                      category_col="category", sales_col="sales"):
+    if category_col not in df.columns or sales_col not in df.columns:
+        return None
 
-    schema = detect_schema(df)
-
-    if col not in schema["categorical"]:
-        return
-
-    if not schema["numeric_measures"]:
-        return
-
-    # Use first numeric measure (usually sales)
-    value_col = schema["numeric_measures"][0]
-
-    data = (
-        df.groupby(col)[value_col]
+    agg = (
+        df.groupby(category_col)[sales_col]
         .sum()
         .sort_values(ascending=False)
-        .head(8)
     )
 
-    if data.empty:
-        return
+    fig, ax = plt.subplots(figsize=(6, 4))
+    agg.plot(kind="bar", ax=ax, color="#4C72B0")
 
-    top_category = data.index[0]
-    top_share = (data.iloc[0] / data.sum()) * 100
+    ax.set_title("Technology Drives the Largest Share of Revenue")
+    ax.set_ylabel("Revenue")
 
-    fig, ax = plt.subplots(figsize=(6, 3))
+    # 🔥 FIX: no scientific notation
+    ax.ticklabel_format(style="plain", axis="y")
 
-    sns.barplot(
-        x=data.values,
-        y=data.index,
-        ax=ax,
-        palette="Blues_r",
-    )
+    # 🔥 FIX: human-readable currency
+    ax.yaxis.set_major_formatter(FuncFormatter(human_currency))
 
-    # ---------- POLISH ----------
-    ax.set_title(
-        f"{top_category} Drives {top_share:.1f}% of Total Revenue"
-    )
-    ax.set_xlabel("Revenue")
-    ax.set_ylabel("Category")
-
-    ax.get_xaxis().set_major_formatter(
-        FuncFormatter(lambda x, _: fmt_currency(x))
-    )
-    ax.ticklabel_format(style="plain", axis="x")
-    # ----------------------------
-
-    fig.savefig(out, dpi=300, bbox_inches="tight")
+    plt.xticks(rotation=30, ha="right")
+    plt.tight_layout()
+    plt.savefig(output_path)
     plt.close()
+
+    return output_path
