@@ -1,4 +1,3 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import FuncFormatter
@@ -8,41 +7,38 @@ def _k_formatter(x, _):
     return f"${x/1_000:.0f}K"
 
 
-def sales_trend_visual(df, output_dir: Path):
-    date_col = next((c for c in df.columns if "date" in c.lower()), None)
+def shipping_vs_sales_visual(df, output_dir: Path):
     sales_col = next((c for c in df.columns if "sales" in c.lower()), None)
+    ship_col = next((c for c in df.columns if "ship" in c.lower()), None)
+    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
 
-    if not date_col or not sales_col:
+    if not sales_col or not ship_col or not cat_col:
         return None
 
-    df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    monthly = (
-        df.dropna(subset=[date_col])
-        .groupby(df[date_col].dt.to_period("M"))[sales_col]
-        .sum()
-    )
-
-    if monthly.empty:
-        return None
-
-    out = output_dir / "sales_trend.png"
+    out = output_dir / "shipping_vs_sales.png"
 
     plt.figure(figsize=(7, 4))
-    plt.plot(monthly.index.to_timestamp(), monthly.values, marker="o")
 
-    growth = (monthly.iloc[-1] - monthly.iloc[0]) / monthly.iloc[0]
-    direction = "UP" if growth >= 0 else "DOWN"
+    for cat in df[cat_col].dropna().unique():
+        subset = df[df[cat_col] == cat]
+        plt.scatter(
+            subset[sales_col],
+            subset[ship_col],
+            alpha=0.4,
+            label=cat
+        )
 
     plt.title(
-        f"Sales Trending {direction} ({growth:.1%} change)",
+        "Shipping Cost Increases with Sales Volume (Category Patterns)",
         weight="bold"
     )
-    plt.ylabel("Monthly Sales")
+    plt.xlabel("Sales")
+    plt.ylabel("Shipping Cost")
 
     ax = plt.gca()
+    ax.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(_k_formatter))
-    ax.grid(alpha=0.3)
+    plt.legend()
 
     plt.tight_layout()
     plt.savefig(out, dpi=120)
