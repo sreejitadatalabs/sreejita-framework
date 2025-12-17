@@ -32,48 +32,54 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
     risks = sum(1 for i in insights if i.get("level") == "RISK")
     total_sales = kpis.get("total_sales", 0)
 
-    # -----------------------------------------
-    # Aggregate Expected Impact (STRUCTURED)
-    # -----------------------------------------
+    # -------------------------------------------------
+    # Aggregate Expected Impact (STRUCTURED ONLY)
+    # -------------------------------------------------
     low_total = 0.0
     high_total = 0.0
+    has_impact = False
 
     for r in recommendations:
         impact = r.get("expected_impact")
-        if not impact:
+        if not isinstance(impact, dict):
             continue
 
-        # Range-based impact
-        if isinstance(impact, dict) and "low" in impact and "high" in impact:
+        if "low" in impact and "high" in impact:
             low_total += float(impact["low"])
             high_total += float(impact["high"])
+            has_impact = True
 
-        # Single-value impact
-        elif isinstance(impact, dict) and "value" in impact:
+        elif "value" in impact:
             low_total += float(impact["value"])
             high_total += float(impact["value"])
+            has_impact = True
 
+    # -------------------------------------------------
+    # Executive Card Style (NO BULLETS)
+    # -------------------------------------------------
     box = ParagraphStyle(
         "exec_box",
         parent=styles["BodyText"],
         backColor="#F2F4F7",
         borderPadding=10,
         spaceAfter=16,
+        leftIndent=0,
+        bulletIndent=0,
     )
 
     story.append(Paragraph("<b>EXECUTIVE BRIEF (1-MINUTE READ)</b>", box))
     story.append(Paragraph(f"💰 Revenue Status: {fmt_currency(total_sales)}", box))
     story.append(
         Paragraph(
-            f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)",
+            f"Issues Found: ⚠️ {warnings} WARNING(s), {risks} RISK(s)",
             box,
         )
     )
 
-    # -----------------------------------------
-    # Render Available Quick Wins (LOW → HIGH)
-    # -----------------------------------------
-    if high_total > 0:
+    # -------------------------------------------------
+    # Available Quick Wins (ALWAYS SHOWN)
+    # -------------------------------------------------
+    if has_impact and high_total > 0:
         if low_total == high_total:
             story.append(
                 Paragraph(
@@ -89,6 +95,14 @@ def render_executive_brief(story, styles, kpis, insights, recommendations):
                     box,
                 )
             )
+    else:
+        story.append(
+            Paragraph(
+                "💡 Available Quick Wins: Opportunity identified "
+                "(quantification in progress)",
+                box,
+            )
+        )
 
     story.append(Paragraph("✅ Data Quality: EXCELLENT (~99% confidence)", box))
     story.append(Paragraph("🎯 Next Step: Initiate shipping audit (5–7 days)", box))
@@ -224,7 +238,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Spacer(1, 12))
 
     formatted_kpis = []
-
     for k, v in kpis.items():
         key = k.replace("_", " ").title()
         key_lower = k.lower()
