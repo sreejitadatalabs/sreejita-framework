@@ -3,7 +3,7 @@ from datetime import datetime
 from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES, DOMAIN_VISUALS
 
 
-def generate_report_payload(df, decision, policy):
+def generate_report_payload(df, decision, policy, config):
     domain = decision.selected_domain
 
     engine = DOMAIN_REPORT_ENGINES.get(domain)
@@ -13,7 +13,7 @@ def generate_report_payload(df, decision, policy):
     # -------------------------
     # KPIs
     # -------------------------
-    kpis = engine["kpis"](df)
+    kpis = engine["kpis"](df, config)
 
     # -------------------------
     # INSIGHTS
@@ -23,24 +23,24 @@ def generate_report_payload(df, decision, policy):
 
     if insights_fn:
         try:
-            insights = insights_fn(df, kpis) or []
+            insights = insights_fn(df, kpis, config) or []
         except TypeError:
-            insights = insights_fn(df) or []
+            insights = insights_fn(df, kpis) or []
 
     # -------------------------
     # RECOMMENDATIONS
     # -------------------------
     recs_fn = engine.get("recommendations")
+    recommendations = []
+
     if recs_fn:
         try:
-            recommendations = recs_fn(df, kpis, insights)
+            recommendations = recs_fn(df, kpis, insights, config)
         except TypeError:
-            recommendations = recs_fn(df)
-    else:
-        recommendations = []
+            recommendations = recs_fn(df, kpis, insights)
 
     # -------------------------
-    # VISUALS (ADAPTER SAFE)
+    # VISUALS (SAFE HOOKS)
     # -------------------------
     visuals = []
     visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
@@ -50,9 +50,14 @@ def generate_report_payload(df, decision, policy):
 
     for hook in visual_hooks:
         try:
-            path = hook(df, output_dir)
+            path = hook(df, output_dir, config)
+        except TypeError:
+            # backward compatibility (older hooks)
+            try:
+                path = hook(df, output_dir)
+            except Exception:
+                continue
         except Exception:
-            # HARD SAFETY: visuals must never break report
             continue
 
         if path:
