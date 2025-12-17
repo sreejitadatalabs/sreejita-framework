@@ -1,18 +1,13 @@
 """
 Customer Domain KPIs
 --------------------
-This module defines all customer-related KPIs used in reports.
-Retail is treated as a reference pattern, not a dependency.
+Customer-specific KPI calculations.
+No dependency on core KPI helpers (Retail-safe).
 """
 
 from typing import Dict, Any
 import pandas as pd
 
-from sreejita.core.kpis import (
-    safe_divide,
-    percentage,
-    average,
-)
 from sreejita.core.validator import require_columns
 from sreejita.reporting.formatter import format_kpi_value
 
@@ -27,9 +22,21 @@ REQUIRED_COLUMNS = [
     "revenue",
 ]
 
-OPTIONAL_COLUMNS = [
-    "is_new_customer",
-]
+
+# ---------------------------------------------------------------------
+# Local Safe Helpers (Domain-Scoped)
+# ---------------------------------------------------------------------
+
+def _safe_divide(numerator: float, denominator: float) -> float | None:
+    if denominator in (0, None):
+        return None
+    return numerator / denominator
+
+
+def _percentage(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return value * 100
 
 
 # ---------------------------------------------------------------------
@@ -39,14 +46,6 @@ OPTIONAL_COLUMNS = [
 def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     """
     Compute all Customer KPIs.
-
-    Returns:
-        Dict[str, Dict[str, Any]]
-        {
-            "total_customers": {...},
-            "active_customers": {...},
-            ...
-        }
     """
 
     require_columns(df, REQUIRED_COLUMNS)
@@ -68,80 +67,39 @@ def compute_customer_kpis(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
         .nunique()
     )
 
-    new_customers = (
-        df[df.get("is_new_customer", False) == True]["customer_id"].nunique()
-        if "is_new_customer" in df.columns
-        else None
-    )
-
     churn_rate = _compute_churn_rate(df)
-    retention_rate = percentage(1 - churn_rate) if churn_rate is not None else None
+    retention_rate = _percentage(1 - churn_rate) if churn_rate is not None else None
 
-    avg_customer_value = safe_divide(
+    avg_customer_value = _safe_divide(
         df["revenue"].sum(),
         total_customers
     )
 
-    purchase_frequency = safe_divide(
+    purchase_frequency = _safe_divide(
         len(df),
         total_customers
     )
 
-    # -----------------------------------------------------------------
-    # Normalized KPI Output (Retail Parity)
-    # -----------------------------------------------------------------
-
     return {
-        "total_customers": _kpi(
-            value=total_customers,
-            label="Total Customers"
-        ),
-        "active_customers": _kpi(
-            value=active_customers,
-            label="Active Customers"
-        ),
-        "repeat_customers": _kpi(
-            value=repeat_customers,
-            label="Repeat Customers"
-        ),
-        "new_customers": _kpi(
-            value=new_customers,
-            label="New Customers"
-        ),
-        "churn_rate": _kpi(
-            value=percentage(churn_rate) if churn_rate is not None else None,
-            label="Churn Rate",
-            unit="%"
-        ),
-        "retention_rate": _kpi(
-            value=retention_rate,
-            label="Retention Rate",
-            unit="%"
-        ),
+        "total_customers": _kpi("Total Customers", total_customers),
+        "active_customers": _kpi("Active Customers", active_customers),
+        "repeat_customers": _kpi("Repeat Customers", repeat_customers),
+        "churn_rate": _kpi("Churn Rate", _percentage(churn_rate), unit="%"),
+        "retention_rate": _kpi("Retention Rate", retention_rate, unit="%"),
         "average_customer_value": _kpi(
-            value=avg_customer_value,
-            label="Avg. Customer Value",
-            currency=True
+            "Avg. Customer Value", avg_customer_value, currency=True
         ),
         "purchase_frequency": _kpi(
-            value=purchase_frequency,
-            label="Purchase Frequency"
+            "Purchase Frequency", purchase_frequency
         ),
     }
 
 
 # ---------------------------------------------------------------------
-# Helper Functions
+# Helpers
 # ---------------------------------------------------------------------
 
 def _compute_churn_rate(df: pd.DataFrame) -> float | None:
-    """
-    Compute churn rate based on customer inactivity.
-
-    Heuristic:
-    - Customer is churned if no activity in last 90 days
-    """
-
     if df.empty:
         return None
 
@@ -154,25 +112,21 @@ def _compute_churn_rate(df: pd.DataFrame) -> float | None:
         .reset_index()
     )
 
-    churned_customers = last_activity[
+    churned = last_activity[
         last_activity["transaction_date"] < cutoff
     ]["customer_id"].nunique()
 
-    total_customers = last_activity["customer_id"].nunique()
+    total = last_activity["customer_id"].nunique()
 
-    return safe_divide(churned_customers, total_customers)
+    return _safe_divide(churned, total)
 
 
 def _kpi(
-    value: Any,
     label: str,
+    value: Any,
     unit: str | None = None,
     currency: bool = False
 ) -> Dict[str, Any]:
-    """
-    Standard KPI envelope to ensure report compatibility.
-    """
-
     return {
         "label": label,
         "value": value,
