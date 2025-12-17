@@ -3,49 +3,44 @@ from datetime import datetime
 from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES, DOMAIN_VISUALS
 
 
-def generate_report_payload(df, decision, policy, config):
-    """
-    Generate a domain-specific report payload (v2.8+)
-    Fully config-driven, deterministic
-    """
-
+def generate_report_payload(df, decision, policy):
     domain = decision.selected_domain
-    engine = DOMAIN_REPORT_ENGINES.get(domain)
 
+    engine = DOMAIN_REPORT_ENGINES.get(domain)
     if not engine:
-        raise RuntimeError(f"No report engine registered for domain '{domain}'")
+        return None
 
     # -------------------------
     # KPIs (MANDATORY)
     # -------------------------
-    kpis = engine["kpis"](df, config)
+    kpis = engine["kpis"](df)
 
     # -------------------------
-    # INSIGHTS
+    # INSIGHTS (FIXED)
     # -------------------------
     insights_fn = engine.get("insights")
     insights = []
 
     if insights_fn:
         try:
-            insights = insights_fn(df, kpis, config) or []
+            insights = insights_fn(df, kpis) or []   # ✅ force list
         except TypeError:
-            insights = insights_fn(df, kpis) or []
+            insights = insights_fn(df) or []
 
     # -------------------------
     # RECOMMENDATIONS
     # -------------------------
     recs_fn = engine.get("recommendations")
-    recommendations = []
-
     if recs_fn:
         try:
-            recommendations = recs_fn(df, kpis, insights, config)
-        except TypeError:
             recommendations = recs_fn(df, kpis, insights)
+        except TypeError:
+            recommendations = recs_fn(df)
+    else:
+        recommendations = []
 
     # -------------------------
-    # VISUALS (OPTIONAL, SAFE)
+    # VISUALS
     # -------------------------
     visuals = []
     visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
@@ -54,26 +49,18 @@ def generate_report_payload(df, decision, policy, config):
     output_dir.mkdir(exist_ok=True)
 
     for hook in visual_hooks:
-        try:
-            # v2.7+ hook signature
-            path = hook(df, output_dir, config)
-        except TypeError:
-            # backward compatibility (v2.5 / v2.6 visuals)
-            path = hook(df, output_dir)
-
+        path = hook(df, output_dir)
         if path:
-            visuals.append(
-                {
-                    "path": path,
-                    "caption": hook.__doc__ or "",
-                }
-            )
+            visuals.append({
+                "path": path,
+                "caption": hook.__doc__ or ""
+            })
 
     return {
         "generated_at": datetime.utcnow().isoformat(),
         "domain": domain,
         "kpis": kpis,
-        "insights": insights,
+        "insights": insights,          # 🔥 NOW POPULATED
         "recommendations": recommendations,
         "visuals": visuals,
         "policy": policy.status,
