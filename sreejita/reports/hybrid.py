@@ -48,7 +48,9 @@ def _header_footer(canvas, doc):
 # ---------------------------------------------------------
 # MAIN REPORT ENTRY
 # ---------------------------------------------------------
-def run(input_path: str, config: dict, output_path: str | None = None) -> str:
+from typing import Optional
+
+def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
 
     if output_path is None:
