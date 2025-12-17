@@ -1,15 +1,6 @@
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-
-
-def human_readable_number(x, _):
-    if abs(x) >= 1_000_000:
-        return f"{x/1_000_000:.1f}M"
-    if abs(x) >= 1_000:
-        return f"{x/1_000:.0f}K"
-    return f"{int(x)}"
 
 
 # =====================================================
@@ -44,11 +35,6 @@ def sales_trend(df, output_path: Path, sales_col="sales"):
     plt.xlabel("Month")
     plt.ylabel("Total Sales")
     plt.grid(alpha=0.3)
-
-    ax = plt.gca()
-    ax.yaxis.set_major_formatter(FuncFormatter(human_readable_number))
-    ax.ticklabel_format(style="plain", axis="y")
-
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -70,11 +56,6 @@ def sales_by_category(df, output_path: Path,
     agg.plot(kind="bar")
     plt.title("Sales by Category")
     plt.ylabel("Sales")
-
-    ax = plt.gca()
-    ax.yaxis.set_major_formatter(FuncFormatter(human_readable_number))
-    ax.ticklabel_format(style="plain", axis="y")
-
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
@@ -94,14 +75,23 @@ def shipping_cost_vs_sales(df, output_path: Path):
     plt.xlabel("Sales")
     plt.ylabel("Shipping Cost")
     plt.title("Shipping Cost vs Sales")
-
-    ax = plt.gca()
-    ax.xaxis.set_major_formatter(FuncFormatter(human_readable_number))
-    ax.yaxis.set_major_formatter(FuncFormatter(human_readable_number))
-    ax.ticklabel_format(style="plain", axis="both")
-
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
 
     return output_path
+
+
+# =====================================================
+# INTERNAL REGISTRY HOOKS (⚠️ REQUIRED)
+# =====================================================
+def _sales_trend_v27(df, output_dir: Path):
+    return sales_trend(df, output_dir / "sales_trend.png")
+
+
+def _sales_by_category_v27(df, output_dir: Path):
+    return sales_by_category(df, output_dir / "sales_by_category.png")
+
+
+def _shipping_cost_vs_sales_v27(df, output_dir: Path):
+    return shipping_cost_vs_sales(df, output_dir / "shipping_cost_vs_sales.png")
