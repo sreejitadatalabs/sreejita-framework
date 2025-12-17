@@ -8,8 +8,7 @@ from sreejita.reporting.formatters import fmt_currency
 
 def bar(df, col, out):
     """
-    Category bar chart with executive-grade visual polish.
-    Insight-driven, deterministic, PDF-readable.
+    Category bar chart with currency formatting and insight-driven title.
     """
 
     schema = detect_schema(df)
@@ -20,7 +19,7 @@ def bar(df, col, out):
     if not schema["numeric_measures"]:
         return
 
-    # Use first numeric measure (usually sales / revenue)
+    # Use first numeric measure (usually sales)
     value_col = schema["numeric_measures"][0]
 
     data = (
@@ -45,34 +44,18 @@ def bar(df, col, out):
         palette="Blues_r",
     )
 
-    # -------------------------------
-    # INSIGHT-DRIVEN TITLE (D1)
-    # -------------------------------
+    # ---------- POLISH ----------
     ax.set_title(
-        f"{top_category} contributes the largest share of total value ({top_share:.1f}%)",
-        fontsize=11,
-        pad=10,
+        f"{top_category} Drives {top_share:.1f}% of Total Revenue"
     )
-
-    # -------------------------------
-    # SEMANTIC AXIS LABELS (D3)
-    # -------------------------------
-    ax.set_xlabel("Total Order Value ($)")
-    ax.set_ylabel(col.replace("_", " ").title())
-
-    # -------------------------------
-    # FORMATTING & READABILITY (D2, D4)
-    # -------------------------------
-    ax.grid(axis="x", linestyle="--", alpha=0.4)
+    ax.set_xlabel("Revenue")
+    ax.set_ylabel("Category")
 
     ax.get_xaxis().set_major_formatter(
         FuncFormatter(lambda x, _: fmt_currency(x))
     )
-
-    # Disable scientific notation defensively
     ax.ticklabel_format(style="plain", axis="x")
-    ax.ticklabel_format(style="plain", axis="y")
+    # ----------------------------
 
-    fig.tight_layout()
     fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close()
