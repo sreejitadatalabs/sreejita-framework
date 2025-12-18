@@ -91,3 +91,4 @@ def generate_report_payload(df, decision, policy):
         "policy": policy.status,
         "narrative": narrative,
     }
+    
