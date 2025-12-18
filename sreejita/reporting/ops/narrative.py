@@ -5,5 +5,5 @@ def get_domain_narrative():
             "kpi": "avg_cycle_time",
             "format": "raw",
         },
-        "default_next_step": "Identify process bottlenecks and delays.",
+        "default_next_step": "Identify process bottlenecks and reduce delays.",
     }
