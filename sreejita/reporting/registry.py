@@ -24,6 +24,7 @@ from sreejita.reporting.customer.narrative import get_domain_narrative as custom
 from sreejita.reporting.finance.kpis import compute_finance_kpis
 from sreejita.reporting.finance.insights import generate_finance_insights
 from sreejita.reporting.finance.recommendations import generate_finance_recommendations
+from sreejita.reporting.finance.narrative import get_domain_narrative as finance_narrative
 
 # -------------------------
 # OPS
@@ -73,12 +74,13 @@ DOMAIN_REPORT_ENGINES = {
 }
 
 # =====================================================
-# DOMAIN NARRATIVE REGISTRY (NEW)
+# DOMAIN NARRATIVE REGISTRY
 # =====================================================
 
 DOMAIN_NARRATIVES = {
     "retail": retail_narrative,
     "customer": customer_narrative,
+    "finance": finance_narrative,
 }
 
 # =====================================================
