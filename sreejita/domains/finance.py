@@ -15,7 +15,9 @@ class FinanceDomain(BaseDomain):
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         return df
 
-    # -------- required abstract methods --------
+    # -------------------------
+    # REQUIRED ABSTRACT METHODS
+    # -------------------------
 
     def calculate_kpis(self, df: pd.DataFrame):
         from sreejita.reporting.finance.kpis import compute_finance_kpis
