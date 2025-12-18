@@ -1,19 +1,20 @@
 """
 Domain Registry (v2.x FINAL)
 
-This file defines the SINGLE registry instance used
-across the entire framework.
+There must be exactly ONE registry instance in the system.
+All domains register here.
+All routers resolve engines from here.
 """
 
 class DomainRegistry:
     def __init__(self):
         self._domains = {}
 
-    def register(self, name, domain_cls, detector_cls=None):
-        self._domains[name] = domain_cls
+    def register(self, name, domain_cls):
+        self._domains[name.lower()] = domain_cls
 
     def get_domain(self, name):
-        domain_cls = self._domains.get(name)
+        domain_cls = self._domains.get(name.lower())
         if not domain_cls:
             return None
         return domain_cls()
@@ -22,5 +23,5 @@ class DomainRegistry:
         return list(self._domains.keys())
 
 
-# 🔒 SINGLETON REGISTRY (THIS MUST BE IMPORTED EVERYWHERE)
+# 🔒 SINGLETON REGISTRY
 registry = DomainRegistry()
