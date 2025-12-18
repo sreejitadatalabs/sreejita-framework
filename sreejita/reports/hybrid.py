@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -116,7 +116,7 @@ def render_executive_brief(story, styles, payload):
 
 
 # =====================================================
-# MAIN PIPELINE (UNCHANGED BELOW)
+# MAIN PIPELINE
 # =====================================================
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
@@ -134,6 +134,18 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     payload = generate_report_payload(df, decision, policy)
 
+    # 🔒 HARD GUARD (fixes Finance crash)
+    if payload is None:
+        raise RuntimeError(
+            f"No reporting engine registered for domain '{decision.selected_domain}'"
+        )
+
+    # 🔑 SINGLE SOURCE OF TRUTH
+    kpis = payload["kpis"]
+    insights = payload["insights"]
+    recommendations = payload["recommendations"]
+    visuals = payload["visuals"]
+
     styles = getSampleStyleSheet()
     title = ParagraphStyle("title", parent=styles["Heading1"], alignment=1)
 
@@ -147,11 +159,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     )
 
     story = []
-
-    # Remaining pages stay EXACTLY as before
-    # (KPIs table, visuals, insights, recommendations, metadata)
-
-
 
     # ================= EXECUTIVE BRIEF =================
     render_executive_brief(story, styles, payload)
@@ -168,21 +175,16 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     for k, v in kpis.items():
         key = k.replace("_", " ").title()
-
         key_lower = k.lower()
 
         if "ratio" in key_lower or "margin" in key_lower or "discount" in key_lower:
             val = fmt_percent(v)
-
         elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
             val = f"{int(v):,}"
-
         elif isinstance(v, (int, float)):
             val = fmt_currency(v)
-
         else:
             val = str(v)
-
 
         formatted_kpis.append([key, val])
 
@@ -193,9 +195,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     # ================= PAGE 2 =================
     story.append(Paragraph("Evidence Snapshot", title))
-    for img, cap in visuals:
-        story.append(Image(str(img), width=14 * cm, height=8 * cm))
-        story.append(Paragraph(cap, styles["BodyText"]))
+    for v in visuals:
+        story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
+        story.append(Paragraph(v.get("caption", ""), styles["BodyText"]))
         story.append(Spacer(1, 18))
     story.append(PageBreak())
 
@@ -221,9 +223,5 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             )
         story.append(Spacer(1, 14))
 
-    # ================= FINAL =================
-    render_data_quality_scorecard(story, styles, df)
-    render_report_metadata(story, styles, df, input_path)
-
-    doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
+    doc.build(story)
     return str(output_path)
