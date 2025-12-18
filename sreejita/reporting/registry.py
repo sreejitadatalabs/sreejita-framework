@@ -52,6 +52,13 @@ from sreejita.reporting.marketing.kpis import compute_marketing_kpis
 from sreejita.reporting.marketing.insights import generate_marketing_insights
 from sreejita.reporting.marketing.recommendations import generate_marketing_recommendations
 from sreejita.reporting.marketing.narrative import get_domain_narrative as marketing_narrative
+# -------------------------
+# ECOMMERCE
+# -------------------------
+from sreejita.reporting.ecommerce.kpis import compute_ecommerce_kpis
+from sreejita.reporting.ecommerce.insights import generate_ecommerce_insights
+from sreejita.reporting.ecommerce.recommendations import generate_ecommerce_recommendations
+from sreejita.reporting.ecommerce.narrative import get_domain_narrative as ecommerce_narrative
 
 
 # =====================================================
@@ -89,6 +96,11 @@ DOMAIN_REPORT_ENGINES = {
     "insights": generate_marketing_insights,
     "recommendations": generate_marketing_recommendations,
     },
+        "ecommerce": {
+        "kpis": compute_ecommerce_kpis,
+        "insights": generate_ecommerce_insights,
+        "recommendations": generate_ecommerce_recommendations,
+    },
 
 }
 
@@ -103,6 +115,7 @@ DOMAIN_NARRATIVES = {
     "healthcare": healthcare_narrative,
     "ops": ops_narrative,
     "marketing": marketing_narrative,
+        "ecommerce": ecommerce_narrative,
 }
 
 # =====================================================
