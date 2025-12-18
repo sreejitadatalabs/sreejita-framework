@@ -1,42 +1,40 @@
-"""
-Finance Domain Module
-"""
-
-from typing import Dict, List, Any, Set
+from typing import Set
 import pandas as pd
 
-from .base import BaseDomain
+from sreejita.domains.base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 class FinanceDomain(BaseDomain):
     name = "finance"
-    description = "Financial analytics"
+    description = "Finance analytics domain"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return isinstance(df, pd.DataFrame)
+        return isinstance(df, pd.DataFrame) and {"revenue", "cost"}.issubset(df.columns)
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df.fillna(0)
+        return df
 
-    def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        kpis = {}
-        if "revenue" in df.columns:
-            kpis["Total Revenue"] = df["revenue"].sum()
-        if "expenses" in df.columns:
-            kpis["Total Expenses"] = df["expenses"].sum()
-        return kpis
+    # -------- required abstract methods --------
 
-    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[str]:
-        return [f"{k}: {v}" for k, v in kpis.items()]
+    def calculate_kpis(self, df: pd.DataFrame):
+        from sreejita.reporting.finance.kpis import compute_finance_kpis
+        return compute_finance_kpis(df)
+
+    def generate_insights(self, df: pd.DataFrame, kpis):
+        from sreejita.reporting.finance.insights import generate_finance_insights
+        return generate_finance_insights(df, kpis)
 
 
 class FinanceDomainDetector(BaseDomainDetector):
     domain_name = "finance"
 
     FINANCE_COLUMNS: Set[str] = {
-        "revenue", "expenses", "profit",
-        "cost", "balance", "margin"
+        "revenue",
+        "cost",
+        "expense",
+        "profit",
+        "cash",
     }
 
     def detect(self, df) -> DomainDetectionResult:
@@ -46,19 +44,18 @@ class FinanceDomainDetector(BaseDomainDetector):
         cols = {str(c).lower() for c in df.columns}
         matches = cols.intersection(self.FINANCE_COLUMNS)
 
-        score = min((len(matches) / len(self.FINANCE_COLUMNS)) * 1.5, 1.0)
+        confidence = min(len(matches) / len(self.FINANCE_COLUMNS) * 1.5, 1.0)
 
         return DomainDetectionResult(
             domain="finance",
-            confidence=score,
-            signals={"matched_columns": list(matches)}
+            confidence=confidence,
+            signals={"matched_columns": sorted(matches)},
         )
 
-# v2.0 registration hook
+
 def register(registry):
     registry.register(
         name="finance",
         domain_cls=FinanceDomain,
         detector_cls=FinanceDomainDetector,
     )
-
