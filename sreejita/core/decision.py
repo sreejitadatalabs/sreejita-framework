@@ -13,7 +13,9 @@ class DecisionExplanation:
     signals: Dict[str, Any]
     rules_applied: List[str]
 
-    fingerprint: Optional[str] = None   # ✅ ADD THIS
+    # ✅ Phase 2 additions (non-breaking)
+    domain_scores: Optional[Dict[str, Any]] = None
+    fingerprint: Optional[str] = None
 
     timestamp: str = field(
         default_factory=lambda: datetime.utcnow().isoformat()
