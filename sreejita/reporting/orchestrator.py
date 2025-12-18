@@ -7,40 +7,41 @@ from sreejita.reporting.registry import (
     DOMAIN_NARRATIVES,
 )
 
+
 def generate_report_payload(df, decision, policy):
     domain = decision.selected_domain
-    
+
     engine = DOMAIN_REPORT_ENGINES.get(domain)
     if not engine:
-        return {
-            "generated_at": datetime.utcnow().isoformat(),
-            "domain": domain,
-            "kpis": {},
-            "insights": ["WARNING: Domain '{}' not recognized. Using generic analysis.".format(domain)],
-            "recommendations": [],
-            "visuals": [],
-            "policy": policy.status,
-            "narrative": {"domain": domain, "description": "Generic analysis - domain not specifically configured"},
-        }
-    
+        return None
+
+    # -------------------------
     # KPIs (Phase 2.2 – Step 1)
+    # -------------------------
     from sreejita.reporting.kpi_engine import normalize_kpis
+
     raw_kpis = engine["kpis"](df)
     kpis = normalize_kpis(raw_kpis)
-    
+
+    # -------------------------
     # INSIGHTS (Phase 2.2 – Step 2)
+    # -------------------------
     insights_fn = engine.get("insights")
     insights = []
+
     if insights_fn:
         try:
             raw_insights = insights_fn(df, kpis) or []
         except TypeError:
             raw_insights = insights_fn(df) or []
-        
+
+        # ✅ Semantic validation added here
         from sreejita.reporting.insights import normalize_and_validate_insights
         insights = normalize_and_validate_insights(raw_insights)
-    
+
+    # -------------------------
     # RECOMMENDATIONS
+    # -------------------------
     recs_fn = engine.get("recommendations")
     if recs_fn:
         try:
@@ -49,12 +50,16 @@ def generate_report_payload(df, decision, policy):
             recommendations = recs_fn(df)
     else:
         recommendations = []
-    
+
+    # -------------------------
     # VISUALS
+    # -------------------------
     visuals = []
     visual_hooks = DOMAIN_VISUALS.get(domain, {}).get("__always__", [])
+
     output_dir = Path("hybrid_images")
     output_dir.mkdir(exist_ok=True)
+
     for hook in visual_hooks:
         path = hook(df, output_dir)
         if path:
@@ -62,11 +67,13 @@ def generate_report_payload(df, decision, policy):
                 "path": path,
                 "caption": hook.__doc__ or ""
             })
-    
+
+    # -------------------------
     # NARRATIVE
+    # -------------------------
     narrative_fn = DOMAIN_NARRATIVES.get(domain)
     narrative = narrative_fn() if narrative_fn else {}
-    
+
     return {
         "generated_at": datetime.utcnow().isoformat(),
         "domain": domain,
