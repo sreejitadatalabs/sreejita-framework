@@ -5,5 +5,5 @@ def get_domain_narrative():
             "kpi": "conversion_rate",
             "format": "percent",
         },
-        "default_next_step": "Optimize underperforming campaigns.",
+        "default_next_step": "Optimize or pause underperforming campaigns.",
     }
