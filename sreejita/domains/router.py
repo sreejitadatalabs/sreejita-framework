@@ -27,12 +27,7 @@ DOMAIN_DETECTORS = [
     OpsDomainDetector(),
     RetailDomainDetector(),
 ]
-    "customer": CustomerDomain(),
-    "finance": FinanceDomain(),
-    "ops": OpsDomain(),
-    "healthcare": HealthcareDomain(),
-    "marketing": MarketingDomain(),
-}
+    
 
 # ------------------------
 # Observability
