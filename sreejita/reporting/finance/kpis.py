@@ -1,10 +1,10 @@
 def compute_finance_kpis(df):
+    revenue = df["revenue"].sum()
+    cost = df["cost"].sum()
+
     return {
-        "total_revenue": df["revenue"].sum(),
-        "total_cost": df["cost"].sum(),
-        "net_profit": df["revenue"].sum() - df["cost"].sum(),
-        "profit_margin": (
-            (df["revenue"].sum() - df["cost"].sum()) / df["revenue"].sum()
-            if df["revenue"].sum() else 0
-        ),
+        "total_revenue": revenue,
+        "total_cost": cost,
+        "net_profit": revenue - cost,
+        "profit_margin": (revenue - cost) / revenue if revenue else 0,
     }
