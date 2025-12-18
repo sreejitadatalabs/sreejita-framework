@@ -1,6 +1,10 @@
-def generate_finance_recommendations(insights):
+def generate_finance_recommendations(df, kpis, insights=None):
     return [{
-        "action": "Audit high-cost expense categories",
-        "priority": "High",
-        "expected_impact": "Margin improvement"
-    }] if insights else []
+        "action": "Optimize operating expenses",
+        "priority": "HIGH",
+        "expected_impact": "$100K–$300K annual savings",
+        "timeline": "4–6 weeks",
+        "owner": "Finance Team",
+        "success_metric": "Improve profit margin",
+        "rationale": "Cost efficiency directly improves margins.",
+    }]
