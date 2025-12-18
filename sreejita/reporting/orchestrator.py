@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+
 from sreejita.reporting.registry import (
     DOMAIN_REPORT_ENGINES,
     DOMAIN_VISUALS,
@@ -15,25 +16,28 @@ def generate_report_payload(df, decision, policy):
         return None
 
     # -------------------------
-    # KPIs
+    # KPIs (Phase 2.2 – Step 1)
     # -------------------------
     from sreejita.reporting.kpi_engine import normalize_kpis
 
     raw_kpis = engine["kpis"](df)
     kpis = normalize_kpis(raw_kpis)
 
-
     # -------------------------
-    # INSIGHTS
+    # INSIGHTS (Phase 2.2 – Step 2)
     # -------------------------
     insights_fn = engine.get("insights")
     insights = []
 
     if insights_fn:
         try:
-            insights = insights_fn(df, kpis) or []
+            raw_insights = insights_fn(df, kpis) or []
         except TypeError:
-            insights = insights_fn(df) or []
+            raw_insights = insights_fn(df) or []
+
+        # ✅ Semantic validation added here
+        from sreejita.reporting.insights import normalize_and_validate_insights
+        insights = normalize_and_validate_insights(raw_insights)
 
     # -------------------------
     # RECOMMENDATIONS
@@ -65,7 +69,7 @@ def generate_report_payload(df, decision, policy):
             })
 
     # -------------------------
-    # NARRATIVE (NEW)
+    # NARRATIVE
     # -------------------------
     narrative_fn = DOMAIN_NARRATIVES.get(domain)
     narrative = narrative_fn() if narrative_fn else {}
@@ -78,5 +82,5 @@ def generate_report_payload(df, decision, policy):
         "recommendations": recommendations,
         "visuals": visuals,
         "policy": policy.status,
-        "narrative": narrative,   # 👈 NEW
+        "narrative": narrative,
     }
