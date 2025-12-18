@@ -17,106 +17,96 @@ from reportlab.platypus import (
     Image,
 )
 
-from sreejita.reporting.formatters import fmt_currency, fmt_percent
 from sreejita.reporting.orchestrator import generate_report_payload
 from sreejita.domains.router import decide_domain
 from sreejita.policy.engine import PolicyEngine
 from sreejita.core.cleaner import clean_dataframe
 
+from sreejita.core.kpi_normalizer import KPI_REGISTRY
+
 
 # =====================================================
-# HELPERS
+# KPI Formatting (Contract-Driven)
 # =====================================================
-def format_by_hint(value, hint):
+def format_kpi_value(kpi_name, value):
+    contract = KPI_REGISTRY.get(kpi_name)
+
     if value is None:
         return "N/A"
-    if hint == "currency":
-        return fmt_currency(value)
-    if hint == "percent":
-        return fmt_percent(value)
-    if hint == "count":
+
+    if not contract:
+        return str(value)
+
+    if contract.unit == "currency":
+        return f"${value:,.0f}"
+
+    if contract.unit == "percent":
+        return f"{value:.1f}%"
+
+    if contract.unit == "count":
         return f"{int(value):,}"
+
     return str(value)
 
 
 # =====================================================
-# EXECUTIVE SUMMARY CARD
+# Executive Summary (Narrative-Driven)
 # =====================================================
 def render_executive_brief(story, styles, payload):
     kpis = payload["kpis"]
     insights = payload["insights"]
-    recommendations = payload["recommendations"]
     narrative = payload.get("narrative", {})
 
     warnings = sum(1 for i in insights if i.get("level") == "WARNING")
     risks = sum(1 for i in insights if i.get("level") == "RISK")
-
-    low, high = 0, 0
-    for r in recommendations:
-        impact = r.get("expected_impact", "")
-        if "$" in impact:
-            nums = (
-                impact.replace("$", "")
-                .replace(",", "")
-                .replace("–", "-")
-                .split()
-            )
-            vals = [float(v) for v in nums if v.replace(".", "").isdigit()]
-            if len(vals) == 1:
-                low += vals[0]
-                high += vals[0]
-            elif len(vals) >= 2:
-                low += vals[0]
-                high += vals[1]
 
     box = ParagraphStyle(
         "exec_box",
         parent=styles["BodyText"],
         backColor="#F2F4F7",
         borderPadding=10,
-        spaceAfter=16,
+        spaceAfter=14,
     )
 
     story.append(Paragraph("<b>EXECUTIVE BRIEF (1-MINUTE READ)</b>", box))
 
+    # Headline KPI
     headline = narrative.get("headline")
     if headline:
-        kpi_key = headline["kpi"]
-        label = headline["label"]
-        fmt = headline.get("format", "raw")
+        kpi_key = headline.get("kpi")
+        label = headline.get("label", "Key Metric")
+
+        value = format_kpi_value(kpi_key, kpis.get(kpi_key))
+        story.append(Paragraph(f"{label}: {value}", box))
+
+    story.append(
+        Paragraph(
+            f"⚠️ Issues Identified: {warnings} WARNING(s), {risks} RISK(s)",
+            box,
+        )
+    )
+
+    # Semantic warnings surfaced
+    semantic_flags = [
+        i for i in insights if "semantic_warning" in i
+    ]
+    if semantic_flags:
         story.append(
             Paragraph(
-                f"{label}: {format_by_hint(kpis.get(kpi_key), fmt)}",
+                f"⚠️ {len(semantic_flags)} insight(s) require semantic review",
                 box,
             )
         )
 
-    story.append(Paragraph(f"⚠️ Issues Found: {warnings} WARNING(s), {risks} RISK(s)", box))
-
-    if high > 0:
-        if low == high:
-            story.append(
-                Paragraph(f"💡 Available Quick Wins: ${high:,.0f} annually", box)
-            )
-        else:
-            story.append(
-                Paragraph(
-                    f"💡 Available Quick Wins: ${low:,.0f} – ${high:,.0f} annually",
-                    box,
-                )
-            )
-
-    story.append(Paragraph("✅ Data Quality: EXCELLENT (~99% confidence)", box))
-
     next_step = narrative.get("default_next_step")
     if next_step:
-        story.append(Paragraph(f"🎯 Next Step: {next_step}", box))
+        story.append(Paragraph(f"🎯 Recommended Next Step: {next_step}", box))
 
-    story.append(Spacer(1, 14))
+    story.append(Spacer(1, 12))
 
 
 # =====================================================
-# MAIN PIPELINE
+# Main Entry
 # =====================================================
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
@@ -133,17 +123,11 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
 
     payload = generate_report_payload(df, decision, policy)
-
-    # 🔒 HARD GUARD (fixes Finance crash)
     if payload is None:
-        raise RuntimeError(
-            f"No reporting engine registered for domain '{decision.selected_domain}'"
-        )
+        raise RuntimeError("Report payload generation failed")
 
-    # 🔑 SINGLE SOURCE OF TRUTH
     kpis = payload["kpis"]
     insights = payload["insights"]
-    recommendations = payload["recommendations"]
     visuals = payload["visuals"]
 
     styles = getSampleStyleSheet()
@@ -160,68 +144,55 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story = []
 
-    # ================= EXECUTIVE BRIEF =================
+    # ================= EXECUTIVE =================
     render_executive_brief(story, styles, payload)
 
-    # ================= PAGE 1 =================
-    story.append(Paragraph("Executive Snapshot", title))
-    story.append(Spacer(1, 12))
-    story.append(Paragraph(f"Detected Domain: {decision.selected_domain}", styles["BodyText"]))
-    story.append(Paragraph(f"Confidence: {decision.confidence:.2f}", styles["BodyText"]))
-    story.append(Paragraph(f"Policy Status: {policy.status}", styles["BodyText"]))
+    # ================= KPIs =================
+    story.append(PageBreak())
+    story.append(Paragraph("Key Performance Indicators", title))
     story.append(Spacer(1, 12))
 
-    formatted_kpis = []
-
+    table_data = []
     for k, v in kpis.items():
-        key = k.replace("_", " ").title()
-        key_lower = k.lower()
+        label = k.replace("_", " ").title()
+        table_data.append([label, format_kpi_value(k, v)])
 
-        if "ratio" in key_lower or "margin" in key_lower or "discount" in key_lower:
-            val = fmt_percent(v)
-        elif "count" in key_lower or "records" in key_lower or "orders" in key_lower:
-            val = f"{int(v):,}"
-        elif isinstance(v, (int, float)):
-            val = fmt_currency(v)
-        else:
-            val = str(v)
+    table = Table(table_data, colWidths=[7 * cm, 7 * cm])
+    table.setStyle(
+        TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, "#CCCCCC"),
+            ("BACKGROUND", (0, 0), (-1, 0), "#F2F4F7"),
+        ])
+    )
+    story.append(table)
 
-        formatted_kpis.append([key, val])
+    # ================= VISUALS =================
+    if visuals:
+        story.append(PageBreak())
+        story.append(Paragraph("Visual Evidence", title))
+        for v in visuals:
+            story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
+            story.append(Paragraph(v.get("caption", ""), styles["BodyText"]))
+            story.append(Spacer(1, 14))
 
-    kpi_table = Table(formatted_kpis, colWidths=[7 * cm, 7 * cm])
-    kpi_table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, "#999999")]))
-    story.append(kpi_table)
+    # ================= INSIGHTS =================
     story.append(PageBreak())
-
-    # ================= PAGE 2 =================
-    story.append(Paragraph("Evidence Snapshot", title))
-    for v in visuals:
-        story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
-        story.append(Paragraph(v.get("caption", ""), styles["BodyText"]))
-        story.append(Spacer(1, 18))
-    story.append(PageBreak())
-
-    # ================= PAGE 3 =================
-    story.append(Paragraph("Key Insights (Threshold-Based)", title))
+    story.append(Paragraph("Key Insights", title))
     for ins in insights:
-        story.append(
-            Paragraph(
-                f"[{ins['level']}] {ins['title']} — {ins.get('value','')}",
-                styles["BodyText"],
-            )
-        )
+        badge = ins["level"]
+        text = f"[{badge}] {ins['title']} — {ins.get('value','')}"
+        story.append(Paragraph(text, styles["BodyText"]))
+        story.append(Paragraph(ins.get("why", ""), styles["BodyText"]))
         story.append(Paragraph(ins.get("so_what", ""), styles["BodyText"]))
-        story.append(Spacer(1, 10))
-    story.append(PageBreak())
 
-    # ================= PAGE 4 =================
-    story.append(Paragraph("Recommendations", styles["Heading2"]))
-    for r in recommendations:
-        for k, v in r.items():
+        if "semantic_warning" in ins:
             story.append(
-                Paragraph(f"<b>{k.replace('_',' ').title()}:</b> {v}", styles["BodyText"])
+                Paragraph(
+                    f"⚠️ {ins['semantic_warning']}",
+                    styles["Italic"],
+                )
             )
-        story.append(Spacer(1, 14))
+        story.append(Spacer(1, 10))
 
     doc.build(story)
     return str(output_path)
