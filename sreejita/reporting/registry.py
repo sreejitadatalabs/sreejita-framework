@@ -38,10 +38,11 @@ from sreejita.reporting.ops.narrative import get_domain_narrative as ops_narrati
 # -------------------------
 # HEALTHCARE
 # -------------------------
+# HEALTHCARE
 from sreejita.reporting.healthcare.kpis import compute_healthcare_kpis
 from sreejita.reporting.healthcare.insights import generate_healthcare_insights
 from sreejita.reporting.healthcare.recommendations import generate_healthcare_recommendations
-
+from sreejita.reporting.healthcare.narrative import get_domain_narrative as healthcare_narrative
 
 # =====================================================
 # DOMAIN → ENGINE MAP
