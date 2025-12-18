@@ -194,5 +194,47 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             )
         story.append(Spacer(1, 10))
 
+        # ================= RECOMMENDATIONS =================
+        if payload.get("recommendations"):
+            story.append(PageBreak())
+            story.append(Paragraph("Recommended Actions", title))
+            story.append(Spacer(1, 12))
+
+            for idx, rec in enumerate(payload["recommendations"], start=1):
+                action = rec.get("action", "Action")
+                priority = rec.get("priority", "MEDIUM")
+                impact = rec.get("expected_impact", "")
+                timeline = rec.get("timeline", "")
+                owner = rec.get("owner", "")
+                rationale = rec.get("rationale", "")
+
+                story.append(
+                    Paragraph(
+                        f"<b>{idx}. {action}</b> "
+                        f"(Priority: {priority})",
+                        styles["BodyText"],
+                    )
+                )
+
+                if impact:
+                    story.append(
+                        Paragraph(f"Expected Impact: {impact}", styles["BodyText"])
+                    )
+                if timeline:
+                    story.append(
+                        Paragraph(f"Timeline: {timeline}", styles["BodyText"])
+                    )
+                if owner:
+                    story.append(
+                        Paragraph(f"Owner: {owner}", styles["BodyText"])
+                    )
+                if rationale:
+                    story.append(
+                        Paragraph(f"Rationale: {rationale}", styles["BodyText"])
+                    )
+
+                story.append(Spacer(1, 12))
+
+
     doc.build(story)
     return str(output_path)
