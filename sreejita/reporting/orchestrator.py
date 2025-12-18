@@ -1,6 +1,10 @@
 from pathlib import Path
 from datetime import datetime
-from sreejita.reporting.registry import DOMAIN_REPORT_ENGINES, DOMAIN_VISUALS
+from sreejita.reporting.registry import (
+    DOMAIN_REPORT_ENGINES,
+    DOMAIN_VISUALS,
+    DOMAIN_NARRATIVES,
+)
 
 
 def generate_report_payload(df, decision, policy):
@@ -11,19 +15,19 @@ def generate_report_payload(df, decision, policy):
         return None
 
     # -------------------------
-    # KPIs (MANDATORY)
+    # KPIs
     # -------------------------
     kpis = engine["kpis"](df)
 
     # -------------------------
-    # INSIGHTS (FIXED)
+    # INSIGHTS
     # -------------------------
     insights_fn = engine.get("insights")
     insights = []
 
     if insights_fn:
         try:
-            insights = insights_fn(df, kpis) or []   # ✅ force list
+            insights = insights_fn(df, kpis) or []
         except TypeError:
             insights = insights_fn(df) or []
 
@@ -56,12 +60,19 @@ def generate_report_payload(df, decision, policy):
                 "caption": hook.__doc__ or ""
             })
 
+    # -------------------------
+    # NARRATIVE (NEW)
+    # -------------------------
+    narrative_fn = DOMAIN_NARRATIVES.get(domain)
+    narrative = narrative_fn() if narrative_fn else {}
+
     return {
         "generated_at": datetime.utcnow().isoformat(),
         "domain": domain,
         "kpis": kpis,
-        "insights": insights,          # 🔥 NOW POPULATED
+        "insights": insights,
         "recommendations": recommendations,
         "visuals": visuals,
         "policy": policy.status,
+        "narrative": narrative,   # 👈 NEW
     }
