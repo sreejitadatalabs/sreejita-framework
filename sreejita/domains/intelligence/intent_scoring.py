@@ -1,6 +1,6 @@
 from .domain_intents import DOMAIN_INTENTS
 
-HIGH_WEIGHT = 5
+HIGH_WEIGHT = 3
 AMBIGUOUS_WEIGHT = 1
 
 
