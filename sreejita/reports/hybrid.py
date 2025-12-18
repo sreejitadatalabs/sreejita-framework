@@ -138,7 +138,19 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         for k, v in kpis.items()
     ]
 
+    from reportlab.platypus import Table, Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    styles = getSampleStyleSheet()
+
+    if not kpi_rows:
+        kpi_rows = [[
+            Paragraph("No KPIs available for this dataset", styles["Normal"]),
+            Paragraph("-", styles["Normal"])
+        ]]
+
     kpi_table = Table(kpi_rows, colWidths=[9 * cm, 5 * cm])
+
     kpi_table.setStyle(
         TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.5, "#CCCCCC"),
