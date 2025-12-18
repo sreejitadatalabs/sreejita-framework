@@ -20,7 +20,7 @@ from sreejita.reporting.orchestrator import generate_report_payload
 from sreejita.domains.router import decide_domain
 from sreejita.policy.engine import PolicyEngine
 from sreejita.core.cleaner import clean_dataframe
-
+from sreejita.domains.router_dispatch import dispatch_domain
 
 # =====================================================
 # HEADER / FOOTER (BRANDING)
@@ -84,7 +84,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     df = clean_dataframe(pd.read_csv(input_path, encoding="latin1"))["df"]
 
-    decision = decide_domain(df)
+    decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
 
     payload = generate_report_payload(df, decision, policy)
