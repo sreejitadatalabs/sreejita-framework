@@ -1,12 +1,14 @@
 def generate_healthcare_insights(df, kpis):
-    insights = []
+    score = kpis.get("outcome_score", 0)
 
-    if kpis["readmission_rate"] > 0.15:
-        insights.append({
-            "title": "High patient readmission rate",
-            "severity": "high",
-            "evidence": f"Readmission rate at {kpis['readmission_rate']:.1%}",
-            "metric": "readmission_rate"
-        })
+    level = "GOOD" if score > 80 else "WARNING" if score > 60 else "RISK"
 
-    return insights
+    return [{
+        "metric": "outcome_score",
+        "level": level,
+        "title": "Clinical Outcomes",
+        "value": f"{score:.1f}",
+        "what": "Average patient outcome score.",
+        "why": "Outcomes reflect care quality.",
+        "so_what": "Higher outcomes improve trust and compliance.",
+    }]
