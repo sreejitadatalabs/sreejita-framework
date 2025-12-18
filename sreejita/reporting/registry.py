@@ -29,9 +29,11 @@ from sreejita.reporting.finance.narrative import get_domain_narrative as finance
 # -------------------------
 # OPS
 # -------------------------
+# OPS
 from sreejita.reporting.ops.kpis import compute_ops_kpis
 from sreejita.reporting.ops.insights import generate_ops_insights
 from sreejita.reporting.ops.recommendations import generate_ops_recommendations
+from sreejita.reporting.ops.narrative import get_domain_narrative as ops_narrative
 
 # -------------------------
 # HEALTHCARE
