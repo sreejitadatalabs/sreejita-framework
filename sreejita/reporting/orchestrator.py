@@ -20,7 +20,14 @@ def generate_report_payload(df, decision, policy):
     # -------------------------
     from sreejita.reporting.kpi_engine import normalize_kpis
 
-    raw_kpis = engine["kpis"](df)
+    try:
+        raw_kpis = engine["kpis"](df)
+    except Exception as e:
+        raw_kpis = {}
+
+    if not raw_kpis:
+        raw_kpis = {}
+
     kpis = normalize_kpis(raw_kpis)
 
     # -------------------------
