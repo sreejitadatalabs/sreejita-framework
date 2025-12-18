@@ -5,6 +5,6 @@ def generate_finance_recommendations(df, kpis, insights=None):
         "expected_impact": "$100K–$300K annual savings",
         "timeline": "4–6 weeks",
         "owner": "Finance Team",
-        "success_metric": "Improve profit margin",
-        "rationale": "Cost efficiency directly improves margins.",
+        "success_metric": "Improved profit margin",
+        "rationale": "Reducing costs directly improves financial health.",
     }]
