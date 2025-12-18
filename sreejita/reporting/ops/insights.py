@@ -1,12 +1,14 @@
 def generate_ops_insights(df, kpis):
-    insights = []
+    rate = kpis.get("on_time_rate", 0)
 
-    if kpis["sla_breach_rate"] > 0.1:
-        insights.append({
-            "title": "Frequent SLA breaches detected",
-            "severity": "high",
-            "evidence": f"{kpis['sla_breach_rate']:.1%} processes breached SLA",
-            "metric": "sla_breach_rate"
-        })
+    level = "GOOD" if rate > 0.9 else "WARNING" if rate > 0.75 else "RISK"
 
-    return insights
+    return [{
+        "metric": "on_time_rate",
+        "level": level,
+        "title": "Delivery Reliability",
+        "value": f"{rate:.1%}",
+        "what": "Measures operational timeliness.",
+        "why": "Delays reduce efficiency and trust.",
+        "so_what": "Improving reliability lowers costs.",
+    }]
