@@ -84,6 +84,8 @@ DOMAIN_NARRATIVES = {
     "retail": retail_narrative,
     "customer": customer_narrative,
     "finance": finance_narrative,
+    "healthcare": healthcare_narrative,
+    "ops": ops_narrative,
 }
 
 # =====================================================
