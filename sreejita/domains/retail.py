@@ -4,15 +4,16 @@ from sreejita.domains.base import BaseDomainDetector
 class RetailDomainDetector(BaseDomainDetector):
     domain = "retail"
 
-    # Retail should be specific, not generic
+    # Retail-specific structure (strong)
     PRIMARY_SIGNALS = {
-        "pos_id",
         "store_id",
+        "pos_id",
         "aisle",
         "shelf",
         "cashier",
     }
 
+    # Product-level context (medium)
     SECONDARY_SIGNALS = {
         "product",
         "item",
@@ -21,7 +22,7 @@ class RetailDomainDetector(BaseDomainDetector):
         "sub_category",
     }
 
-    # Generic business metrics — LOW weight
+    # Generic business metrics (weak)
     GENERIC_SIGNALS = {
         "sales",
         "revenue",
