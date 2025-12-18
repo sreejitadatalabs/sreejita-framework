@@ -12,9 +12,18 @@ def generate_report_payload(df, decision, policy):
     domain = decision.selected_domain
 
     engine = DOMAIN_REPORT_ENGINES.get(domain)
-    if not engine:
-        return None
-
+if not engine:
+        # ⚠ FALLBACK: Unknown domain or engine not registered
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "domain": domain,
+            "kpis": {},
+            "insights": [f"⚠ Domain '{domain}' not recognized. Using generic analysis."],
+            "recommendations": [],
+            "visuals": [],
+            "policy": policy.status,
+            "narrative": {"domain": domain, "description": "Generic analysis - domain not specifically configured"},
+        }
     # -------------------------
     # KPIs (Phase 2.2 – Step 1)
     # -------------------------
