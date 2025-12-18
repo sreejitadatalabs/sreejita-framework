@@ -1,59 +1,119 @@
-from sreejita.core.decision import DomainDecision
-from sreejita.domains.retail import RetailDomainDetector
-from sreejita.domains.finance import FinanceDomainDetector
-# add other domains here as you extend
-# from sreejita.domains.healthcare import HealthcareDomainDetector
-# from sreejita.domains.ops import OpsDomainDetector
+from sreejita.domains.retail import RetailDomain, RetailDomainDetector
+from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
+from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
+from sreejita.domains.ops import OpsDomain, OpsDomainDetector
+from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
+from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 
+from sreejita.core.decision import DecisionExplanation
+from sreejita.observability.hooks import DecisionObserver
+from sreejita.core.fingerprint import dataframe_fingerprint
 
-DETECTORS = [
+# 🔹 Phase 2.1-B intelligence
+from sreejita.domains.intelligence.detector_v2 import (
+    compute_domain_scores,
+    select_best_domain,
+)
+
+# ------------------------
+# Domain detectors (Phase 1)
+# ------------------------
+
+DOMAIN_DETECTORS = [
     RetailDomainDetector(),
+    CustomerDomainDetector(),
     FinanceDomainDetector(),
-    # add more detectors here
+    OpsDomainDetector(),
+    HealthcareDomainDetector(),
+    MarketingDomainDetector(),
 ]
 
+DOMAIN_IMPLEMENTATIONS = {
+    "retail": RetailDomain(),
+    "customer": CustomerDomain(),
+    "finance": FinanceDomain(),
+    "ops": OpsDomain(),
+    "healthcare": HealthcareDomain(),
+    "marketing": MarketingDomain(),
+}
 
-def decide_domain(df) -> DomainDecision:
-    """
-    Runs all domain detectors and selects the best domain
-    using signal-weighted logic.
-    """
+# ------------------------
+# Observability
+# ------------------------
 
-    results = {}
+_OBSERVERS: list[DecisionObserver] = []
 
-    for detector in DETECTORS:
+
+def register_observer(observer: DecisionObserver):
+    _OBSERVERS.append(observer)
+
+
+# ------------------------
+# Domain decision (v2.5 — Phase 2.1-B)
+# ------------------------
+
+def decide_domain(df) -> DecisionExplanation:
+    rule_results = {}
+
+    # 1️⃣ Run Phase-1 rule-based detectors
+    for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
-        results[detector.domain] = result
+        rule_results[result.domain] = {
+            "confidence": result.confidence,
+            "signals": result.signals,
+        }
 
-    # ----------------------------------
-    # Prefer domains with PRIMARY signals
-    # ----------------------------------
-    primary_domains = {
-        d: r for d, r in results.items()
-        if r.signals.get("primary")
-    }
+    # 2️⃣ Phase-2 intent-weighted scoring
+    domain_scores = compute_domain_scores(df, rule_results)
 
-    candidates = primary_domains if primary_domains else results
+    # 3️⃣ Select best domain with confidence floor
+    selected_domain, confidence, meta = select_best_domain(domain_scores)
 
-    selected_domain, best_result = max(
-        candidates.items(),
-        key=lambda x: x[1].confidence
-    )
+    # 4️⃣ Build alternatives list (sorted)
+    alternatives = [
+        {
+            "domain": d,
+            "confidence": info["confidence"],
+        }
+        for d, info in sorted(
+            domain_scores.items(),
+            key=lambda x: x[1]["confidence"],
+            reverse=True
+        )
+        if d != selected_domain
+    ]
 
-    return DomainDecision(
+    # 5️⃣ Build decision object
+    decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
-        confidence=best_result.confidence,
+        confidence=confidence,
+        alternatives=alternatives,
+        signals=meta.get("signals", {}) if meta else {},
         rules_applied=[
-            "signal_weighted_detection",
-            "primary_signal_preference" if primary_domains else "fallback_selection",
+            "rule_based_domain_detection",
+            "intent_weighted_scoring",
+            "highest_confidence_selection",
         ],
-        signals={
-            d: {
-                "primary": list(r.signals["primary"]),
-                "secondary": list(r.signals["secondary"]),
-                "generic": list(r.signals["generic"]),
-            }
-            for d, r in results.items()
-        },
+        domain_scores=domain_scores,
     )
+
+    # 6️⃣ Attach fingerprint (replay guarantee)
+    decision.fingerprint = dataframe_fingerprint(df)
+
+    # 7️⃣ Observability hooks
+    for observer in _OBSERVERS:
+        observer.record(decision)
+
+    return decision
+
+
+# ------------------------
+# Domain application
+# ------------------------
+
+def apply_domain(df, domain_name: str):
+    domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
+    if domain:
+        return domain.preprocess(df)
+    return df
