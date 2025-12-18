@@ -138,27 +138,22 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         for k, v in kpis.items()
     ]
 
-    from reportlab.platypus import Table, Paragraph
-    from reportlab.lib.styles import getSampleStyleSheet
-
-    styles = getSampleStyleSheet()
-
+    # ---- SAFE EMPTY KPI HANDLING ----
     if not kpi_rows:
         kpi_rows = [[
-            Paragraph("No KPIs available for this dataset", styles["Normal"]),
-            Paragraph("-", styles["Normal"])
+            Paragraph("No KPIs available for this dataset", body),
+            Paragraph("-", body)
         ]]
 
     kpi_table = Table(kpi_rows, colWidths=[9 * cm, 5 * cm])
-
     kpi_table.setStyle(
         TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.5, "#CCCCCC"),
             ("BACKGROUND", (0, 0), (-1, 0), "#F2F4F7"),
         ])
     )
-    story.append(kpi_table)
 
+    story.append(kpi_table)
     story.append(PageBreak())
 
     # =====================================================
@@ -195,12 +190,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         story.append(Paragraph(ins.get("so_what", ""), body))
 
         if "semantic_warning" in ins:
-            story.append(
-                Paragraph(
-                    f"⚠ {ins['semantic_warning']}",
-                    italic,
-                )
-            )
+            story.append(Paragraph(f"⚠ {ins['semantic_warning']}", italic))
 
         story.append(Spacer(1, 12))
 
@@ -214,36 +204,16 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     if recommendations:
         for idx, rec in enumerate(recommendations, start=1):
-            story.append(
-                Paragraph(
-                    f"<b>{idx}. {rec.get('action','Action')}</b>",
-                    body,
-                )
-            )
+            story.append(Paragraph(f"<b>{idx}. {rec.get('action','Action')}</b>", body))
 
             if rec.get("rationale"):
-                story.append(
-                    Paragraph(
-                        f"<b>Rationale:</b> {rec['rationale']}",
-                        body,
-                    )
-                )
+                story.append(Paragraph(f"<b>Rationale:</b> {rec['rationale']}", body))
 
             if rec.get("expected_impact"):
-                story.append(
-                    Paragraph(
-                        f"<b>Expected Impact:</b> {rec['expected_impact']}",
-                        body,
-                    )
-                )
+                story.append(Paragraph(f"<b>Expected Impact:</b> {rec['expected_impact']}", body))
 
             if rec.get("timeline"):
-                story.append(
-                    Paragraph(
-                        f"<b>Timeline:</b> {rec['timeline']}",
-                        body,
-                    )
-                )
+                story.append(Paragraph(f"<b>Timeline:</b> {rec['timeline']}", body))
 
             story.append(Spacer(1, 12))
     else:
