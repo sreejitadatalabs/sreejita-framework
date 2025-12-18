@@ -1,13 +1,14 @@
 # =====================================================
-# REPORT ENGINE REGISTRY — v2.7
+# REPORT ENGINE REGISTRY — v2.9 (EXTENDED)
 # =====================================================
 
 # -------------------------
-# RETAIL (v2.7 — THRESHOLD-BASED)
+# RETAIL
 # -------------------------
 from sreejita.reporting.retail.kpis import compute_retail_kpis
 from sreejita.reporting.retail.insights import generate_retail_insights
 from sreejita.reporting.retail.recommendations import generate_retail_recommendations
+from sreejita.reporting.retail.narrative import get_domain_narrative as retail_narrative
 
 # -------------------------
 # CUSTOMER
@@ -15,6 +16,7 @@ from sreejita.reporting.retail.recommendations import generate_retail_recommenda
 from sreejita.reporting.customer.kpis import compute_customer_kpis
 from sreejita.reporting.customer.insights import generate_customer_insights
 from sreejita.reporting.customer.recommendations import generate_customer_recommendations
+from sreejita.reporting.customer.narrative import get_domain_narrative as customer_narrative
 
 # -------------------------
 # FINANCE
@@ -45,7 +47,7 @@ from sreejita.reporting.healthcare.recommendations import generate_healthcare_re
 DOMAIN_REPORT_ENGINES = {
     "retail": {
         "kpis": compute_retail_kpis,
-        "insights": generate_retail_insights,  # ✅ THRESHOLD-BASED
+        "insights": generate_retail_insights,
         "recommendations": generate_retail_recommendations,
     },
     "customer": {
@@ -71,7 +73,16 @@ DOMAIN_REPORT_ENGINES = {
 }
 
 # =====================================================
-# VISUAL REGISTRY (unchanged)
+# DOMAIN NARRATIVE REGISTRY (NEW)
+# =====================================================
+
+DOMAIN_NARRATIVES = {
+    "retail": retail_narrative,
+    "customer": customer_narrative,
+}
+
+# =====================================================
+# VISUAL REGISTRY (UNCHANGED)
 # =====================================================
 from sreejita.visuals.time_series import sales_trend_visual
 from sreejita.visuals.categorical import category_sales_visual
