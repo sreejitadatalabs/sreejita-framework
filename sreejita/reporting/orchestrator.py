@@ -45,11 +45,16 @@ def generate_report_payload(df, decision, policy):
         ) or []
 
         # Recommendations
-        recommendations = (
-            engine.generate_recommendations(df, kpis)
-            if hasattr(engine, "generate_recommendations")
-            else []
-        ) or []
+        from sreejita.reporting.recommendation_enricher import enrich_recommendations
+
+    raw_recs = (
+        engine.generate_recommendations(df, kpis)
+        if hasattr(engine, "generate_recommendations")
+        else []
+    )
+
+    recommendations = enrich_recommendations(raw_recs)
+
 
         # Visuals
         output_dir = Path("reports") / "visuals"
