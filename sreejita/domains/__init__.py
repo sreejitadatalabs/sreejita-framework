@@ -1,42 +1,35 @@
-"""Sreejita Framework - Domain Modules
+"""
+Sreejita Framework - Domain Initialization (v2.x FINAL)
 
-Domain modules extend the core engine with specialized KPIs, insights,
-and preprocessing for specific business contexts.
-
-Available Domains:
-- retail: Retail analytics, sales, inventory
-- ecommerce: E-commerce, conversions, cart analysis
-- customer: Customer segmentation, profiling, behavior
-- text: NLP preprocessing, sentiment, topic extraction
-- finance: Financial metrics, forecasting, risk
+This file ensures all domain modules are imported
+and registered into the SINGLE registry instance.
 """
 
-from .retail import RetailDomain
-from .ecommerce import EcommerceDomain
-from .customer import CustomerDomain
-from .text import TextDomain
-from .finance import FinanceDomain
-from .base import BaseDomain
+from sreejita.domains.registry import registry
+
+from sreejita.domains.retail import RetailDomain
+from sreejita.domains.ecommerce import EcommerceDomain
+from sreejita.domains.customer import CustomerDomain
+from sreejita.domains.marketing import MarketingDomain
+from sreejita.domains.healthcare import HealthcareDomain
+from sreejita.domains.ops import OpsDomain
+from sreejita.domains.finance import FinanceDomain
+
+# 🔒 REGISTER DOMAINS (ONCE)
+registry.register("retail", RetailDomain)
+registry.register("ecommerce", EcommerceDomain)
+registry.register("customer", CustomerDomain)
+registry.register("marketing", MarketingDomain)
+registry.register("healthcare", HealthcareDomain)
+registry.register("ops", OpsDomain)
+registry.register("finance", FinanceDomain)
 
 __all__ = [
     "RetailDomain",
     "EcommerceDomain",
     "CustomerDomain",
-    "TextDomain",
+    "MarketingDomain",
+    "HealthcareDomain",
+    "OpsDomain",
     "FinanceDomain",
-    "BaseDomain",
 ]
-
-DOMAIN_REGISTRY = {
-    "retail": RetailDomain,
-    "ecommerce": EcommerceDomain,
-    "customer": CustomerDomain,
-    "text": TextDomain,
-    "finance": FinanceDomain,
-}
-
-def get_domain(domain_name):
-    """Dynamically load domain module by name."""
-    if domain_name.lower() not in DOMAIN_REGISTRY:
-        raise ValueError(f"Unknown domain: {domain_name}. Available: {list(DOMAIN_REGISTRY.keys())}")
-    return DOMAIN_REGISTRY[domain_name.lower()]
