@@ -44,6 +44,16 @@ from sreejita.reporting.healthcare.insights import generate_healthcare_insights
 from sreejita.reporting.healthcare.recommendations import generate_healthcare_recommendations
 from sreejita.reporting.healthcare.narrative import get_domain_narrative as healthcare_narrative
 
+# -------------------------
+# MARKETING
+# -------------------------
+# MARKETING
+from sreejita.reporting.marketing.kpis import compute_marketing_kpis
+from sreejita.reporting.marketing.insights import generate_marketing_insights
+from sreejita.reporting.marketing.recommendations import generate_marketing_recommendations
+from sreejita.reporting.marketing.narrative import get_domain_narrative as marketing_narrative
+
+
 # =====================================================
 # DOMAIN → ENGINE MAP
 # =====================================================
@@ -74,6 +84,12 @@ DOMAIN_REPORT_ENGINES = {
         "insights": generate_healthcare_insights,
         "recommendations": generate_healthcare_recommendations,
     },
+    "marketing": {
+    "kpis": compute_marketing_kpis,
+    "insights": generate_marketing_insights,
+    "recommendations": generate_marketing_recommendations,
+    },
+
 }
 
 # =====================================================
@@ -86,6 +102,7 @@ DOMAIN_NARRATIVES = {
     "finance": finance_narrative,
     "healthcare": healthcare_narrative,
     "ops": ops_narrative,
+    "marketing": marketing_narrative,
 }
 
 # =====================================================
