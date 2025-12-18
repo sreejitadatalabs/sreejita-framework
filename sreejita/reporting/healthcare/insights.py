@@ -1,14 +1,26 @@
 def generate_healthcare_insights(df, kpis):
-    score = kpis.get("outcome_score", 0)
+    insights = []
 
-    level = "GOOD" if score > 80 else "WARNING" if score > 60 else "RISK"
+    outcome = kpis.get("avg_outcome_score", 0)
 
-    return [{
-        "metric": "outcome_score",
+    if outcome >= 80:
+        level = "GOOD"
+        msg = "Clinical outcomes are strong."
+    elif outcome >= 60:
+        level = "WARNING"
+        msg = "Outcomes show room for improvement."
+    else:
+        level = "RISK"
+        msg = "Low outcomes indicate quality risks."
+
+    insights.append({
+        "metric": "avg_outcome_score",
         "level": level,
         "title": "Clinical Outcomes",
-        "value": f"{score:.1f}",
+        "value": f"{outcome:.1f}",
         "what": "Average patient outcome score.",
-        "why": "Outcomes reflect care quality.",
-        "so_what": "Higher outcomes improve trust and compliance.",
-    }]
+        "why": msg,
+        "so_what": "Better outcomes improve patient safety and trust.",
+    })
+
+    return insights
