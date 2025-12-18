@@ -12,6 +12,8 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
+    PageBreak,
+    Image,
 )
 
 from sreejita.reporting.orchestrator import generate_report_payload
@@ -22,7 +24,7 @@ from sreejita.core.kpi_normalizer import KPI_REGISTRY
 
 
 # =====================================================
-# KPI Formatting (STRICTLY CONTRACT-DRIVEN)
+# KPI Formatting (Contract-Driven)
 # =====================================================
 def format_kpi_value(kpi_name, value):
     contract = KPI_REGISTRY.get(kpi_name)
@@ -48,7 +50,7 @@ def format_kpi_value(kpi_name, value):
 
 
 # =====================================================
-# EXECUTIVE PAGE-1 REPORT
+# FULL REPORT
 # =====================================================
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
@@ -56,29 +58,25 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
-        output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = out_dir / f"Hybrid_Full_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
     # -------------------------
-    # Load & Clean Data
+    # Load & Prepare Data
     # -------------------------
     df_raw = pd.read_csv(input_path, encoding="latin1")
     df = clean_dataframe(df_raw)["df"]
 
-    # -------------------------
-    # Decision + Policy
-    # -------------------------
     decision = decide_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
 
-    # -------------------------
-    # Payload
-    # -------------------------
     payload = generate_report_payload(df, decision, policy)
     if payload is None:
         raise RuntimeError("Report payload generation failed")
 
     kpis = payload.get("kpis", {})
     insights = payload.get("insights", [])
+    recommendations = payload.get("recommendations", [])
+    visuals = payload.get("visuals", [])
     narrative = payload.get("narrative", {})
 
     warnings = sum(1 for i in insights if i.get("level") == "WARNING")
@@ -100,7 +98,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     heading = ParagraphStyle(
         "heading",
         parent=styles["Heading3"],
-        spaceAfter=6,
+        spaceAfter=8,
     )
 
     doc = SimpleDocTemplate(
@@ -115,7 +113,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story = []
 
     # =====================================================
-    # EXECUTIVE BRIEF
+    # PAGE 1 — EXECUTIVE SNAPSHOT
     # =====================================================
     story.append(Paragraph("<b>EXECUTIVE BRIEF (1-MINUTE READ)</b>", box))
 
@@ -141,9 +139,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     if next_step:
         story.append(Paragraph(f"■ Next Step: {next_step}", box))
 
-    # =====================================================
-    # EXECUTIVE SNAPSHOT
-    # =====================================================
     story.append(Spacer(1, 10))
     story.append(Paragraph("Executive Snapshot", heading))
 
@@ -162,16 +157,13 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     )
     story.append(snapshot_table)
 
-    # =====================================================
-    # KEY PERFORMANCE INDICATORS
-    # =====================================================
     story.append(Spacer(1, 14))
     story.append(Paragraph("Key Performance Indicators", heading))
 
-    kpi_rows = []
-    for kpi_name, value in kpis.items():
-        label = kpi_name.replace("_", " ").title()
-        kpi_rows.append([label, format_kpi_value(kpi_name, value)])
+    kpi_rows = [
+        [k.replace("_", " ").title(), format_kpi_value(k, v)]
+        for k, v in kpis.items()
+    ]
 
     kpi_table = Table(kpi_rows, colWidths=[8 * cm, 6 * cm])
     kpi_table.setStyle(
@@ -183,7 +175,68 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(kpi_table)
 
     # =====================================================
-    # BUILD (PAGE-1 ONLY)
+    # PAGE 2 — VISUAL EVIDENCE
     # =====================================================
+    if visuals:
+        story.append(PageBreak())
+        story.append(Paragraph("Visual Evidence", heading))
+        story.append(Spacer(1, 12))
+
+        for v in visuals:
+            story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
+            if v.get("caption"):
+                story.append(Paragraph(v["caption"], styles["BodyText"]))
+            story.append(Spacer(1, 16))
+
+    # =====================================================
+    # PAGE 3 — INSIGHTS + RECOMMENDATIONS
+    # =====================================================
+    story.append(PageBreak())
+    story.append(Paragraph("Key Insights & Recommended Actions", heading))
+    story.append(Spacer(1, 12))
+
+    for idx, ins in enumerate(insights, start=1):
+        story.append(
+            Paragraph(
+                f"<b>{idx}. [{ins['level']}] {ins['title']}</b>",
+                styles["BodyText"],
+            )
+        )
+        story.append(Paragraph(ins.get("why", ""), styles["BodyText"]))
+        story.append(Paragraph(ins.get("so_what", ""), styles["BodyText"]))
+
+        if "semantic_warning" in ins:
+            story.append(
+                Paragraph(
+                    f"⚠ {ins['semantic_warning']}",
+                    styles["Italic"],
+                )
+            )
+
+        # Attach recommendations immediately after insights
+        for rec in recommendations:
+            story.append(
+                Paragraph(
+                    f"→ <b>Action:</b> {rec.get('action')} "
+                    f"(Priority: {rec.get('priority','MEDIUM')})",
+                    styles["BodyText"],
+                )
+            )
+            if rec.get("expected_impact"):
+                story.append(
+                    Paragraph(
+                        f"Expected Impact: {rec['expected_impact']}",
+                        styles["BodyText"],
+                    )
+                )
+            if rec.get("timeline"):
+                story.append(
+                    Paragraph(
+                        f"Timeline: {rec['timeline']}",
+                        styles["BodyText"],
+                    )
+                )
+            story.append(Spacer(1, 10))
+
     doc.build(story)
     return str(output_path)
