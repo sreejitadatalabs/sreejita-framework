@@ -133,10 +133,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Paragraph("Key Performance Indicators", h1))
     story.append(Spacer(1, 10))
 
-kpi_rows = [["Metric", "Value"]] + [
-        [k.replace("_", " ").title(), format_kpi_value(k, v)]
-        for k, v in kpis.items()
-    ]
+kpi_rows = [["Metric", "Value"]]
+    for k, v in kpis.items():
+        kpi_rows.append([k.replace("_", " ").title(), format_kpi_value(k, v)])
     kpi_table = Table(kpi_rows, colWidths=[9 * cm, 5 * cm])
     kpi_table.setStyle(
         TableStyle([
