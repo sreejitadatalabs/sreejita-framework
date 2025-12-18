@@ -1,12 +1,15 @@
 from datetime import datetime
 from pathlib import Path
 
+from sreejita.reporting.recommendation_enricher import enrich_recommendations
+
 
 def generate_report_payload(df, decision, policy):
     """
-    v2.x HARDENED ORCHESTRATOR
+    v2.x FINAL ORCHESTRATOR
     - NEVER returns None
     - NEVER crashes Hybrid
+    - Always returns a valid payload
     """
 
     domain = decision.selected_domain
@@ -21,7 +24,7 @@ def generate_report_payload(df, decision, policy):
             "insights": [{
                 "level": "RISK",
                 "title": "Domain Engine Missing",
-                "so_what": "No domain engine was resolved for this dataset."
+                "so_what": "No domain engine could be resolved for this dataset.",
             }],
             "recommendations": [],
             "visuals": [],
@@ -30,33 +33,38 @@ def generate_report_payload(df, decision, policy):
         }
 
     try:
+        # -------------------------
         # KPIs
+        # -------------------------
         kpis = (
             engine.calculate_kpis(df)
             if hasattr(engine, "calculate_kpis")
             else {}
         ) or {}
 
-        # Insights
+        # -------------------------
+        # INSIGHTS
+        # -------------------------
         insights = (
             engine.generate_insights(df, kpis)
             if hasattr(engine, "generate_insights")
             else []
         ) or []
 
-        # Recommendations
-        from sreejita.reporting.recommendation_enricher import enrich_recommendations
+        # -------------------------
+        # RECOMMENDATIONS (ENRICHED)
+        # -------------------------
+        raw_recs = (
+            engine.generate_recommendations(df, kpis)
+            if hasattr(engine, "generate_recommendations")
+            else []
+        )
 
-    raw_recs = (
-        engine.generate_recommendations(df, kpis)
-        if hasattr(engine, "generate_recommendations")
-        else []
-    )
+        recommendations = enrich_recommendations(raw_recs)
 
-    recommendations = enrich_recommendations(raw_recs)
-
-
-        # Visuals
+        # -------------------------
+        # VISUALS
+        # -------------------------
         output_dir = Path("reports") / "visuals"
         visuals = (
             engine.generate_visuals(df, output_dir)
@@ -76,7 +84,7 @@ def generate_report_payload(df, decision, policy):
         }
 
     except Exception as e:
-        # LAST LINE OF DEFENSE — NEVER BREAK HYBRID
+        # FINAL DEFENSE — Hybrid must still render
         return {
             "generated_at": datetime.utcnow().isoformat(),
             "domain": domain,
