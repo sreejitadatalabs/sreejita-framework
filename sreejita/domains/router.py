@@ -20,14 +20,22 @@ from sreejita.domains.intelligence.detector_v2 import (
 # ------------------------
 
 DOMAIN_DETECTORS = [
+    RetailDomainDetector(),
     CustomerDomainDetector(),
     FinanceDomainDetector(),
+    OpsDomainDetector(),
     HealthcareDomainDetector(),
     MarketingDomainDetector(),
-    OpsDomainDetector(),
-    RetailDomainDetector(),
 ]
-    
+
+DOMAIN_IMPLEMENTATIONS = {
+    "retail": RetailDomain(),
+    "customer": CustomerDomain(),
+    "finance": FinanceDomain(),
+    "ops": OpsDomain(),
+    "healthcare": HealthcareDomain(),
+    "marketing": MarketingDomain(),
+}
 
 # ------------------------
 # Observability
