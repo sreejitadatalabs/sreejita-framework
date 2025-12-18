@@ -1,6 +1,15 @@
-def compute_healthcare_kpis(df):
-    return {
-        "avg_outcome_score": df["outcome_score"].mean(),
-        "readmission_rate": (df["readmitted"] == True).mean(),
-        "patient_count": len(df),
-    }
+from sreejita.core.kpi_utils import safe_mean
+import pandas as pd
+
+def compute_healthcare_kpis(df: pd.DataFrame):
+    kpis = {}
+
+    avg_outcome = safe_mean(df, "outcome_score")
+    if avg_outcome is not None:
+        kpis["avg_outcome_score"] = {
+            "value": round(avg_outcome, 2),
+            "label": "Average Outcome Score",
+            "unit": "score"
+        }
+
+    return kpis
