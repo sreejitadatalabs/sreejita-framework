@@ -17,7 +17,11 @@ def generate_report_payload(df, decision, policy):
     # -------------------------
     # KPIs
     # -------------------------
-    kpis = engine["kpis"](df)
+    from sreejita.reporting.kpi_engine import normalize_kpis
+
+    raw_kpis = engine["kpis"](df)
+    kpis = normalize_kpis(raw_kpis)
+
 
     # -------------------------
     # INSIGHTS
