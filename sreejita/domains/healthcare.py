@@ -1,83 +1,65 @@
-"""
-Healthcare Domain Module
-"""
-
-from typing import Dict, Any, List, Set
+from typing import Set
 import pandas as pd
 
-from .base import BaseDomain
+from sreejita.domains.base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
-# ---------------- Healthcare Analytics ----------------
-
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
-    description = "Healthcare analytics"
+    description = "Healthcare analytics domain"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return isinstance(df, pd.DataFrame)
+        required = {"outcome_score", "readmitted"}
+        return isinstance(df, pd.DataFrame) and required.issubset(df.columns)
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df.fillna(0)
+        return df
 
-    def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        kpis = {}
-        if "cost" in df.columns:
-            kpis["Total Cost"] = df["cost"].sum()
-        if "revenue" in df.columns:
-            kpis["Total Revenue"] = df["revenue"].sum()
-        return kpis
+    # -------------------------
+    # REQUIRED ABSTRACT METHODS
+    # -------------------------
 
-    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[str]:
-        return [f"{k}: {v}" for k, v in kpis.items()]
+    def calculate_kpis(self, df: pd.DataFrame):
+        from sreejita.reporting.healthcare.kpis import compute_healthcare_kpis
+        return compute_healthcare_kpis(df)
 
+    def generate_insights(self, df: pd.DataFrame, kpis):
+        from sreejita.reporting.healthcare.insights import generate_healthcare_insights
+        return generate_healthcare_insights(df, kpis)
 
-# ---------------- Healthcare Detector ----------------
 
 class HealthcareDomainDetector(BaseDomainDetector):
-    """
-    Public v1.x domain detector — DO NOT REMOVE
-    """
-
     domain_name = "healthcare"
 
     HEALTHCARE_COLUMNS: Set[str] = {
         "patient_id",
+        "outcome_score",
+        "readmitted",
+        "length_of_stay",
         "diagnosis",
         "treatment",
-        "cost",
-        "revenue",
-        "doctor",
-        "hospital",
-        "admission_date",
-        "discharge_date",
     }
 
     def detect(self, df) -> DomainDetectionResult:
         if df is None or not hasattr(df, "columns"):
-            return DomainDetectionResult(
-                domain="healthcare",
-                confidence=0.0,
-                signals={"reason": "invalid_df"},
-            )
+            return DomainDetectionResult("healthcare", 0.0, {"reason": "invalid_df"})
 
         cols = {str(c).lower() for c in df.columns}
         matches = cols.intersection(self.HEALTHCARE_COLUMNS)
 
-        score = min((len(matches) / len(self.HEALTHCARE_COLUMNS)) * 1.5, 1.0)
+        confidence = min(len(matches) / len(self.HEALTHCARE_COLUMNS) * 1.5, 1.0)
 
         return DomainDetectionResult(
             domain="healthcare",
-            confidence=score,
-            signals={"matched_columns": list(matches)},
+            confidence=confidence,
+            signals={"matched_columns": sorted(matches)},
         )
 
-# v2.0 registration hook
+
 def register(registry):
     registry.register(
         name="healthcare",
         domain_cls=HealthcareDomain,
         detector_cls=HealthcareDomainDetector,
     )
-
