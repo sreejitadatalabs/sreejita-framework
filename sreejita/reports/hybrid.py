@@ -152,22 +152,28 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # =====================================================
     story.append(Paragraph("Key Insights", h1))
     story.append(Spacer(1, 10))
-    for idx, ins in enumerate(insights, start=1):
-        story.append(
-            Paragraph(
-                f"<b>{idx}. [{ins['level']}] {ins['title']}</b>",
-                body,
-            )
-        )
-        story.append(Paragraph(ins.get("why", ""), body))
-        story.append(Paragraph(ins.get("so_what", ""), body))
-        if "semantic_warning" in ins:
+for idx, ins in enumerate(insights, start=1):
+        if isinstance(ins, dict):
+            # Handle dictionary insights
             story.append(
                 Paragraph(
-                    f"⚠ {ins['semantic_warning']}",
-                    italic,
+                    f"<b>{idx}. [{ins.get('level', '')}] {ins.get('title', '')}</b>",
+                    body,
                 )
             )
+            story.append(Paragraph(ins.get("why", ""), body))
+            story.append(Paragraph(ins.get("so_what", ""), body))
+            if "semantic_warning" in ins:
+                story.append(
+                    Paragraph(
+                        f"⚠ {ins['semantic_warning']}",
+                        italic,
+                    )
+                )
+        else:
+            # Handle string insights (simple case)
+            story.append(Paragraph(f"<b>{idx}. {str(ins)}</b>", body))
+        story.append(Spacer(1, 12))
         story.append(Spacer(1, 12))
     story.append(PageBreak())
     
