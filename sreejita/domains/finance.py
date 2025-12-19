@@ -67,7 +67,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# FINANCE DOMAIN (v2.x)
+# FINANCE DOMAIN (v2.x GOLD STANDARD)
 # =====================================================
 
 class FinanceDomain(BaseDomain):
@@ -108,6 +108,7 @@ class FinanceDomain(BaseDomain):
         profit = resolve_column(df, "profit") or resolve_column(df, "net income")
         budget = resolve_column(df, "budget") or resolve_column(df, "target")
 
+        # 1. Base Totals
         if revenue and pd.api.types.is_numeric_dtype(df[revenue]):
             kpis["total_revenue"] = df[revenue].sum()
 
@@ -119,19 +120,28 @@ class FinanceDomain(BaseDomain):
         elif "total_revenue" in kpis and "total_expense" in kpis:
             kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
+        # 2. Budget Logic
         if budget and revenue and pd.api.types.is_numeric_dtype(df[budget]):
+            actual = df[revenue].sum()
             planned = df[budget].sum()
             if planned != 0:
-                actual = df[revenue].sum()
                 var = actual - planned
                 kpis["budget_variance_abs"] = var
                 kpis["budget_variance_pct"] = _safe_div(var, planned)
 
+        # 3. Ratios & Thresholds
         if "total_profit" in kpis and "total_revenue" in kpis:
             kpis["profit_margin"] = _safe_div(
                 kpis["total_profit"], kpis["total_revenue"]
             )
+            # Healthy standard margin is often > 15%
+            kpis["target_profit_margin"] = 0.15 
 
+        if "total_expense" in kpis and "total_revenue" in kpis:
+            kpis["expense_ratio"] = _safe_div(kpis["total_expense"], kpis["total_revenue"])
+            kpis["target_expense_ratio"] = 0.70 # Target < 70%
+
+        # 4. Growth Logic
         if self.has_time_series and revenue and df[revenue].notna().sum() >= 2:
             first = df[revenue].iloc[0]
             last = df[revenue].iloc[-1]
@@ -140,7 +150,7 @@ class FinanceDomain(BaseDomain):
 
         return kpis
 
-    # ---------------- VISUALS ----------------
+    # ---------------- VISUALS (MAX 4, DATA-DRIVEN) ----------------
 
     def generate_visuals(
         self, df: pd.DataFrame, output_dir: Path
@@ -148,6 +158,9 @@ class FinanceDomain(BaseDomain):
 
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # --- FIX 2: Calculate KPIs once to prevent re-computation ---
+        kpis = self.calculate_kpis(df)
 
         def human_fmt(x, _):
             if abs(x) >= 1_000_000:
@@ -163,16 +176,17 @@ class FinanceDomain(BaseDomain):
         )
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
 
-        # 1️⃣ Revenue Trend
+        # -------- VISUAL 1: Revenue Trend --------
         if self.has_time_series and revenue:
             p = output_dir / "revenue_trend.png"
             plt.figure(figsize=(7, 4))
 
             plot_df = df.copy()
+            # Smart Aggregation: Only if huge (>100) and confirmed datetime
             if len(df) > 100 and pd.api.types.is_datetime64_any_dtype(df[self.time_col]):
                 plot_df = (
                     df.set_index(self.time_col)
-                    .resample("M")
+                    .resample("ME") 
                     .sum()
                     .reset_index()
                 )
@@ -189,7 +203,7 @@ class FinanceDomain(BaseDomain):
                 "caption": "Revenue performance over time"
             })
 
-        # 2️⃣ P&L Summary
+        # -------- VISUAL 2: P&L Summary --------
         if revenue and expense:
             p = output_dir / "pnl_summary.png"
             rev = df[revenue].sum()
@@ -199,9 +213,10 @@ class FinanceDomain(BaseDomain):
             steps = ["Revenue", "Expenses", "Net Result"]
             values = [rev, -exp, prof]
             bottoms = [0, rev, 0]
+            colors = ["#2ca02c", "#d62728", "#1f77b4"]
 
             plt.figure(figsize=(7, 4))
-            bars = plt.bar(steps, values, bottom=bottoms)
+            bars = plt.bar(steps, values, bottom=bottoms, color=colors)
             for bar, val in zip(bars, values):
                 plt.text(
                     bar.get_x() + bar.get_width() / 2,
@@ -212,7 +227,6 @@ class FinanceDomain(BaseDomain):
                     color="white",
                     fontweight="bold",
                 )
-
             plt.title("P&L Summary")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
             plt.tight_layout()
@@ -224,16 +238,17 @@ class FinanceDomain(BaseDomain):
                 "caption": "Revenue to net result summary"
             })
 
-        # 3️⃣ Expense Breakdown (Optional but Safe)
-        if expense:
+        # -------- VISUAL 3: Expense Breakdown --------
+        # --- FIX 3: Defensive check for numeric expense ---
+        if expense and pd.api.types.is_numeric_dtype(df[expense]):
+            p = output_dir / "expense_breakdown.png"
+            plt.figure(figsize=(7, 4))
+
             category = (
                 resolve_column(df, "department")
                 or resolve_column(df, "category")
                 or resolve_column(df, "account")
             )
-
-            p = output_dir / "expense_breakdown.png"
-            plt.figure(figsize=(7, 4))
 
             if category:
                 grp = (
@@ -242,11 +257,11 @@ class FinanceDomain(BaseDomain):
                     .sort_values(ascending=False)
                     .head(7)
                 )
-                grp.plot(kind="bar")
+                grp.plot(kind="bar", color="#d62728")
                 plt.title("Top Expense Contributors")
-                plt.xticks(rotation=45, ha="right")
+                plt.xticks(rotation=45, ha='right')
             else:
-                plt.bar(["Total Expenses"], [df[expense].sum()])
+                plt.bar(["Total Expenses"], [df[expense].sum()], color="#d62728")
                 plt.title("Total Expenses")
 
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
@@ -259,30 +274,78 @@ class FinanceDomain(BaseDomain):
                 "caption": "Expense contribution overview"
             })
 
+        # -------- VISUAL 4: Financial Ratios --------
+        # --- FIX 2: Use pre-calculated KPIs ---
+        ratios = {
+            "Profit Margin": kpis.get("profit_margin"),
+            "Budget Variance %": kpis.get("budget_variance_pct"),
+            "Revenue Growth": kpis.get("revenue_growth"),
+        }
+
+        ratios = {k: v for k, v in ratios.items() if v is not None}
+
+        if ratios:
+            p = output_dir / "financial_ratios.png"
+            plt.figure(figsize=(7, 4))
+            plt.bar(ratios.keys(), ratios.values(), color="#1f77b4")
+            plt.axhline(0, color="black", linewidth=0.8)
+            plt.title("Key Financial Ratios")
+            plt.gca().yaxis.set_major_formatter(
+                FuncFormatter(lambda x, _: f"{x:.0%}")
+            )
+            plt.tight_layout()
+            plt.savefig(p)
+            plt.close()
+
+            visuals.append({
+                "path": p,
+                "caption": "Snapshot of key financial ratios"
+            })
+
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- INSIGHTS (ENHANCED) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
 
         margin = kpis.get("profit_margin")
         var_pct = kpis.get("budget_variance_pct")
+        growth = kpis.get("revenue_growth")
+        expense_ratio = kpis.get("expense_ratio")
 
+        # 1. Profitability (Burn Rate vs Healthy)
         if margin is not None:
             if margin < 0:
                 insights.append({
                     "level": "RISK",
                     "title": "High Burn Rate Detected",
-                    "so_what": f"Expenses exceed revenue. Margin is {margin:.1%}."
+                    "so_what": f"Expenses exceed revenue. Net margin is {margin:.1%}."
                 })
             elif margin < 0.10:
                 insights.append({
                     "level": "WARNING",
                     "title": "Low Profit Margin",
-                    "so_what": f"Margin is {margin:.1%}."
+                    "so_what": f"Margin is {margin:.1%}, below the healthy target of 15%."
+                })
+        
+        # 2. Efficiency Check (Corrected Thresholds)
+        # > 85% is High Risk, > 70% is Warning
+        if expense_ratio is not None:
+            if expense_ratio > 0.85:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Critical Operational Costs",
+                    "so_what": f"Expenses consume {expense_ratio:.1%} of revenue, threatening solvency."
+                })
+            elif expense_ratio > 0.70:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "High Operational Costs",
+                    "so_what": f"Expenses are consuming {expense_ratio:.1%} of total revenue."
                 })
 
+        # 3. Budget Check
         if var_pct is not None:
             if var_pct < -0.05:
                 insights.append({
@@ -295,6 +358,21 @@ class FinanceDomain(BaseDomain):
                     "level": "INFO",
                     "title": "Exceeding Budget",
                     "so_what": f"Revenue exceeds plan by {var_pct:.1%}."
+                })
+
+        # 4. Growth Check
+        if growth is not None:
+            if growth < 0:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Revenue Contraction",
+                    "so_what": f"Revenue has declined by {abs(growth):.1%} over the period."
+                })
+            elif growth > 0.20:
+                insights.append({
+                    "level": "INFO",
+                    "title": "High Growth Trajectory",
+                    "so_what": f"Revenue grew by {growth:.1%}, indicating strong momentum."
                 })
 
         if not insights:
