@@ -1,28 +1,33 @@
 """
 Sreejita Framework - Domain Modules
+
+Only real, registered business domains are exposed here.
+Capabilities (NLP, ML, etc.) are NOT domains.
 """
 
+from .base import BaseDomain
+
 from .retail import RetailDomain
+from .ecommerce import EcommerceDomain
 from .customer import CustomerDomain
 from .finance import FinanceDomain
 from .healthcare import HealthcareDomain
-from .ecommerce import EcommerceDomain
-from .marketing import MarketingDomain
 from .hr import HRDomain
 from .supply_chain import SupplyChainDomain
-from .base import BaseDomain
+from .marketing import MarketingDomain
 
 __all__ = [
+    "BaseDomain",
     "RetailDomain",
+    "EcommerceDomain",
     "CustomerDomain",
     "FinanceDomain",
     "HealthcareDomain",
-    "EcommerceDomain",
-    "MarketingDomain",
     "HRDomain",
     "SupplyChainDomain",
-    "BaseDomain",
+    "MarketingDomain",
 ]
+
 
 DOMAIN_REGISTRY = {
     "retail": RetailDomain,
