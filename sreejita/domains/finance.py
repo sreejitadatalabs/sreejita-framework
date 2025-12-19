@@ -22,8 +22,8 @@ def _safe_div(n, d):
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
     v2.x SAFE time detector.
-    - Explicit finance-safe names first
-    - Then fuzzy 'date' containment (validated)
+    - Explicit finance-safe names first (Safety)
+    - Then fuzzy 'date' containment (Utility), but strictly validated.
     """
 
     explicit = [
@@ -38,12 +38,13 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
         for low, real in cols_lower.items():
             if key == low and not df[real].isna().all():
                 try:
+                    # Validate content is actually time-like
                     pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
                     return real
                 except Exception:
                     continue
 
-    # Pass 2 — fuzzy containment
+    # Pass 2 — fuzzy containment (e.g., "Order_Date", "Payment Date")
     for low, real in cols_lower.items():
         if "date" in low and not df[real].isna().all():
             try:
@@ -67,7 +68,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# FINANCE DOMAIN (v2.x FROZEN)
+# FINANCE DOMAIN (v2.x GOLD STANDARD)
 # =====================================================
 
 class FinanceDomain(BaseDomain):
@@ -92,6 +93,7 @@ class FinanceDomain(BaseDomain):
 
         if self.time_col:
             df = _prepare_time_series(df, self.time_col)
+            # We need at least 2 distinct points to draw a trend line
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -101,6 +103,7 @@ class FinanceDomain(BaseDomain):
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis: Dict[str, Any] = {}
 
+        # 1. Resolve Columns (Prioritize standard terms, allow 'sales' for retail)
         revenue = (
             resolve_column(df, "revenue")
             or resolve_column(df, "income")
@@ -110,17 +113,20 @@ class FinanceDomain(BaseDomain):
         profit = resolve_column(df, "profit") or resolve_column(df, "net income")
         budget = resolve_column(df, "budget") or resolve_column(df, "target")
 
+        # 2. Calculate Totals (Defensive Checks)
         if revenue and pd.api.types.is_numeric_dtype(df[revenue]):
             kpis["total_revenue"] = df[revenue].sum()
 
         if expense and pd.api.types.is_numeric_dtype(df[expense]):
             kpis["total_expense"] = df[expense].sum()
 
+        # 3. Profit Logic (Trust 'Profit' col first, else calculate)
         if profit and pd.api.types.is_numeric_dtype(df[profit]):
             kpis["total_profit"] = df[profit].sum()
         elif "total_revenue" in kpis and "total_expense" in kpis:
             kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
+        # 4. Variance Logic
         if budget and revenue and pd.api.types.is_numeric_dtype(df[budget]):
             actual = df[revenue].sum()
             planned = df[budget].sum()
@@ -129,11 +135,13 @@ class FinanceDomain(BaseDomain):
                 kpis["budget_variance_abs"] = var
                 kpis["budget_variance_pct"] = _safe_div(var, planned)
 
+        # 5. Ratios
         if "total_profit" in kpis and "total_revenue" in kpis:
             kpis["profit_margin"] = _safe_div(
                 kpis["total_profit"], kpis["total_revenue"]
             )
 
+        # 6. Growth (Strict Last-First)
         if self.has_time_series and revenue and df[revenue].notna().sum() >= 2:
             first = df[revenue].iloc[0]
             last = df[revenue].iloc[-1]
@@ -152,10 +160,8 @@ class FinanceDomain(BaseDomain):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         def human_fmt(x, _):
-            if abs(x) >= 1_000_000:
-                return f"{x/1_000_000:.1f}M"
-            if abs(x) >= 1_000:
-                return f"{x/1_000:.0f}K"
+            if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
+            if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
 
         revenue = (
@@ -165,11 +171,23 @@ class FinanceDomain(BaseDomain):
         )
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
 
-        # ---- Revenue Trend (HONEST, NO RESAMPLING) ----
+        # ---- Revenue Trend (Smart & Safe Aggregation) ----
         if self.has_time_series and revenue:
             p = output_dir / "revenue_trend.png"
             plt.figure(figsize=(7, 4))
-            plt.plot(df[self.time_col], df[revenue], linewidth=2)
+            
+            # SAFE AGGREGATION:
+            # If dataset is huge (>100 rows), summarize to Month-End.
+            # CRITICAL FIX: Ensure we have a valid datetime index before resampling.
+            plot_df = df.copy()
+            if (
+                len(df) > 100 
+                and pd.api.types.is_datetime64_any_dtype(df[self.time_col])
+            ):
+                # Resample to Month End ('ME') for cleaner visualization
+                plot_df = df.set_index(self.time_col).resample('ME').sum().reset_index()
+            
+            plt.plot(plot_df[self.time_col], plot_df[revenue], linewidth=2)
             plt.title("Revenue Trend")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
             plt.tight_layout()
@@ -180,7 +198,8 @@ class FinanceDomain(BaseDomain):
                 "caption": "Revenue performance over time"
             })
 
-        # ---- P&L Summary Waterfall ----
+        # ---- P&L Summary Waterfall (Always Safe) ----
+        # We plot TOTALS, not rows. This ensures it works on 10 or 10M rows.
         if (
             revenue and expense
             and pd.api.types.is_numeric_dtype(df[revenue])
@@ -232,6 +251,7 @@ class FinanceDomain(BaseDomain):
         margin = kpis.get("profit_margin")
         var_pct = kpis.get("budget_variance_pct")
 
+        # 1. Burn Rate Context
         if margin is not None:
             if margin < 0:
                 insights.append({
@@ -246,8 +266,10 @@ class FinanceDomain(BaseDomain):
                     "so_what": f"Margin is {margin:.1%}, indicating cost pressure."
                 })
 
+        # 2. Budget Variance
         if var_pct is not None:
             if var_pct < -0.05:
+                # If we don't have time series, grain mismatch is possible, so downgrade risk
                 level = "RISK" if self.has_time_series else "WARNING"
                 insights.append({
                     "level": level,
@@ -314,7 +336,7 @@ class FinanceDomainDetector(BaseDomainDetector):
         "expense", "cost", "spend",
         "budget", "forecast",
         "profit", "loss",
-        "ledger", "fiscal"
+        "ledger", "fiscal", "amount"
     }
 
     def detect(self, df) -> DomainDetectionResult:
