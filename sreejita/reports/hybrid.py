@@ -197,8 +197,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
                 str(v["path"]), 
                 width=14 * cm, 
                 height=8 * cm, 
-                preserveAspectRatio=True
-            ))
+                ))
             story.append(Paragraph(v.get("caption", ""), body))
             
             # --- FIX 3: The "Blank Page" Fix ---
