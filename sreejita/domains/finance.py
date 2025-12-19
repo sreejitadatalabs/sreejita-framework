@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
@@ -19,7 +19,7 @@ def _safe_div(n, d):
     return n / d
 
 
-def _detect_time_column(df: pd.DataFrame) -> str | None:
+def _detect_time_column(df: pd.DataFrame) -> Optional[str] | None:
     """
     Detect REAL time columns only.
     (No fiscal codes, no posting keys, no transactions)
