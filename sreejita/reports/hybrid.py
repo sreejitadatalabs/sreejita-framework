@@ -46,7 +46,7 @@ def header_footer(canvas, doc):
 
 
 # =====================================================
-# VALUE FORMATTER
+# VALUE FORMATTER (DOMAIN-AGNOSTIC)
 # =====================================================
 
 def format_value(value):
@@ -150,6 +150,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for k, v in kpis.items():
         snapshot_rows.append([k.replace("_", " ").title(), format_value(v)])
 
+    if len(snapshot_rows) == 1:
+        snapshot_rows.append(["KPIs", "Not Available"])
+
     table = Table(snapshot_rows, colWidths=[9 * cm, 5 * cm])
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, "#999999"),
@@ -160,22 +163,30 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # =====================================================
-    # VISUAL EVIDENCE (DEFENSIBLE)
+    # VISUAL EVIDENCE (DEFENSIBLE, DOMAIN-AGNOSTIC)
     # =====================================================
 
-    if visuals:
-        story.append(Paragraph("Visual Evidence", h1))
+    story.append(Paragraph("Visual Evidence", h1))
 
-        # 🔑 CONTEXT BLOCK (THIS FIXES THE “EMPTY PAGE” FEEL)
+    if not visuals:
+        story.append(Paragraph(
+            "No defensible visual evidence could be generated from the available data. "
+            "This typically indicates insufficient numeric variation, missing time context, "
+            "or lack of categorical structure.",
+            body
+        ))
+        story.append(PageBreak())
+
+    else:
         if len(visuals) == 1:
             story.append(Paragraph(
                 "The dataset supports a focused visual analysis. "
-                "Key trends are shown below.",
+                "The chart below highlights the primary measurable trend.",
                 body
             ))
         elif len(visuals) == 2:
             story.append(Paragraph(
-                "The following visuals summarize performance and financial structure.",
+                "The following visuals summarize performance across complementary dimensions.",
                 body
             ))
         else:
@@ -188,7 +199,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
         VISUALS_PER_PAGE = 2
 
-        for idx, v in enumerate(visuals):
+        for idx, v in enumerate(visuals[:4]):  # hard max = 4
             story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
             story.append(Paragraph(v.get("caption", ""), body))
 
