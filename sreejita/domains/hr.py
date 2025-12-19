@@ -23,19 +23,34 @@ def _safe_div(n, d):
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
     HR-safe time detector:
-    hiring, exit, attendance, evaluation timelines.
+    Prioritize Hire/Exit dates over generic dates.
     """
-    candidates = [
+    # Priority 1: Lifecycle Dates (Strongest HR Signal)
+    priority_candidates = [
         "hire date", "joining date", "start date",
-        "exit date", "termination date",
-        "date", "month", "year"
+        "exit date", "termination date", "term date",
+        "dob", "birth date"
     ]
+    
+    # Priority 2: Generic Dates
+    generic_candidates = ["date", "month", "year", "period"]
 
     cols = {c.lower(): c for c in df.columns}
 
-    for key in candidates:
+    # Pass 1: Lifecycle
+    for key in priority_candidates:
         for low, real in cols.items():
             if key in low and not df[real].isna().all():
+                try:
+                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
+                    return real
+                except Exception:
+                    continue
+    
+    # Pass 2: Generic
+    for key in generic_candidates:
+        for low, real in cols.items():
+            if key == low and not df[real].isna().all(): # Strict match for generic
                 try:
                     pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
                     return real
@@ -56,17 +71,16 @@ class HRDomain(BaseDomain):
 
     def validate_data(self, df: pd.DataFrame) -> bool:
         """
-        HR data must have people signals (Employee ID, Salary, Performance, etc.)
+        HR data must have PEOPLE signals (Employee, Salary, Dept).
         """
         return any(
             resolve_column(df, c) is not None
             for c in [
                 "employee", "employee_id", "staff",
-                "department", "designation", "role",
-                "salary", "compensation",
+                "department", "designation", "role", "title",
+                "salary", "compensation", "pay", "payzone",
                 "attrition", "exit", "termination",
-                "attendance", "absence", "leave",
-                "performance", "rating"
+                "performance", "rating", "score"
             ]
         )
 
@@ -96,11 +110,14 @@ class HRDomain(BaseDomain):
             or resolve_column(df, "staff")
         )
         salary = resolve_column(df, "salary") or resolve_column(df, "compensation")
-        performance = resolve_column(df, "performance") or resolve_column(df, "rating")
-        attrition = resolve_column(df, "attrition")
-        status = resolve_column(df, "status")
-        absence = resolve_column(df, "absence") or resolve_column(df, "leave")
-
+        performance = (
+            resolve_column(df, "performance") 
+            or resolve_column(df, "rating") 
+            or resolve_column(df, "score")
+        )
+        attrition = resolve_column(df, "attrition") or resolve_column(df, "termination")
+        status = resolve_column(df, "status") or resolve_column(df, "employeestatus")
+        
         # 1. Headcount
         if employee:
             kpis["headcount"] = df[employee].nunique()
@@ -109,14 +126,22 @@ class HRDomain(BaseDomain):
 
         # 2. Attrition
         kpis["target_attrition_rate"] = 0.10
+        kpis["attrition_rate"] = 0.0
 
-        if attrition and pd.api.types.is_numeric_dtype(df[attrition]):
-            kpis["attrition_rate"] = df[attrition].mean()
+        if attrition:
+            # Check if numeric (0/1) or text
+            if pd.api.types.is_numeric_dtype(df[attrition]):
+                kpis["attrition_rate"] = df[attrition].mean()
+            else:
+                # Text based: "Voluntary", "Involuntary" implies exit
+                # Anything not null/empty often means they left
+                kpis["attrition_rate"] = df[attrition].notna().mean()
 
         elif status:
             # Fallback: Infer churn from status text (Regex)
+            # HR specific terms: Terminated, Resigned, Voluntary
             status_series = df[status].astype(str).str.lower()
-            exits = status_series.str.contains("exit|left|terminated|resigned|inactive", na=False)
+            exits = status_series.str.contains("term|exit|resign|left|inactive|vol", na=False)
             kpis["attrition_rate"] = exits.mean()
 
         # 3. Compensation
@@ -124,7 +149,7 @@ class HRDomain(BaseDomain):
             kpis["avg_salary"] = df[salary].mean()
             kpis["salary_std_dev"] = df[salary].std()
 
-        # 4. Performance (FIX 1: Safe Normalization)
+        # 4. Performance (Safe Normalization)
         if performance and pd.api.types.is_numeric_dtype(df[performance]):
             perf_series = df[performance].dropna()
             
@@ -133,12 +158,7 @@ class HRDomain(BaseDomain):
                 perf_series = perf_series / 2
             
             kpis["avg_performance_score"] = perf_series.mean()
-            # Low performer < 3.0 on 5.0 scale
             kpis["low_performance_rate"] = (perf_series < 3).mean()
-
-        # 5. Absenteeism
-        if absence and pd.api.types.is_numeric_dtype(df[absence]):
-            kpis["avg_absence_days"] = df[absence].mean()
 
         return kpis
 
@@ -151,7 +171,7 @@ class HRDomain(BaseDomain):
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Calculate KPIs once at start
+        # Calculate KPIs once
         kpis = self.calculate_kpis(df)
 
         employee = (
@@ -159,24 +179,32 @@ class HRDomain(BaseDomain):
             or resolve_column(df, "employee_id")
             or resolve_column(df, "staff")
         )
-        department = resolve_column(df, "department")
+        department = resolve_column(df, "department") or resolve_column(df, "dept")
         salary = resolve_column(df, "salary") or resolve_column(df, "compensation")
-        performance = resolve_column(df, "performance") or resolve_column(df, "rating")
-        absence = resolve_column(df, "absence") or resolve_column(df, "leave")
-        status = resolve_column(df, "status")
+        performance = (
+            resolve_column(df, "performance") 
+            or resolve_column(df, "rating") 
+            or resolve_column(df, "score")
+        )
+        status = resolve_column(df, "status") or resolve_column(df, "employeestatus")
+        title = resolve_column(df, "title") or resolve_column(df, "designation")
 
         def human_fmt(x, _):
-            if abs(x) >= 1_000_000:
-                return f"{x/1_000_000:.1f}M"
-            if abs(x) >= 1_000:
-                return f"{x/1_000:.0f}K"
+            if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
+            if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
 
         # -------- Visual 1: Headcount by Department --------
-        if employee and department:
+        if department:
             p = output_dir / "headcount_by_department.png"
-
-            counts = df.groupby(department)[employee].nunique().sort_values(ascending=False).head(10)
+            
+            # Use employee ID for count if available, else just row count
+            if employee:
+                counts = df.groupby(department)[employee].nunique()
+            else:
+                counts = df[department].value_counts()
+                
+            counts = counts.sort_values(ascending=False).head(10)
 
             plt.figure(figsize=(7, 4))
             counts.plot(kind="bar", color="#1f77b4")
@@ -186,13 +214,9 @@ class HRDomain(BaseDomain):
             plt.savefig(p)
             plt.close()
 
-            visuals.append({
-                "path": p,
-                "caption": "Employee distribution across departments"
-            })
+            visuals.append({"path": p, "caption": "Employee distribution across departments"})
 
         # -------- Visual 2: Salary Distribution --------
-        # SAFETY: Ensure salary is numeric
         if salary and pd.api.types.is_numeric_dtype(df[salary]):
             p = output_dir / "salary_distribution.png"
 
@@ -225,10 +249,9 @@ class HRDomain(BaseDomain):
                 "path": p,
                 "caption": "Employee performance score spread"
             })
-        # Priority 2: Status Pie (if performance is missing)
+        # Priority 2: Status Pie
         elif status:
             p = output_dir / "status_breakdown.png"
-            # FIX 2: Cap categories to prevent clutter
             counts = df[status].value_counts().head(5)
             
             plt.figure(figsize=(6, 4))
@@ -239,52 +262,25 @@ class HRDomain(BaseDomain):
             plt.savefig(p)
             plt.close()
             
-            visuals.append({
-                "path": p,
-                "caption": "Ratio of active vs terminated employees"
-            })
+            visuals.append({"path": p, "caption": "Ratio of active vs terminated employees" })
 
-        # -------- Visual 4: Absence Analysis OR Perf vs Salary --------
-        # Priority 1: Performance vs Salary (Scatter) - Needs both numeric
-        if (
-            performance and salary 
-            and pd.api.types.is_numeric_dtype(df[performance]) 
-            and pd.api.types.is_numeric_dtype(df[salary])
-        ):
-            p = output_dir / "perf_vs_salary.png"
+        # -------- Visual 4: Designation / Title Breakdown --------
+        # (Replaces Absence if Absence is missing, which is common in messy HR data)
+        if title:
+            p = output_dir / "title_breakdown.png"
+            
+            counts = df[title].value_counts().head(7)
             
             plt.figure(figsize=(7, 4))
-            plt.scatter(df[performance], df[salary], alpha=0.5, color="#9467bd")
-            plt.title("Performance vs. Salary")
-            plt.xlabel("Performance")
-            plt.ylabel("Salary")
-            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            counts.plot(kind="barh", color="#9467bd")
+            plt.title("Top Job Titles")
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
             
             visuals.append({
                 "path": p,
-                "caption": "Relationship between pay and performance"
-            })
-            
-        # Priority 2: Absence by Dept (if scatter not possible)
-        elif absence and department and pd.api.types.is_numeric_dtype(df[absence]):
-            p = output_dir / "absence_by_department.png"
-
-            abs_by_dept = df.groupby(department)[absence].mean().sort_values(ascending=False).head(10)
-
-            plt.figure(figsize=(7, 4))
-            abs_by_dept.plot(kind="bar", color="#d62728")
-            plt.title("Avg Absence Days by Department")
-            plt.xticks(rotation=45, ha="right")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-
-            visuals.append({
-                "path": p,
-                "caption": "Departments with higher absenteeism"
+                "caption": "Most common roles in the organization"
             })
 
         return visuals[:4]
@@ -297,8 +293,7 @@ class HRDomain(BaseDomain):
         attrition = kpis.get("attrition_rate")
         perf = kpis.get("avg_performance_score")
         low_perf = kpis.get("low_performance_rate")
-        absence = kpis.get("avg_absence_days")
-
+        
         # 1. Attrition
         if attrition is not None:
             if attrition > 0.20:
@@ -315,7 +310,7 @@ class HRDomain(BaseDomain):
                 })
 
         # 2. Performance
-        if perf is not None and perf < 3.5:
+        if perf is not None and perf < 3.0:
             insights.append({
                 "level": "WARNING",
                 "title": "Low Average Performance",
@@ -327,14 +322,6 @@ class HRDomain(BaseDomain):
                 "level": "WARNING",
                 "title": "Large Low-Performance Segment",
                 "so_what": f"{low_perf:.1%} of employees are underperforming."
-            })
-
-        # 3. Absenteeism
-        if absence is not None and absence > 10:
-            insights.append({
-                "level": "INFO",
-                "title": "Elevated Absenteeism",
-                "so_what": f"Average absence is {absence:.1f} days per employee."
             })
 
         if not insights:
@@ -379,30 +366,53 @@ class HRDomain(BaseDomain):
 
 
 # =====================================================
-# DOMAIN DETECTOR
+# DOMAIN DETECTOR (COLLISION PROOF)
 # =====================================================
 
 class HRDomainDetector(BaseDomainDetector):
     domain_name = "hr"
 
-    HR_TOKENS: Set[str] = {
-        "employee", "staff", "hr",
-        "salary", "compensation", "pay",
-        "department", "designation",
-        "attrition", "exit", "resign",
-        "performance", "rating",
-        "leave", "absence"
-    }
-
     def detect(self, df) -> DomainDetectionResult:
         cols = {str(c).lower() for c in df.columns}
-        hits = [c for c in cols if any(t in c for t in self.HR_TOKENS)]
-        confidence = min(len(hits) / 3, 1.0)
+        
+        # 1. ANCHOR TOKENS (The Veto Power)
+        # If these exist, it is almost certainly HR, not Customer/Retail
+        anchors = {
+            "salary", "compensation", "payroll", "hourly_rate", "payzone",
+            "department", "designation", "job_title", "title",
+            "hire_date", "termination_date", "dob", "marital", "race", "gender",
+            "employee_id", "emp_id"
+        }
+        
+        # 2. SHARED TOKENS (Ambiguous)
+        # These appear in HR but also in Customer/Retail
+        shared = {
+            "performance", "rating", "score", "status", "id", "name", 
+            "active", "date", "training"
+        }
 
+        anchor_hits = [c for c in cols if any(t in c for t in anchors)]
+        shared_hits = [c for c in cols if any(t in c for t in shared)]
+
+        # SCORING LOGIC
+        # Anchor hits are worth 5x shared hits
+        confidence = 0.0
+        
+        if len(anchor_hits) >= 1:
+            # Strong signal found. 
+            confidence = 0.8 + (len(anchor_hits) * 0.05)
+        elif len(shared_hits) >= 3:
+            # Only weak signals found. Check for specific "Employee" keyword context
+            if any("employee" in c for c in cols):
+                confidence = 0.85
+            else:
+                # If only "Score" and "Status" exist without "Employee", likely Customer data
+                confidence = 0.2 
+        
         return DomainDetectionResult(
             domain="hr",
-            confidence=confidence,
-            signals={"matched_columns": hits},
+            confidence=min(confidence, 1.0),
+            signals={"anchor_hits": anchor_hits, "shared_hits": shared_hits},
         )
 
 
