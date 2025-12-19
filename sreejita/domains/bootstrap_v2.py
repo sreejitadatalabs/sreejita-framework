@@ -10,9 +10,17 @@ from sreejita.domains import (
     customer,
     finance,
     healthcare,
+    marketing,
+    hr,
+    supply_chain,
 )
 
 retail.register(registry)
 customer.register(registry)
 finance.register(registry)
 healthcare.register(registry)
+hr.register(registry)
+supply_chain.register(registry)
+marketing.register(registry)
+
+
