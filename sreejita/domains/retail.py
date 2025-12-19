@@ -53,9 +53,6 @@ class RetailDomain(BaseDomain):
     # ---------------- VALIDATION ----------------
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        """
-        Validates if the dataset contains the minimum required columns.
-        """
         return (
             resolve_column(df, "revenue") is not None
             or resolve_column(df, "sales") is not None
@@ -65,18 +62,14 @@ class RetailDomain(BaseDomain):
     # ---------------- PREPROCESS ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Prepares the dataframe by detecting and parsing the time column.
-        """
         self.time_col = _detect_time_column(df)
         self.has_time_series = False
 
         if self.time_col:
-            df = df.copy() # Avoid SettingWithCopy warnings
+            df = df.copy()
             df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
             df = df.dropna(subset=[self.time_col])
             df = df.sort_values(self.time_col)
-            # Ensure we have enough data points for a time series
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -84,9 +77,6 @@ class RetailDomain(BaseDomain):
     # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Calculates key retail metrics including Profit, Shipping, and Discounts.
-        """
         kpis = {}
 
         # 1. Resolve Columns
@@ -98,7 +88,10 @@ class RetailDomain(BaseDomain):
         order_id = resolve_column(df, "order_id") or resolve_column(df, "transaction")
         customer = resolve_column(df, "customer")
         
-        profit_col = resolve_column(df, "profit") or resolve_column(df, "margin")
+        # --- FIX 2: Semantic Separation (Profit vs Margin) ---
+        profit_col = resolve_column(df, "profit") # Absolute Currency
+        margin_col = resolve_column(df, "margin") # Ratio/Percentage
+        
         shipping_col = resolve_column(df, "shipping_cost") or resolve_column(df, "freight")
         discount_col = resolve_column(df, "discount")
 
@@ -111,17 +104,26 @@ class RetailDomain(BaseDomain):
                 kpis["avg_order_value"] = _safe_div(total_rev, df[order_id].nunique())
 
             # 3. Profitability Metrics
+            kpis["target_profit_margin"] = 0.15  # Benchmark
+
             if profit_col:
+                # Standard case: We have absolute profit
                 total_profit = df[profit_col].sum()
                 kpis["total_profit"] = total_profit
                 kpis["profit_margin"] = _safe_div(total_profit, total_rev)
-                kpis["target_profit_margin"] = 0.15  # Standard Retail Target (15%)
+            
+            elif margin_col:
+                # Fallback: We have a margin ratio column
+                avg_margin = df[margin_col].mean()
+                # Normalize if stored as 15.0 instead of 0.15
+                if avg_margin > 1:
+                    avg_margin = avg_margin / 100
+                kpis["profit_margin"] = avg_margin
 
             # 4. Cost Metrics
             if shipping_col:
                 total_shipping = df[shipping_col].sum()
                 kpis["shipping_cost_ratio"] = _safe_div(total_shipping, total_rev)
-                kpis["target_shipping_ratio"] = 0.10 # Target < 10%
 
         if order_id:
             kpis["order_volume"] = df[order_id].nunique()
@@ -129,10 +131,13 @@ class RetailDomain(BaseDomain):
         if customer:
             kpis["customer_count"] = df[customer].nunique()
 
-        # 5. Discount Metrics
+        # 5. Discount Metrics (with FIX 1: Normalization Guard)
         if discount_col:
-            # Assuming discount is a ratio (0.1) or percentage. Mean gives avg rate.
-            kpis["average_discount"] = df[discount_col].mean()
+            avg_disc = df[discount_col].mean()
+            # If avg discount > 1 (e.g. 10.0), assume it's percentage and normalize to 0.10
+            if avg_disc > 1:
+                avg_disc = avg_disc / 100
+            kpis["average_discount"] = avg_disc
 
         return kpis
 
@@ -141,15 +146,11 @@ class RetailDomain(BaseDomain):
     def generate_visuals(
         self, df: pd.DataFrame, output_dir: Path
     ) -> List[Dict[str, Any]]:
-        """
-        Generates visualizations: Trend, Category, Customers, and Discount Analysis.
-        """
 
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
         def human_fmt(x, _):
-            """Format numbers for human readability."""
             if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
             if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
@@ -169,12 +170,13 @@ class RetailDomain(BaseDomain):
         customer = resolve_column(df, "customer")
         discount = resolve_column(df, "discount")
 
-        # --- Visual 1: Sales Trend (Smart Aggregation) ---
+        # --- Visual 1: Sales Trend ---
         if self.has_time_series and revenue:
             p = output_dir / "sales_trend.png"
             plt.figure(figsize=(7, 4))
             
             plot_df = df.copy()
+            # Smart Aggregation for large datasets
             if len(df) > 100:
                 plot_df = (
                     df.set_index(self.time_col)
@@ -220,17 +222,21 @@ class RetailDomain(BaseDomain):
             plt.close()
             visuals.append({"path": p, "caption": "Customer revenue concentration"})
 
-        # --- Visual 4: Discount Impact (Profit Leak Analysis) ---
+        # --- Visual 4: Discount Impact (Normalized) ---
         if discount and category and pd.api.types.is_numeric_dtype(df[discount]):
             p = output_dir / "discount_by_category.png"
             
             # Avg Discount by Category
             disc_by_cat = df.groupby(category)[discount].mean().sort_values(ascending=False).head(7)
             
+            # NORMALIZE FOR PLOTTING: If max > 1, assume it's raw numbers (e.g. 15.0), divide by 100
+            if disc_by_cat.max() > 1:
+                disc_by_cat = disc_by_cat / 100
+
             # Only plot if meaningful discounts exist (> 1%)
             if disc_by_cat.max() > 0.01:
                 plt.figure(figsize=(7, 4))
-                disc_by_cat.plot(kind="bar", color="#d62728") # Red for "Cost/Loss"
+                disc_by_cat.plot(kind="bar", color="#d62728")
                 plt.title("Avg Discount Level by Category")
                 plt.gca().yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
                 plt.xticks(rotation=45, ha='right')
@@ -244,9 +250,6 @@ class RetailDomain(BaseDomain):
     # ---------------- INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Generates insights based on Retail Thresholds.
-        """
         insights = []
 
         margin = kpis.get("profit_margin")
@@ -261,7 +264,7 @@ class RetailDomain(BaseDomain):
                     "title": "Negative Profit Margin",
                     "so_what": f"You are losing money on sales. Margin is {margin:.1%}."
                 })
-            elif margin < 0.10: # Below 10% is thin for retail
+            elif margin < 0.10: 
                 insights.append({
                     "level": "WARNING",
                     "title": "Low Profit Margin",
@@ -270,7 +273,7 @@ class RetailDomain(BaseDomain):
 
         # 2. Shipping Cost Insights
         if ship_ratio is not None:
-            if ship_ratio > 0.15: # >15% is very high
+            if ship_ratio > 0.15:
                 insights.append({
                     "level": "WARNING",
                     "title": "High Shipping Costs",
@@ -279,11 +282,11 @@ class RetailDomain(BaseDomain):
 
         # 3. Discounting Insights
         if avg_disc is not None:
-            if avg_disc > 0.25: # >25% average discount is aggressive
+            if avg_disc > 0.25:
                 insights.append({
                     "level": "WARNING",
                     "title": "Heavy Discounting Detected",
-                    "so_what": f"Avg discount is {avg_disc:.1%}, eroding margins."
+                    "so_what": f"Avg discount is {avg_disc:.1%}, potentially eroding brand value."
                 })
 
         # Default Info
@@ -299,9 +302,6 @@ class RetailDomain(BaseDomain):
     # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Generates actionable recommendations based on KPIs.
-        """
         recs = []
 
         margin = kpis.get("profit_margin")
@@ -309,7 +309,6 @@ class RetailDomain(BaseDomain):
         avg_disc = kpis.get("average_discount")
         aov = kpis.get("avg_order_value")
 
-        # Prioritized Actions
         if margin is not None and margin < 0.05:
             recs.append({
                 "action": "Audit product pricing and cost of goods sold (COGS)",
@@ -362,9 +361,6 @@ class RetailDomainDetector(BaseDomainDetector):
     }
 
     def detect(self, df) -> DomainDetectionResult:
-        """
-        Detects if the dataframe belongs to the Retail domain.
-        """
         cols = {str(c).lower() for c in df.columns}
         hits = [c for c in cols if any(t in c for t in self.RETAIL_TOKENS)]
         confidence = min(len(hits) / 3, 1.0)
