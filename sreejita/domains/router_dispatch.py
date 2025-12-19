@@ -1,37 +1,30 @@
 """
-Router dispatcher with feature flag.
+Router dispatcher (v2.x FINAL)
 
-Controls whether v1 or v2 routing is used.
-Default: v1 (safe)
+- Detects domain
+- Attaches domain engine
+- Single source of truth for execution routing
 """
 
 import os
+from sreejita.domains.registry import registry
+from sreejita.domains.router import decide_domain
 
-# Feature flag
+# Feature flag (kept for backward compatibility)
 USE_ROUTER_V2 = os.getenv("SREEJITA_ROUTER_V2", "false").lower() == "true"
 
 
-def apply_domain(df, domain_name=None):
+def dispatch_domain(df):
     """
-    Unified apply_domain entry point.
-
-    - v1 requires domain_name
-    - v2 auto-detects domain
+    Detect domain and ATTACH engine.
+    This is mandatory for v2.x execution.
     """
+    decision = decide_domain(df)
 
-    if USE_ROUTER_V2:
-        # v2 path (auto-detection)
-        from sreejita.domains.router_v2 import apply_domain as apply_v2
-        return apply_v2(df)
+    domain_name = decision.selected_domain
+    engine = registry.get_domain(domain_name)
 
-    else:
-        # v1 path (explicit domain)
-        from sreejita.domains.router import apply_domain as apply_v1
+    # 🔒 CRITICAL LINE
+    decision.engine = engine
 
-        if domain_name is None:
-            raise ValueError(
-                "domain_name is required when using v1 router "
-                "(set SREEJITA_ROUTER_V2=true to enable v2)"
-            )
-
-        return apply_v1(df, domain_name)
+    return decision
