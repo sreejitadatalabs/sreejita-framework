@@ -54,21 +54,30 @@ def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # =====================================================
-# HELPER: DATE INTELLIGENCE (DERIVED LOS)
+# HELPER: DATE INTELLIGENCE (SMART DATE FIX)
 # =====================================================
 
 def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
     """
     Derive length_of_stay if missing but admission & discharge dates exist.
+    Uses 'fuzzy matching' to find date columns even if names change.
     """
     # 1. If it already exists, do nothing
     if resolve_column(df, "length_of_stay"):
         return df
 
-    # 2. Try to find dates
-    admit = resolve_column(df, "admission_date")
-    discharge = resolve_column(df, "discharge_date")
-
+    # 2. Smart Search: Look for ANY column containing specific keywords
+    admit = None
+    discharge = None
+    
+    for col in df.columns:
+        c_low = col.lower()
+        if "admission" in c_low and "date" in c_low:
+            admit = col
+        if "discharge" in c_low and "date" in c_low:
+            discharge = col
+            
+    # 3. Calculate if both found
     if admit and discharge:
         try:
             # Convert to datetime safely
@@ -79,8 +88,12 @@ def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
             df["derived_length_of_stay"] = (
                 df[discharge] - df[admit]
             ).dt.days
+            
+            # Clean up: Remove negative days (data errors)
+            df.loc[df["derived_length_of_stay"] < 0, "derived_length_of_stay"] = None
+            
         except Exception:
-            pass # Fail silently if date formats are weird
+            pass # Fail silently if date formats are unrecognizable
 
     return df
 
@@ -135,7 +148,9 @@ class HealthcareDomain(BaseDomain):
     description = "Universal healthcare analytics (clinical + financial + operational)"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return resolve_column(df, "patient_id") is not None
+        # Relaxed validation: Just needs SOME identifiable healthcare column
+        return (resolve_column(df, "patient_id") is not None) or \
+               (resolve_column(df, "billing_amount") is not None)
 
     # ---------------- PREPROCESS ----------------
 
@@ -314,15 +329,15 @@ class HealthcareDomain(BaseDomain):
         return recs
 
 # =====================================================
-# REGISTRATION (Keep as is)
+# REGISTRATION
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-    # Added "test", "result", "condition" to detection list for Dataset B
+    # Extended dictionary to catch columns from BOTH datasets
     HEALTHCARE_COLUMNS: Set[str] = {
         "patient", "patient_id", "pid",
-        "los", "length_of_stay", "admission_date",
+        "los", "length_of_stay", "admission_date", "date_of_admission",
         "readmitted", "mortality", "test", "result",
         "billing", "insurance",
         "doctor", "diagnosis", "medical_condition"
@@ -330,12 +345,21 @@ class HealthcareDomainDetector(BaseDomainDetector):
 
     def detect(self, df) -> DomainDetectionResult:
         cols = {str(c).lower() for c in df.columns}
-        matches = cols.intersection(self.HEALTHCARE_COLUMNS)
-        confidence = min(len(matches) / 4, 1.0)
+        # Check for partial matches to be safe (e.g. "date of admission" contains "admission")
+        matched_count = 0
+        matches = []
+        for target in self.HEALTHCARE_COLUMNS:
+            for col in cols:
+                if target in col:
+                    matched_count += 1
+                    matches.append(col)
+                    break
+        
+        confidence = min(matched_count / 4, 1.0)
         return DomainDetectionResult(
             domain="healthcare",
             confidence=confidence,
-            signals={"matched_columns": list(matches)},
+            signals={"matched_columns": matches},
         )
 
 def register(registry):
