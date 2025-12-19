@@ -5,11 +5,15 @@ from sreejita.domains.ops import OpsDomain, OpsDomainDetector
 from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
 from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 
+# 🔥 MISSING IMPORTS (FIX)
+from sreejita.domains.hr import HRDomain, HRDomainDetector
+from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
+
 from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
 from sreejita.core.fingerprint import dataframe_fingerprint
 
-# 🔹 Phase 2.1-B intelligence
+# Phase 2.1-B intelligence
 from sreejita.domains.intelligence.detector_v2 import (
     compute_domain_scores,
     select_best_domain,
@@ -26,6 +30,10 @@ DOMAIN_DETECTORS = [
     OpsDomainDetector(),
     HealthcareDomainDetector(),
     MarketingDomainDetector(),
+
+    # ✅ ADD THESE
+    HRDomainDetector(),
+    SupplyChainDomainDetector(),
 ]
 
 DOMAIN_IMPLEMENTATIONS = {
@@ -35,6 +43,10 @@ DOMAIN_IMPLEMENTATIONS = {
     "ops": OpsDomain(),
     "healthcare": HealthcareDomain(),
     "marketing": MarketingDomain(),
+
+    # ✅ ADD THESE
+    "hr": HRDomain(),
+    "supply_chain": SupplyChainDomain(),
 }
 
 # ------------------------
@@ -55,7 +67,7 @@ def register_observer(observer: DecisionObserver):
 def decide_domain(df) -> DecisionExplanation:
     rule_results = {}
 
-    # 1️⃣ Run Phase-1 rule-based detectors
+    # 1️⃣ Phase-1: rule-based detectors
     for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
         rule_results[result.domain] = {
@@ -63,13 +75,13 @@ def decide_domain(df) -> DecisionExplanation:
             "signals": result.signals,
         }
 
-    # 2️⃣ Phase-2 intent-weighted scoring
+    # 2️⃣ Phase-2: intent-weighted scoring
     domain_scores = compute_domain_scores(df, rule_results)
 
-    # 3️⃣ Select best domain with confidence floor
+    # 3️⃣ Select best domain
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
-    # 4️⃣ Build alternatives list (sorted)
+    # 4️⃣ Alternatives
     alternatives = [
         {
             "domain": d,
@@ -83,7 +95,7 @@ def decide_domain(df) -> DecisionExplanation:
         if d != selected_domain
     ]
 
-    # 5️⃣ Build decision object
+    # 5️⃣ Decision object
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
@@ -98,10 +110,9 @@ def decide_domain(df) -> DecisionExplanation:
         domain_scores=domain_scores,
     )
 
-    # 6️⃣ Attach fingerprint (replay guarantee)
     decision.fingerprint = dataframe_fingerprint(df)
 
-    # 7️⃣ Observability hooks
+    # Observability
     for observer in _OBSERVERS:
         observer.record(decision)
 
