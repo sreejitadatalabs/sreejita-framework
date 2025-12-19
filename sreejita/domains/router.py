@@ -10,29 +10,24 @@ from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
 from sreejita.core.fingerprint import dataframe_fingerprint
 
-# Phase 2.x Intelligence
+# Phase-2 intelligence
 from sreejita.domains.intelligence.detector_v2 import (
     compute_domain_scores,
     select_best_domain,
 )
 
 # =====================================================
-# DOMAIN DETECTORS (COMPLETE & ORDERED)
+# DOMAIN DETECTORS — PHASE 1 (CRITICAL)
 # =====================================================
 
 DOMAIN_DETECTORS = [
-    # Narrow / high-signal domains FIRST
-    HRDomainDetector(),
-    SupplyChainDomainDetector(),
-    HealthcareDomainDetector(),
-
-    # Business domains
-    FinanceDomainDetector(),
     RetailDomainDetector(),
-    MarketingDomainDetector(),
-
-    # Broadest domain LAST
     CustomerDomainDetector(),
+    FinanceDomainDetector(),
+    HealthcareDomainDetector(),
+    MarketingDomainDetector(),
+    HRDomainDetector(),              # ✅ FIX
+    SupplyChainDomainDetector(),     # ✅ FIX
 ]
 
 # =====================================================
@@ -40,13 +35,13 @@ DOMAIN_DETECTORS = [
 # =====================================================
 
 DOMAIN_IMPLEMENTATIONS = {
-    "hr": HRDomain(),
-    "supply_chain": SupplyChainDomain(),
-    "healthcare": HealthcareDomain(),
-    "finance": FinanceDomain(),
     "retail": RetailDomain(),
-    "marketing": MarketingDomain(),
     "customer": CustomerDomain(),
+    "finance": FinanceDomain(),
+    "healthcare": HealthcareDomain(),
+    "marketing": MarketingDomain(),
+    "hr": HRDomain(),                # ✅ FIX
+    "supply_chain": SupplyChainDomain(),  # ✅ FIX
 }
 
 # =====================================================
@@ -55,17 +50,18 @@ DOMAIN_IMPLEMENTATIONS = {
 
 _OBSERVERS: list[DecisionObserver] = []
 
+
 def register_observer(observer: DecisionObserver):
     _OBSERVERS.append(observer)
 
 # =====================================================
-# DOMAIN DECISION (v2.x FINAL)
+# DOMAIN DECISION (v2.x)
 # =====================================================
 
 def decide_domain(df) -> DecisionExplanation:
     rule_results = {}
 
-    # Phase 1 — Rule-based detectors
+    # 1️⃣ Phase-1 rule-based detectors
     for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
         rule_results[result.domain] = {
@@ -73,12 +69,13 @@ def decide_domain(df) -> DecisionExplanation:
             "signals": result.signals,
         }
 
-    # Phase 2 — Intent-weighted scoring
+    # 2️⃣ Phase-2 intent-weighted scoring
     domain_scores = compute_domain_scores(df, rule_results)
 
-    # Phase 3 — Final selection
+    # 3️⃣ Select best domain
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
+    # 4️⃣ Alternatives
     alternatives = [
         {
             "domain": d,
@@ -92,6 +89,7 @@ def decide_domain(df) -> DecisionExplanation:
         if d != selected_domain
     ]
 
+    # 5️⃣ Build decision object
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
