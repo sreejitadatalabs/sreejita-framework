@@ -80,7 +80,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         out_dir.mkdir(exist_ok=True)
         output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # --- FIX 1: Safe Encoding Fallback ---
+    # Safe encoding fallback
     try:
         df_raw = pd.read_csv(input_path, encoding="utf-8")
     except UnicodeDecodeError:
@@ -88,10 +88,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     df = clean_dataframe(df_raw)["df"]
 
-    # Domain decision + policy
     decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
-
     payload = generate_report_payload(df, decision, policy)
 
     kpis = payload.get("kpis", {})
@@ -100,24 +98,8 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     visuals = payload.get("visuals", [])
 
     styles = getSampleStyleSheet()
-
-    brand = ParagraphStyle(
-        "brand",
-        parent=styles["Title"],
-        alignment=1,
-        fontSize=26,
-        spaceAfter=6,
-    )
-
-    tagline = ParagraphStyle(
-        "tagline",
-        parent=styles["Normal"],
-        alignment=1,
-        fontSize=14,
-        textColor="#555555",
-        spaceAfter=18,
-    )
-
+    brand = ParagraphStyle("brand", parent=styles["Title"], alignment=1, fontSize=26)
+    tagline = ParagraphStyle("tagline", parent=styles["Normal"], alignment=1, fontSize=14)
     h1 = ParagraphStyle("h1", parent=styles["Heading1"])
     h2 = ParagraphStyle("h2", parent=styles["Heading2"])
     body = styles["BodyText"]
@@ -168,9 +150,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     for k, v in kpis.items():
         snapshot_rows.append([k.replace("_", " ").title(), format_value(v)])
 
-    if len(snapshot_rows) == 1:
-        snapshot_rows.append(["KPIs", "Not Available"])
-
     table = Table(snapshot_rows, colWidths=[9 * cm, 5 * cm])
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, "#999999"),
@@ -181,33 +160,41 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # =====================================================
-    # VISUAL EVIDENCE (FIXED PAGINATION)
+    # VISUAL EVIDENCE (DEFENSIBLE)
     # =====================================================
 
     if visuals:
         story.append(Paragraph("Visual Evidence", h1))
+
+        # 🔑 CONTEXT BLOCK (THIS FIXES THE “EMPTY PAGE” FEEL)
+        if len(visuals) == 1:
+            story.append(Paragraph(
+                "The dataset supports a focused visual analysis. "
+                "Key trends are shown below.",
+                body
+            ))
+        elif len(visuals) == 2:
+            story.append(Paragraph(
+                "The following visuals summarize performance and financial structure.",
+                body
+            ))
+        else:
+            story.append(Paragraph(
+                "The following visuals provide multi-angle evidence across key dimensions.",
+                body
+            ))
+
         story.append(Spacer(1, 12))
 
         VISUALS_PER_PAGE = 2
 
         for idx, v in enumerate(visuals):
-            # --- FIX 2: Aspect Ratio Safety ---
-            # preserveAspectRatio=True prevents square charts from stretching
-            story.append(Image(
-                str(v["path"]), 
-                width=14 * cm, 
-                height=8 * cm, 
-                ))
+            story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
             story.append(Paragraph(v.get("caption", ""), body))
-            
-            # --- FIX 3: The "Blank Page" Fix ---
-            # Only add Spacer if it's NOT the last image.
-            # This prevents a stray spacer from pushing to a new blank page.
+
             if idx < len(visuals) - 1:
                 story.append(Spacer(1, 14))
 
-            # Dynamic Page Break
-            # Note: We check idx+1 < len so we don't break on the very last item loop
             if (idx + 1) % VISUALS_PER_PAGE == 0 and idx + 1 < len(visuals):
                 story.append(PageBreak())
 
