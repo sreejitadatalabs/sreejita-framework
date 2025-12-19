@@ -15,10 +15,7 @@ from sreejita.domains.intelligence.detector_v2 import (
     select_best_domain,
 )
 
-# ------------------------
-# Phase-1 Rule Detectors
-# ------------------------
-
+# Phase-1 detectors (order does NOT matter anymore)
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
     EcommerceDomainDetector(),
@@ -34,7 +31,6 @@ DOMAIN_DETECTORS = [
 def decide_domain(df) -> DecisionExplanation:
     rule_results = {}
 
-    # Phase 1 — rule-based detection
     for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
         rule_results[result.domain] = {
@@ -42,16 +38,11 @@ def decide_domain(df) -> DecisionExplanation:
             "signals": result.signals,
         }
 
-    # Phase 2 — intent + dominance intelligence
     domain_scores = compute_domain_scores(df, rule_results)
-
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
     alternatives = [
-        {
-            "domain": d,
-            "confidence": info["confidence"],
-        }
+        {"domain": d, "confidence": info["confidence"]}
         for d, info in sorted(
             domain_scores.items(),
             key=lambda x: x[1]["confidence"],
@@ -68,11 +59,10 @@ def decide_domain(df) -> DecisionExplanation:
         signals=meta.get("signals", {}),
         rules_applied=[
             "rule_based_detection",
-            "dominance_protected_intent_scoring",
+            "intent_weighted_scoring",
         ],
         domain_scores=domain_scores,
     )
 
     decision.fingerprint = dataframe_fingerprint(df)
-
     return decision
