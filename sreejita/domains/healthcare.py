@@ -8,14 +8,10 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# DATA NORMALIZATION (CRITICAL FOR REAL DATASETS)
+# DATA NORMALIZATION
 # =====================================================
 
 def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert Yes/No, Y/N, True/False columns to 1/0.
-    Works safely for mixed datasets.
-    """
     for col in df.columns:
         if df[col].dtype == object:
             values = set(
@@ -26,10 +22,7 @@ def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
                 .str.lower()
                 .unique()
             )
-
-            if values and values.issubset(
-                {"yes", "no", "y", "n", "true", "false"}
-            ):
+            if values and values.issubset({"yes", "no", "y", "n", "true", "false"}):
                 df[col] = (
                     df[col]
                     .astype(str)
@@ -62,7 +55,7 @@ def _detect_capabilities(df: pd.DataFrame) -> Dict[str, bool]:
 
 
 # =====================================================
-# HEALTHCARE DOMAIN ENGINE
+# HEALTHCARE DOMAIN
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -77,12 +70,8 @@ class HealthcareDomain(BaseDomain):
     # ---------------- PREPROCESS ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        # 1️⃣ Normalize real-world categorical data
         df = _normalize_binary_columns(df)
-
-        # 2️⃣ Detect dataset capabilities
         self.capabilities = _detect_capabilities(df)
-
         return df
 
     # ---------------- KPIs ----------------
@@ -92,7 +81,6 @@ class HealthcareDomain(BaseDomain):
 
         pid = resolve_column(df, "patient_id")
 
-        # ---- Clinical KPIs ----
         if self.capabilities["has_clinical"]:
             los = resolve_column(df, "length_of_stay")
             if los and pd.api.types.is_numeric_dtype(df[los]):
@@ -102,22 +90,15 @@ class HealthcareDomain(BaseDomain):
             if readm and pd.api.types.is_numeric_dtype(df[readm]):
                 kpis["readmission_rate"] = df[readm].mean()
 
-            mort = resolve_column(df, "mortality")
-            if mort and pd.api.types.is_numeric_dtype(df[mort]):
-                kpis["mortality_rate"] = df[mort].mean()
-
-        # ---- Financial KPIs ----
         if self.capabilities["has_financials"]:
             bill = resolve_column(df, "billing_amount")
             if bill and pd.api.types.is_numeric_dtype(df[bill]):
                 kpis["total_billing"] = df[bill].sum()
-
                 if pid:
                     kpis["avg_billing_per_patient"] = (
                         df.groupby(pid)[bill].sum().mean()
                     )
 
-        # ---- Volume KPI ----
         if pid:
             kpis["patient_volume"] = df[pid].nunique()
 
@@ -125,171 +106,125 @@ class HealthcareDomain(BaseDomain):
 
     # ---------------- VISUALS ----------------
 
-    def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> List[Dict[str, Any]]:
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         import matplotlib.pyplot as plt
 
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # ---- LOS Distribution ----
         los = resolve_column(df, "length_of_stay")
         if los and pd.api.types.is_numeric_dtype(df[los]):
             path = output_dir / "length_of_stay.png"
-            df[los].dropna().hist(bins=15)
+            df[los].hist(bins=15)
             plt.title("Length of Stay Distribution")
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({
-                "path": path,
-                "caption": "Distribution of patient length of stay"
-            })
+            visuals.append({"path": path, "caption": "Length of stay distribution"})
 
-        # ---- Billing by Insurance ----
         bill = resolve_column(df, "billing_amount")
         ins = resolve_column(df, "insurance")
         if bill and ins and pd.api.types.is_numeric_dtype(df[bill]):
             path = output_dir / "billing_by_insurance.png"
-            df.groupby(ins)[bill].sum().sort_values(
-                ascending=False
-            ).plot(kind="bar")
+            df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar")
             plt.title("Billing by Insurance Provider")
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({
-                "path": path,
-                "caption": "Total billing amount by insurance provider"
-            })
+            visuals.append({"path": path, "caption": "Billing by insurance provider"})
 
         return visuals
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- INSIGHTS (DIAGNOSTIC) ----------------
 
-    def generate_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
-    # ---------- Helper ----------
         def pct_diff(val, ref):
-            if ref == 0:
-                return 0
-            return (val - ref) / ref
+            return 0 if ref == 0 else (val - ref) / ref
 
-    # ---------- Worst Performing Doctor (Readmission) ----------
+        # Worst doctor by readmission
         doc = resolve_column(df, "doctor")
         readm = resolve_column(df, "readmitted")
-
         if doc and readm and pd.api.types.is_numeric_dtype(df[readm]):
-            overall_rate = df[readm].mean()
+            overall = df[readm].mean()
             grp = df.groupby(doc)[readm].mean()
+            worst_name = grp.idxmax()
+            worst_val = grp.loc[worst_name]
+            diff = pct_diff(worst_val, overall)
 
-            worst = grp.loc[grp.idxmax()]
-            diff = pct_diff(worst, overall_rate)
-
-            if diff > 0.10:  # 10% worse than avg
+            if diff > 0.10:
                 insights.append({
                     "level": "RISK",
-                    "title": f"Worst Performing Doctor: {grp.idxmax()}",
+                    "title": f"Worst Performing Doctor: {worst_name}",
                     "so_what": (
-                        f"Readmission rate ({worst:.1%}) is "
-                        f"{diff:.0%} higher than the overall average ({overall_rate:.1%})."
+                        f"Readmission rate ({worst_val:.1%}) is "
+                        f"{diff:.0%} higher than the overall average ({overall:.1%})."
                     )
                 })
 
-    # ---------- Highest Cost Diagnosis ----------
+        # Highest cost diagnosis
         diag = resolve_column(df, "diagnosis")
         bill = resolve_column(df, "billing_amount")
-
         if diag and bill and pd.api.types.is_numeric_dtype(df[bill]):
-            overall_bill = df[bill].mean()
+            overall = df[bill].mean()
             grp = df.groupby(diag)[bill].mean()
+            name = grp.idxmax()
+            val = grp.loc[name]
+            diff = pct_diff(val, overall)
 
-            worst_diag = grp.idxmax()
-            worst_val = grp.loc[worst_diag]
-            diff = pct_diff(worst_val, overall_bill)
-
-            if diff > 0.25:  # 25% higher cost
+            if diff > 0.25:
                 insights.append({
                     "level": "WARNING",
-                    "title": f"High-Cost Diagnosis: {worst_diag}",
+                    "title": f"High-Cost Diagnosis: {name}",
                     "so_what": (
-                        f"Average billing for this diagnosis is "
-                        f"{diff:.0%} higher than the overall average."
+                        f"Average billing is {diff:.0%} higher than the dataset average."
                     )
                 })
 
-    # ---------- Most Expensive Branch ----------
-    branch = resolve_column(df, "hospital_branch")
-    if branch and bill and pd.api.types.is_numeric_dtype(df[bill]):
-        grp = df.groupby(branch)[bill].mean()
-        worst_branch = grp.idxmax()
-        worst_val = grp.loc[worst_branch]
-        avg_val = grp.mean()
-
-        diff = pct_diff(worst_val, avg_val)
-
-        if diff > 0.20:
+        # Fallback
+        if not insights:
             insights.append({
-                "level": "WARNING",
-                "title": f"Most Expensive Branch: {worst_branch}",
+                "level": "INFO",
+                "title": "No Extreme Outliers Detected",
                 "so_what": (
-                    f"Average billing is {diff:.0%} higher than "
-                    f"the branch average."
+                    "All key metrics fall within normal variance ranges."
                 )
             })
 
-    # ---------- Fallback (Should Almost Never Trigger Now) ----------
-    if not insights:
-        insights.append({
-            "level": "INFO",
-            "title": "No Extreme Outliers Detected",
-            "so_what": (
-                "All key metrics fall within normal variance ranges, "
-                "with no segment deviating materially from the mean."
-            )
-        })
-
-    return insights
+        return insights
 
     # ---------------- RECOMMENDATIONS ----------------
 
-def generate_recommendations(
-    self, df: pd.DataFrame, kpis: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    recs: List[Dict[str, Any]] = []
+    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        recs: List[Dict[str, Any]] = []
 
-    insights = self.generate_insights(df, kpis)
+        for i in self.generate_insights(df, kpis):
+            if i["level"] == "RISK":
+                recs.append({
+                    "action": f"Investigate immediately: {i['title']}",
+                    "priority": "HIGH",
+                    "timeline": "2–4 weeks",
+                })
+            elif i["level"] == "WARNING":
+                recs.append({
+                    "action": f"Review cost drivers for: {i['title']}",
+                    "priority": "MEDIUM",
+                    "timeline": "4–6 weeks",
+                })
 
-    for i in insights:
-        if i["level"] == "RISK":
+        if not recs:
             recs.append({
-                "action": f"Investigate and remediate: {i['title']}",
-                "priority": "HIGH",
-                "timeline": "2–4 weeks",
-            })
-        elif i["level"] == "WARNING":
-            recs.append({
-                "action": f"Review cost and efficiency drivers for: {i['title']}",
-                "priority": "MEDIUM",
-                "timeline": "4–6 weeks",
+                "action": "Continue routine monitoring",
+                "priority": "LOW",
+                "timeline": "Ongoing",
             })
 
-    if not recs:
-        recs.append({
-            "action": "Continue routine monitoring across all clinical and financial dimensions",
-            "priority": "LOW",
-            "timeline": "Ongoing",
-        })
-
-    return recs
+        return recs
 
 
 # =====================================================
-# DOMAIN DETECTOR (TEST + ROUTER SAFE)
+# DOMAIN DETECTOR
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
@@ -316,7 +251,7 @@ class HealthcareDomainDetector(BaseDomainDetector):
 
 
 # =====================================================
-# REGISTRATION HOOK
+# REGISTRATION
 # =====================================================
 
 def register(registry):
