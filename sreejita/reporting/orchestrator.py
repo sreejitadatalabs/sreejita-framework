@@ -8,16 +8,16 @@ def generate_report_payload(df, decision, policy):
     v2.x FINAL ORCHESTRATOR (LOCKED)
 
     Guarantees:
-    - Domain engine MUST exist for healthcare
-    - No silent fallbacks
-    - Hybrid never crashes
+    - Domain lifecycle is respected (preprocess → kpis → insights → visuals)
+    - Healthcare engine MUST exist
+    - No silent failures
     """
 
     domain = decision.selected_domain
     engine = getattr(decision, "engine", None)
 
     # =====================================================
-    # HARD PROTECTION — STEP 4 (MANDATORY)
+    # HARD PROTECTION — HEALTHCARE MUST HAVE ENGINE
     # =====================================================
     if domain == "healthcare" and engine is None:
         raise RuntimeError(
@@ -26,7 +26,7 @@ def generate_report_payload(df, decision, policy):
         )
 
     # =====================================================
-    # SOFT FALLBACK (OTHER DOMAINS)
+    # SOFT FALLBACK — OTHER DOMAINS
     # =====================================================
     if engine is None:
         return {
@@ -45,37 +45,44 @@ def generate_report_payload(df, decision, policy):
         }
 
     try:
-        # -------------------------
+        # =====================================================
+        # 🔥 DOMAIN PREPROCESS (THIS WAS MISSING)
+        # =====================================================
+        if hasattr(engine, "preprocess"):
+            df = engine.preprocess(df)
+
+        # =====================================================
         # KPIs (DOMAIN-OWNED)
-        # -------------------------
+        # =====================================================
         kpis = (
             engine.calculate_kpis(df)
             if hasattr(engine, "calculate_kpis")
             else {}
         ) or {}
 
-        # -------------------------
+        # =====================================================
         # INSIGHTS (DOMAIN-OWNED)
-        # -------------------------
+        # =====================================================
         insights = (
             engine.generate_insights(df, kpis)
             if hasattr(engine, "generate_insights")
             else []
         ) or []
 
-        # -------------------------
+        # =====================================================
         # RECOMMENDATIONS (ENRICH ONLY)
-        # -------------------------
+        # =====================================================
         raw_recs = (
             engine.generate_recommendations(df, kpis)
             if hasattr(engine, "generate_recommendations")
             else []
-        )
+        ) or []
+
         recommendations = enrich_recommendations(raw_recs)
 
-        # -------------------------
+        # =====================================================
         # VISUALS (DOMAIN-OWNED)
-        # -------------------------
+        # =====================================================
         output_dir = Path("reports") / "visuals"
         visuals = (
             engine.generate_visuals(df, output_dir)
@@ -95,7 +102,9 @@ def generate_report_payload(df, decision, policy):
         }
 
     except Exception as e:
+        # =====================================================
         # FINAL DEFENSE — REPORT MUST STILL RENDER
+        # =====================================================
         return {
             "generated_at": datetime.utcnow().isoformat(),
             "domain": domain,
