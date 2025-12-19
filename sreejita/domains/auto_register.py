@@ -17,6 +17,8 @@ DEFAULT_DOMAIN_MODULES = [
     "sreejita.domains.customer",
     "sreejita.domains.finance",
     "sreejita.domains.healthcare",
+    "sreejita.domains.supply_chain",
+    "sreejita.domains.hr",
 ]
 
 
