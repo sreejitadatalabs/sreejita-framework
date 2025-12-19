@@ -19,17 +19,57 @@ def _safe_div(n, d):
     return n / d
 
 
-def _detect_time_column(df: pd.DataFrame) -> Optional[str] | None:
+from typing import Optional
+import pandas as pd
+import numpy as np
+
+def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
-    Detect REAL time columns only.
-    (No fiscal codes, no posting keys, no transactions)
+    Detect a real time column safely (Datetime, Numeric, or String-Date).
     """
+    # 1. Prioritize explicit names to narrow search space
     for key in ["date", "period", "month", "year"]:
         col = resolve_column(df, key)
-        if col:
-            return col
-    return None
+        if not col:
+            continue
+        
+        # 2. Skip if column is entirely empty (prevents crashes later)
+        if df[col].isna().all():
+            continue
 
+        # A. Accept standard datetime columns directly
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            return col
+
+        # B. Accept numeric Year/Month (with range guards)
+        if pd.api.types.is_numeric_dtype(df[col]):
+            # usage of unique() speeds up large column checks
+            values = df[col].dropna().unique()
+            
+            if len(values) == 0: continue
+
+            v_min, v_max = values.min(), values.max()
+
+            # Year-like (e.g. 1990–2050) - Tightened range for modern finance
+            if 1950 <= v_min and v_max <= 2050:
+                return col
+
+            # Month-like (1–12)
+            if 1 <= v_min and v_max <= 12:
+                return col
+
+        # C. Accept String Dates (The Missing Piece)
+        # Often "date" columns in CSVs are just strings: "2023-01-01"
+        if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+            try:
+                # Test the first 10 non-null values to see if they parse
+                sample = df[col].dropna().iloc[:10]
+                pd.to_datetime(sample, errors = "raise") # Will raise error if not date-like
+                return col
+            except (ValueError, TypeError):
+                continue
+
+    return None
 
 def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     df_out = df.copy()
