@@ -21,50 +21,41 @@ def _safe_div(n, d):
 
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
-    Detect a real time column safely (Datetime, Numeric, or String-Date).
+    v2.x SAFE time detector.
+    - Exact finance-safe match first
+    - Then fuzzy 'date' containment
+    - No prioritization logic
+    - No inference of "best" date
     """
-    # 1. Prioritize explicit names to narrow search space
-    for key in ["date", "period", "month", "year"]:
-        col = resolve_column(df, key)
-        if not col:
-            continue
-        
-        # 2. Skip if column is entirely empty (prevents crashes later)
-        if df[col].isna().all():
-            continue
 
-        # A. Accept standard datetime columns directly
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            return col
+    # 1. Explicit finance-safe names
+    explicit = [
+        "fiscal date", "posting date", "transaction date",
+        "invoice date", "date", "period", "month", "year"
+    ]
 
-        # B. Accept numeric Year/Month (with range guards)
-        if pd.api.types.is_numeric_dtype(df[col]):
-            # usage of unique() speeds up large column checks
-            values = df[col].dropna().unique()
-            
-            if len(values) == 0: continue
+    cols_lower = {c.lower(): c for c in df.columns}
 
-            v_min, v_max = values.min(), values.max()
+    # Pass 1 — explicit names
+    for key in explicit:
+        for low, real in cols_lower.items():
+            if key == low:
+                if not df[real].isna().all():
+                    try:
+                        pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
+                        return real
+                    except Exception:
+                        continue
 
-            # Year-like (e.g. 1950–2050)
-            if 1950 <= v_min and v_max <= 2050:
-                return col
-
-            # Month-like (1–12)
-            # FIX 2: Added nunique check to avoid confusing category codes with months
-            if 1 <= v_min and v_max <= 12 and len(values) <= 12:
-                return col
-
-        # C. Accept String Dates (The Missing Piece)
-        # Often "date" columns in CSVs are just strings: "2023-01-01"
-        if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-            try:
-                # Test the first 10 non-null values to see if they parse
-                sample = df[col].dropna().iloc[:10]
-                pd.to_datetime(sample, errors="raise") # Will raise error if not date-like
-                return col
-            except (ValueError, TypeError):
-                continue
+    # Pass 2 — fuzzy containment ("Fiscal Date", etc.)
+    for low, real in cols_lower.items():
+        if "date" in low:
+            if not df[real].isna().all():
+                try:
+                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
+                    return real
+                except Exception:
+                    continue
 
     return None
 
@@ -81,12 +72,12 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# FINANCE DOMAIN
+# FINANCE DOMAIN (v2.x SAFE)
 # =====================================================
 
 class FinanceDomain(BaseDomain):
     name = "finance"
-    description = "Defensible financial analytics (P&L, Budget, Ratios)"
+    description = "Defensible financial analytics (Revenue, Expense, Budget, Ratios)"
 
     # ---------------- VALIDATION ----------------
 
@@ -94,6 +85,7 @@ class FinanceDomain(BaseDomain):
         return (
             resolve_column(df, "revenue") is not None
             or resolve_column(df, "income") is not None
+            or resolve_column(df, "expense") is not None
         )
 
     # ---------------- PREPROCESS ----------------
@@ -104,7 +96,6 @@ class FinanceDomain(BaseDomain):
 
         if self.time_col:
             df = _prepare_time_series(df, self.time_col)
-            # Need at least 2 points to draw a line
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -118,10 +109,8 @@ class FinanceDomain(BaseDomain):
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
         profit = resolve_column(df, "profit")
         budget = resolve_column(df, "budget") or resolve_column(df, "target")
-        debt = resolve_column(df, "debt")
-        equity = resolve_column(df, "equity")
 
-        # ---- Totals ----
+        # Totals
         if revenue and pd.api.types.is_numeric_dtype(df[revenue]):
             kpis["total_revenue"] = df[revenue].sum()
 
@@ -133,7 +122,7 @@ class FinanceDomain(BaseDomain):
         elif "total_revenue" in kpis and "total_expense" in kpis:
             kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
-        # ---- Budget Variance ----
+        # Budget variance
         if budget and revenue:
             actual = df[revenue].sum()
             planned = df[budget].sum()
@@ -141,24 +130,14 @@ class FinanceDomain(BaseDomain):
             kpis["budget_variance_abs"] = var
             kpis["budget_variance_pct"] = _safe_div(var, planned)
 
-        # ---- Ratios ----
+        # Margin
         if "total_profit" in kpis and "total_revenue" in kpis:
             kpis["profit_margin"] = _safe_div(
                 kpis["total_profit"], kpis["total_revenue"]
             )
 
-        if debt and equity:
-            kpis["debt_to_equity"] = _safe_div(
-                df[debt].sum(), df[equity].sum()
-            )
-
-        # ---- Growth (STRICT) ----
-        # Only calculate if we have time series AND enough data points
-        if (
-            self.has_time_series
-            and revenue
-            and df[revenue].notna().sum() >= 2
-        ):
+        # Growth (strict: first vs last only)
+        if self.has_time_series and revenue and df[revenue].notna().sum() >= 2:
             first = df[revenue].iloc[0]
             last = df[revenue].iloc[-1]
             kpis["revenue_growth"] = _safe_div(last - first, first)
@@ -183,26 +162,14 @@ class FinanceDomain(BaseDomain):
 
         revenue = resolve_column(df, "revenue") or resolve_column(df, "income")
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
-        budget = resolve_column(df, "budget")
 
-        # ---- Revenue Trend (ONLY if time-series) ----
+        # ---- Revenue Trend ----
         if self.has_time_series and revenue:
             p = output_dir / "revenue_trend.png"
             plt.figure(figsize=(7, 4))
-            plt.plot(df[self.time_col], df[revenue], label="Revenue", linewidth=2)
-            
-            # Show budget line only if data density is reasonable (<50 points)
-            if budget and len(df) < 50:
-                plt.plot(
-                    df[self.time_col],
-                    df[budget],
-                    linestyle="--",
-                    label="Budget",
-                    alpha=0.7,
-                )
+            plt.plot(df[self.time_col], df[revenue], linewidth=2)
             plt.title("Revenue Trend")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.legend()
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
@@ -211,29 +178,21 @@ class FinanceDomain(BaseDomain):
                 "caption": "Revenue performance over time"
             })
 
-        # ---- P&L Waterfall (GATED & SAFE) ----
-        # FIX 3: Added checks ensuring columns are numeric to prevent crashes
-        if (
-            revenue and expense 
-            and len(df) <= 12
-            and pd.api.types.is_numeric_dtype(df[revenue])
-            and pd.api.types.is_numeric_dtype(df[expense])
-        ):
-            p = output_dir / "pnl_waterfall.png"
+        # ---- P&L Summary Waterfall (ALWAYS SAFE) ----
+        if revenue and expense:
+            p = output_dir / "pnl_summary.png"
 
             rev = df[revenue].sum()
             exp = df[expense].sum()
-            profit = rev - exp
+            prof = rev - exp
 
-            steps = ["Revenue", "Expenses", "Net Profit"]
-            values = [rev, -exp, profit]
+            steps = ["Revenue", "Expenses", "Net Result"]
+            values = [rev, -exp, prof]
             bottoms = [0, rev, 0]
             colors = ["#2ca02c", "#d62728", "#1f77b4"]
 
             plt.figure(figsize=(7, 4))
             bars = plt.bar(steps, values, bottom=bottoms, color=colors)
-            
-            # Add text labels on bars
             for bar, val in zip(bars, values):
                 plt.text(
                     bar.get_x() + bar.get_width() / 2,
@@ -244,70 +203,64 @@ class FinanceDomain(BaseDomain):
                     color="white",
                     fontweight="bold",
                 )
-            
-            plt.title("P&L Waterfall")
+            plt.title("P&L Summary")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
             visuals.append({
                 "path": p,
-                "caption": "Bridge from revenue to net profit"
+                "caption": "Revenue to net result summary"
             })
 
         return visuals
 
     # ---------------- INSIGHTS ----------------
 
-    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+
         insights: List[Dict[str, Any]] = []
 
         margin = kpis.get("profit_margin")
-        growth = kpis.get("revenue_growth")
         var_pct = kpis.get("budget_variance_pct")
 
-        # ---- Margin ----
-        if margin is not None and margin < 0.10:
-            insights.append({
-                "level": "WARNING",
-                "title": "Low Profit Margin",
-                "so_what": f"Profit margin is {margin:.1%}, indicating cost pressure."
-            })
-
-        # ---- Budget Variance ----
-        if var_pct is not None:
-            # We treat missed budget as RISK only if we are confident in the time series
-            if var_pct < -0.05:
-                level = "RISK" if self.has_time_series else "INFO"
+        # Burn rate vs margin
+        if margin is not None:
+            if margin < 0:
                 insights.append({
-                    "level": level,
+                    "level": "RISK",
+                    "title": "High Burn Rate Detected",
+                    "so_what": f"Expenses exceed revenue. Net margin is {margin:.1%}."
+                })
+            elif margin < 0.10:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Low Profit Margin",
+                    "so_what": f"Margin is {margin:.1%}, indicating cost pressure."
+                })
+
+        # Budget
+        if var_pct is not None:
+            if var_pct < -0.05:
+                insights.append({
+                    "level": "WARNING" if not self.has_time_series else "RISK",
                     "title": "Missed Budget Target",
-                    "so_what": f"Revenue is {abs(var_pct):.1%} below budget."
+                    "so_what": f"Revenue is {abs(var_pct):.1%} below plan."
                 })
             elif var_pct > 0.10:
                 insights.append({
                     "level": "INFO",
                     "title": "Exceeding Budget",
-                    "so_what": f"Revenue exceeds budget by {var_pct:.1%}."
-                })
-
-        # ---- Hollow Growth ----
-        if growth is not None and margin is not None:
-            if growth > 0.20 and margin < 0.05:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Unprofitable Growth",
-                    "so_what": (
-                        f"High growth ({growth:.1%}) with thin margins "
-                        f"({margin:.1%})."
-                    )
+                    "so_what": f"Revenue exceeds plan by {var_pct:.1%}."
                 })
 
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Financial Performance Stable",
-                "so_what": "Key financial indicators are within expected ranges."
+                "so_what": "Key financial metrics are within expected ranges."
             })
 
         return insights
@@ -352,8 +305,11 @@ class FinanceDomainDetector(BaseDomainDetector):
     domain_name = "finance"
 
     FINANCE_TOKENS: Set[str] = {
-        "revenue", "income", "expense", "cost", "cogs",
-        "profit", "loss", "debt", "equity", "budget", "forecast"
+        "revenue", "income", "sales",
+        "expense", "cost", "spend",
+        "budget", "forecast",
+        "profit", "loss",
+        "ledger", "fiscal", "amount"
     }
 
     def detect(self, df) -> DomainDetectionResult:
