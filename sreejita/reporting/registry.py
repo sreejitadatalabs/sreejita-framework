@@ -79,11 +79,11 @@ DOMAIN_REPORT_ENGINES = {
         "insights": generate_ops_insights,
         "recommendations": generate_ops_recommendations,
     },
-    "healthcare": {
+    ''' "healthcare": {
         "kpis": compute_healthcare_kpis,
         "insights": generate_healthcare_insights,
         "recommendations": generate_healthcare_recommendations,
-    },
+    },'''
     "marketing": {
     "kpis": compute_marketing_kpis,
     "insights": generate_marketing_insights,
