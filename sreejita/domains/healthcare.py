@@ -257,7 +257,7 @@ class HealthcareDomain(BaseDomain):
 
     # ---------------- RECOMMENDATIONS ----------------
 
-    def generate_recommendations(
+def generate_recommendations(
     self, df: pd.DataFrame, kpis: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     recs: List[Dict[str, Any]] = []
