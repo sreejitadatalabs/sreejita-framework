@@ -1,263 +1,299 @@
-"""
-Retail Domain Module (v2.x FINAL)
-
-- Ranked KPI fallback system (top 4 always attempted)
-- KPI-driven visuals (no hard dependency)
-- Defensive execution (no schema assumptions)
-- Domain-neutral reporting compatibility
-"""
-
-from typing import Dict, Any, List, Set
-from pathlib import Path
 import pandas as pd
+from pathlib import Path
+from typing import Dict, Any, List, Set, Optional
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
+from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# KPI RANKING PLAN (AUTHORITATIVE CONTRACT)
+# HELPERS
 # =====================================================
-
-RETAIL_KPI_PLAN = [
-    {"name": "total_sales", "rank": 1, "columns": ["sales"]},
-    {"name": "order_count", "rank": 2, "columns": ["sales"]},
-    {"name": "average_order_value", "rank": 3, "columns": ["sales"]},
-    {"name": "profit_margin", "rank": 4, "columns": ["sales", "profit"]},
-    {"name": "shipping_cost_ratio", "rank": 5, "columns": ["sales", "shipping_cost"]},
-    {"name": "average_discount", "rank": 6, "columns": ["discount"]},
-    {"name": "category_revenue", "rank": 7, "columns": ["category", "sales"]},
-    {"name": "top_products", "rank": 8, "columns": ["product", "sales"]},
-    {"name": "sales_volatility", "rank": 9, "columns": ["sales"]},
-    {"name": "profit_contribution", "rank": 10, "columns": ["profit", "category"]},
-]
-
-
-# =====================================================
-# INTERNAL HELPERS
-# =====================================================
-
-def _select_ranked_kpis(df: pd.DataFrame, max_kpis: int = 4) -> List[str]:
-    selected = []
-    for item in sorted(RETAIL_KPI_PLAN, key=lambda x: x["rank"]):
-        if all(col in df.columns for col in item["columns"]):
-            selected.append(item["name"])
-        if len(selected) >= max_kpis:
-            break
-    return selected
-
 
 def _safe_div(n, d):
-    return float(n / d) if d and d != 0 else None
-
-
-# =====================================================
-# KPI COMPUTATION (DEFENSIVE)
-# =====================================================
-
-def _compute_kpi(name: str, df: pd.DataFrame):
-    try:
-        if name == "total_sales":
-            return float(df["sales"].sum())
-
-        if name == "order_count":
-            return int(len(df))
-
-        if name == "average_order_value":
-            return float(df["sales"].mean())
-
-        if name == "profit_margin":
-            return _safe_div(df["profit"].sum(), df["sales"].sum())
-
-        if name == "shipping_cost_ratio":
-            return _safe_div(df["shipping_cost"].sum(), df["sales"].sum())
-
-        if name == "average_discount":
-            return float(df["discount"].mean())
-
-        if name == "category_revenue":
-            return float(df.groupby("category")["sales"].sum().max())
-
-        if name == "top_products":
-            return float(df.groupby("product")["sales"].sum().max())
-
-        if name == "sales_volatility":
-            return float(df["sales"].std())
-
-        if name == "profit_contribution":
-            return float(df.groupby("category")["profit"].sum().max())
-
-    except Exception:
+    """Safely divides n by d, returning None if d is 0 or NaN."""
+    if d in (0, None) or pd.isna(d):
         return None
+    return n / d
 
+
+def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
+    """
+    Detects a time column suitable for retail analytics.
+    Prioritizes specific retail terms like 'order date'.
+    """
+    candidates = [
+        "order date", "invoice date", "transaction date",
+        "date", "order_date", "ship date"
+    ]
+
+    cols = {c.lower(): c for c in df.columns}
+
+    for key in candidates:
+        for low, real in cols.items():
+            if key in low and not df[real].isna().all():
+                try:
+                    # Validate by attempting to parse a small sample
+                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
+                    return real
+                except Exception:
+                    continue
     return None
 
 
 # =====================================================
-# VISUALS (ONLY FOR SELECTED KPIs)
-# =====================================================
-
-def _generate_visuals(df: pd.DataFrame, selected_kpis: List[str], out_dir: Path):
-    """
-    NOTE:
-    We intentionally implement ONLY 2–3 visuals.
-    Ranking guarantees stability; visuals can grow later without refactor.
-    """
-    visuals = []
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Sales trend
-    if "total_sales" in selected_kpis:
-        path = out_dir / "sales_trend.png"
-        df["sales"].plot(title="Sales Trend")
-        import matplotlib.pyplot as plt
-        plt.tight_layout()
-        plt.savefig(path)
-        plt.close()
-        visuals.append({
-            "path": path,
-            "caption": "Sales trend over records"
-        })
-
-    # Category revenue
-    if "category_revenue" in selected_kpis:
-        path = out_dir / "category_revenue.png"
-        df.groupby("category")["sales"].sum().plot(kind="bar", title="Revenue by Category")
-        import matplotlib.pyplot as plt
-        plt.tight_layout()
-        plt.savefig(path)
-        plt.close()
-        visuals.append({
-            "path": path,
-            "caption": "Revenue distribution by category"
-        })
-
-    # Discount distribution
-    if "average_discount" in selected_kpis:
-        path = out_dir / "discount_dist.png"
-        df["discount"].hist()
-        import matplotlib.pyplot as plt
-        plt.title("Discount Distribution")
-        plt.tight_layout()
-        plt.savefig(path)
-        plt.close()
-        visuals.append({
-            "path": path,
-            "caption": "Discount distribution"
-        })
-
-    return visuals[:4]
-
-
-# =====================================================
-# DOMAIN CLASS
+# RETAIL DOMAIN
 # =====================================================
 
 class RetailDomain(BaseDomain):
     name = "retail"
-    description = "Retail analytics with ranked KPI fallback"
-    required_columns = ["sales"]
+    description = "Retail & Sales Analytics (Revenue, Orders, Products, Customers)"
+
+    # ---------------- VALIDATION ----------------
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return "sales" in df.columns
+        """
+        Validates if the dataset contains the minimum required columns.
+        """
+        return (
+            resolve_column(df, "revenue") is not None
+            or resolve_column(df, "sales") is not None
+            or resolve_column(df, "amount") is not None
+        )
+
+    # ---------------- PREPROCESS ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        if "profit" in df.columns and "sales" in df.columns:
-            df["margin"] = _safe_div(df["profit"], df["sales"])
+        """
+        Prepares the dataframe by detecting and parsing the time column.
+        """
+        self.time_col = _detect_time_column(df)
+        self.has_time_series = False
+
+        if self.time_col:
+            df = df.copy() # Avoid SettingWithCopy warnings
+            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
+            df = df.dropna(subset=[self.time_col])
+            df = df.sort_values(self.time_col)
+            # Ensure we have enough data points for a time series
+            self.has_time_series = df[self.time_col].nunique() >= 2
+
         return df
 
+    # ---------------- KPIs ----------------
+
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        selected = _select_ranked_kpis(df)
+        """
+        Calculates key retail metrics: Total Revenue, AOV, Order Volume.
+        """
         kpis = {}
 
-        for name in selected:
-            val = _compute_kpi(name, df)
-            if val is not None:
-                kpis[name] = val
+        revenue = (
+            resolve_column(df, "revenue")
+            or resolve_column(df, "sales")
+            or resolve_column(df, "amount")
+        )
+
+        order_id = resolve_column(df, "order_id") or resolve_column(df, "transaction")
+        customer = resolve_column(df, "customer")
+
+        if revenue:
+            kpis["total_revenue"] = df[revenue].sum()
+            
+            # --- YOUR FIX: Validate Order ID is usable ---
+            if order_id and df[order_id].notna().any():
+                kpis["avg_order_value"] = _safe_div(
+                    df[revenue].sum(), df[order_id].nunique()
+                )
+
+        if order_id:
+            kpis["order_volume"] = df[order_id].nunique()
+
+        if customer:
+            kpis["customer_count"] = df[customer].nunique()
 
         return kpis
 
+    # ---------------- VISUALS ----------------
+
+    def generate_visuals(
+        self, df: pd.DataFrame, output_dir: Path
+    ) -> List[Dict[str, Any]]:
+        """
+        Generates visualizations for the report.
+        Includes safeguards for data types and aggregation for large datasets.
+        """
+
+        visuals = []
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        def human_fmt(x, _):
+            """Format numbers for human readability (e.g., 1.5M, 10K)."""
+            if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
+            if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
+            return str(int(x))
+
+        revenue = (
+            resolve_column(df, "revenue")
+            or resolve_column(df, "sales")
+            or resolve_column(df, "amount")
+        )
+
+        # --- SAFETY GUARD: Numeric Check ---
+        # If revenue column exists but contains non-numeric data (e.g., "$1,200"),
+        # stop generation to prevent crashes.
+        if revenue and not pd.api.types.is_numeric_dtype(df[revenue]):
+            return visuals
+        # -----------------------------------
+
+        category = resolve_column(df, "category") or resolve_column(df, "product")
+        customer = resolve_column(df, "customer")
+
+        # --- Visual 1: Sales Trend (Smart Aggregation) ---
+        if self.has_time_series and revenue:
+            p = output_dir / "sales_trend.png"
+            plt.figure(figsize=(7, 4))
+            
+            # --- AGGREGATION LOGIC ---
+            plot_df = df.copy()
+            # If dataset is large (>100 rows), aggregate to Month End ('ME')
+            # to prevent messy charts.
+            if len(df) > 100:
+                plot_df = (
+                    df.set_index(self.time_col)
+                    .resample('ME')
+                    .sum()
+                    .reset_index()
+                )
+            # -------------------------
+
+            plt.plot(plot_df[self.time_col], plot_df[revenue], linewidth=2, color="#1f77b4")
+            plt.title("Sales Trend")
+            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            plt.tight_layout()
+            plt.savefig(p)
+            plt.close()
+            visuals.append({"path": p, "caption": "Sales performance over time"})
+
+        # --- Visual 2: Revenue by Category ---
+        if revenue and category:
+            p = output_dir / "revenue_by_category.png"
+            
+            # Get Top 7 Categories
+            top_cats = df.groupby(category)[revenue].sum().sort_values(ascending=False).head(7)
+            
+            plt.figure(figsize=(7, 4))
+            top_cats.plot(kind="bar", color="#ff7f0e")
+            plt.title("Revenue by Category")
+            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            plt.savefig(p)
+            plt.close()
+            visuals.append({"path": p, "caption": "Top revenue-generating categories"})
+
+        # --- Visual 3: Top Customers ---
+        if revenue and customer:
+            p = output_dir / "top_customers.png"
+            
+            # Get Top 7 Customers
+            top_cust = df.groupby(customer)[revenue].sum().sort_values(ascending=True).tail(7)
+            
+            plt.figure(figsize=(7, 4))
+            top_cust.plot(kind="barh", color="#2ca02c")
+            plt.title("Top Customers by Revenue")
+            plt.gca().xaxis.set_major_formatter(FuncFormatter(human_fmt))
+            plt.tight_layout()
+            plt.savefig(p)
+            plt.close()
+            visuals.append({"path": p, "caption": "Customer revenue concentration"})
+
+        return visuals[:4]
+
+    # ---------------- INSIGHTS ----------------
+
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Generates text insights based on calculated KPIs.
+        """
         insights = []
 
-        if "profit_margin" in kpis:
-            pm = kpis["profit_margin"]
-            level = "GOOD" if pm >= 0.12 else "WARNING"
+        revenue = kpis.get("total_revenue")
+        orders = kpis.get("order_volume")
+        aov = kpis.get("avg_order_value")
+
+        if revenue and orders and aov:
             insights.append({
-                "level": level,
-                "title": "Profitability Health",
-                "value": f"{pm:.1%}",
-                "so_what": "Margin impacts reinvestment and growth capacity."
+                "level": "INFO",
+                "title": "Revenue Composition",
+                "so_what": (
+                    f"Revenue is driven by {orders} orders "
+                    f"with an average order value of {aov:,.2f}."
+                )
             })
 
-        if "shipping_cost_ratio" in kpis:
-            scr = kpis["shipping_cost_ratio"]
-            if scr > 0.1:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Shipping Cost Efficiency",
-                    "value": f"{scr:.1%}",
-                    "so_what": "High shipping costs reduce net margin."
-                })
+        # Default insight if nothing specific is found
+        return insights or [{
+            "level": "INFO",
+            "title": "Retail Performance Stable",
+            "so_what": "Sales metrics fall within expected operating ranges."
+        }]
 
-        return insights
+    # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Generates actionable recommendations based on KPIs.
+        """
         recs = []
 
-        if "shipping_cost_ratio" in kpis and kpis["shipping_cost_ratio"] > 0.1:
+        # Simple threshold-based recommendation for AOV
+        if kpis.get("avg_order_value") and kpis["avg_order_value"] < 50:
             recs.append({
-                "action": "Optimize shipping cost structure",
-                "expected_impact": "$200K–$300K annual savings",
-                "timeline": "5–7 days"
+                "action": "Increase average order value through bundling or upsell",
+                "priority": "MEDIUM",
+                "timeline": "Next Quarter"
             })
 
-        if "average_discount" in kpis and kpis["average_discount"] > 0.15:
-            recs.append({
-                "action": "Review discount strategy",
-                "expected_impact": "+1.5–2.0% margin improvement",
-                "timeline": "2 weeks"
-            })
-
-        return recs
-
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        selected = _select_ranked_kpis(df)
-        return _generate_visuals(df, selected, output_dir)
+        return recs or [{
+            "action": "Continue monitoring sales performance",
+            "priority": "LOW",
+            "timeline": "Ongoing"
+        }]
 
 
 # =====================================================
-# DETECTOR (UNCHANGED, CORRECT)
+# DOMAIN DETECTOR
 # =====================================================
 
 class RetailDomainDetector(BaseDomainDetector):
     domain_name = "retail"
 
-    RETAIL_COLUMNS: Set[str] = {
-        "sales", "revenue", "profit", "discount",
-        "product", "category", "sub_category",
-        "quantity", "price", "order_id"
+    RETAIL_TOKENS: Set[str] = {
+        "order", "sales", "revenue", "customer",
+        "product", "sku", "category", "discount"
     }
 
     def detect(self, df) -> DomainDetectionResult:
-        if df is None or not hasattr(df, "columns"):
-            return DomainDetectionResult("retail", 0.0, {"reason": "invalid_df"})
-
+        """
+        Detects if the dataframe belongs to the Retail domain.
+        """
         cols = {str(c).lower() for c in df.columns}
-        matches = cols.intersection(self.RETAIL_COLUMNS)
-
-        score = min((len(matches) / len(self.RETAIL_COLUMNS)) * 1.5, 1.0)
+        hits = [c for c in cols if any(t in c for t in self.RETAIL_TOKENS)]
+        confidence = min(len(hits) / 3, 1.0)
 
         return DomainDetectionResult(
             domain="retail",
-            confidence=score,
-            signals={"matched_columns": list(matches)}
+            confidence=confidence,
+            signals={"matched_columns": hits},
         )
 
 
 # =====================================================
-# REGISTRATION HOOK
+# REGISTRATION
 # =====================================================
 
 def register(registry):
