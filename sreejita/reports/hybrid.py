@@ -17,13 +17,13 @@ from reportlab.platypus import (
 )
 
 from sreejita.reporting.orchestrator import generate_report_payload
-from sreejita.domains.router import decide_domain
+from sreejita.domains.router_dispatch import dispatch_domain
 from sreejita.policy.engine import PolicyEngine
 from sreejita.core.cleaner import clean_dataframe
 
 
 # =====================================================
-# HEADER / FOOTER (BRANDING)
+# HEADER / FOOTER
 # =====================================================
 
 def header_footer(canvas, doc):
@@ -46,32 +46,25 @@ def header_footer(canvas, doc):
 
 
 # =====================================================
-# KPI FORMATTER
+# VALUE FORMATTER (EXECUTIVE-SAFE)
 # =====================================================
 
-def format_kpi(name, value):
+def format_value(value):
     if value is None:
         return "N/A"
 
-    # Explicit % KPIs
-    if name in {
-        "profit_margin",
-        "target_profit_margin",
-        "average_discount",
-        "shipping_cost_ratio",
-    }:
-        return f"{value:.1%}"
+    if isinstance(value, float):
+        if 0 < value < 1:
+            return f"{value:.1%}"
+        if abs(value) >= 100:
+            return f"${value:,.2f}"
+        return f"{value:.2f}"
 
-    # Currency-like
-    if "revenue" in name or "sales" in name or "cost" in name:
-        return f"${value:,.2f}"
-
-    # Default
     return str(value)
 
 
 # =====================================================
-# HYBRID REPORT (FINAL v2.x)
+# HYBRID REPORT
 # =====================================================
 
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
@@ -84,19 +77,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     df = clean_dataframe(pd.read_csv(input_path, encoding="latin1"))["df"]
 
-    decision = decide_domain(df)
+    decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
-
-    payload = generate_report_payload(df, decision, policy)
-
-    # Absolute safety
-    if not payload:
-        payload = {
-            "kpis": {},
-            "insights": [],
-            "recommendations": [],
-            "visuals": [],
-        }
+    payload = generate_report_payload(df, decision, policy) or {}
 
     kpis = payload.get("kpis", {})
     insights = payload.get("insights", [])
@@ -104,6 +87,24 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     visuals = payload.get("visuals", [])
 
     styles = getSampleStyleSheet()
+
+    brand = ParagraphStyle(
+        "brand",
+        parent=styles["Title"],
+        alignment=1,  # CENTER
+        fontSize=28,
+        spaceAfter=6,
+    )
+
+    tagline = ParagraphStyle(
+        "tagline",
+        parent=styles["Normal"],
+        alignment=1,  # CENTER
+        fontSize=14,
+        textColor="#555555",
+        spaceAfter=18,
+    )
+
     h1 = ParagraphStyle("h1", parent=styles["Heading1"])
     h2 = ParagraphStyle("h2", parent=styles["Heading2"])
     body = styles["BodyText"]
@@ -120,56 +121,52 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story = []
 
     # =====================================================
-    # PAGE 1 — EXECUTIVE BRIEF (BRANDED)
+    # PAGE 1 — BRAND + EXECUTIVE BRIEF
     # =====================================================
 
-    story.append(Paragraph(
-        "<b>Sreejita Data Labs</b><br/>"
-        "<i>Insights · Intelligence · Impact</i>",
-        h1
-    ))
-    story.append(Spacer(1, 12))
+    story.append(Paragraph("Sreejita Data Labs", brand))
+    story.append(Paragraph("Insights · Intelligence · Impact", tagline))
 
     story.append(Paragraph("EXECUTIVE BRIEF (1-MINUTE READ)", h2))
-    story.append(Paragraph(f"Detected Domain: {decision.selected_domain}", body))
-    story.append(Paragraph(f"Policy Status: {policy.status}", body))
+    story.append(Paragraph(f"Detected Domain: <b>{decision.selected_domain}</b>", body))
+    story.append(Paragraph(f"Policy Status: <b>{policy.status}</b>", body))
 
-    warning_count = sum(1 for i in insights if i["level"] == "WARNING")
-    risk_count = sum(1 for i in insights if i["level"] == "RISK")
+    warning_count = sum(1 for i in insights if i.get("level") == "WARNING")
+    risk_count = sum(1 for i in insights if i.get("level") == "RISK")
 
     story.append(Paragraph(
-        f"Issues Found: {warning_count} Warning(s), {risk_count} Risk(s)",
+        f"Issues Identified: {warning_count} Warning(s), {risk_count} Risk(s)",
         body
     ))
 
     if recommendations:
         story.append(Paragraph(
-            f"Immediate Next Step: <b>{recommendations[0].get('action','')}</b>",
+            f"Immediate Focus: <b>{recommendations[0].get('action','')}</b>",
             body
         ))
 
     story.append(Spacer(1, 12))
 
     # =====================================================
-    # EXECUTIVE SNAPSHOT (TABLE)
+    # EXECUTIVE SNAPSHOT
     # =====================================================
 
     snapshot_rows = [["Metric", "Value"]]
     for k, v in kpis.items():
         snapshot_rows.append([
             k.replace("_", " ").title(),
-            format_kpi(k, v)
+            format_value(v),
         ])
 
     if len(snapshot_rows) == 1:
-        snapshot_rows.append(["KPIs", "Not available"])
+        snapshot_rows.append(["KPIs", "Not Available"])
 
-    snapshot_table = Table(snapshot_rows, colWidths=[9 * cm, 5 * cm])
-    snapshot_table.setStyle(TableStyle([
+    table = Table(snapshot_rows, colWidths=[9 * cm, 5 * cm])
+    table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, "#999999"),
         ("BACKGROUND", (0, 0), (-1, 0), "#EEEEEE"),
     ]))
-    story.append(snapshot_table)
+    story.append(table)
 
     story.append(PageBreak())
 
@@ -178,23 +175,25 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # =====================================================
 
     story.append(Paragraph("Visual Evidence", h1))
+
     for idx, v in enumerate(visuals[:4]):
         story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
         story.append(Paragraph(v.get("caption", ""), body))
-        story.append(Spacer(1, 16))
+        story.append(Spacer(1, 14))
         if idx == 1:
             story.append(PageBreak())
 
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 4 — INSIGHTS + RECOMMENDATIONS
+    # PAGE 4 — INSIGHTS & RECOMMENDATIONS
     # =====================================================
 
     story.append(Paragraph("Key Insights", h1))
+
     for i in insights:
         story.append(Paragraph(
-            f"[{i['level']}] {i['title']}",
+            f"[{i.get('level','INFO')}] {i.get('title','Insight')}",
             body
         ))
         story.append(Paragraph(i.get("so_what", ""), body))
@@ -207,26 +206,31 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         story.append(Paragraph(f"Priority: {r.get('priority','Medium')}", body))
         story.append(Paragraph(f"Timeline: {r.get('timeline','TBD')}", body))
         story.append(Paragraph(f"Owner: {r.get('owner','Business Team')}", body))
-        story.append(Paragraph(f"Success Metric: {r.get('success_metric','Defined post-approval')}", body))
+        story.append(Paragraph(f"Success Metric: {r.get('success_metric','')}", body))
         story.append(Paragraph(f"Rationale: {r.get('rationale','')}", body))
         story.append(Spacer(1, 10))
 
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 5 — RISKS
+    # PAGE 5 — RISKS (PROGRESSIVE)
     # =====================================================
 
     story.append(Paragraph("Risks", h1))
-    risks = [i for i in insights if i["level"] == "RISK"]
+
+    risks = [i for i in insights if i.get("level") in {"WARNING", "RISK"}]
 
     if risks:
         for r in risks:
-            story.append(Paragraph(r["title"], body))
-            story.append(Paragraph(r.get("so_what", ""), body))
+            story.append(Paragraph(r.get("title","Risk"), body))
+            story.append(Paragraph(r.get("so_what",""), body))
             story.append(Spacer(1, 8))
     else:
-        story.append(Paragraph("No critical risks detected.", body))
+        story.append(Paragraph(
+            "Low operational risk detected. No immediate or critical threats identified, "
+            "but continuous monitoring is recommended as data evolves.",
+            body
+        ))
 
     doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return str(output_path)
