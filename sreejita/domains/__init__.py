@@ -6,6 +6,7 @@ from .retail import RetailDomain
 from .customer import CustomerDomain
 from .finance import FinanceDomain
 from .healthcare import HealthcareDomain
+from .ecommerce import EcommerceDomain
 from .marketing import MarketingDomain
 from .hr import HRDomain
 from .supply_chain import SupplyChainDomain
@@ -16,6 +17,7 @@ __all__ = [
     "CustomerDomain",
     "FinanceDomain",
     "HealthcareDomain",
+    "EcommerceDomain",
     "MarketingDomain",
     "HRDomain",
     "SupplyChainDomain",
@@ -26,6 +28,7 @@ DOMAIN_REGISTRY = {
     "retail": RetailDomain,
     "customer": CustomerDomain,
     "finance": FinanceDomain,
+    "ecommerce": EcommerceDomain,
     "healthcare": HealthcareDomain,
     "marketing": MarketingDomain,
     "hr": HRDomain,                   # ✅ FIX
