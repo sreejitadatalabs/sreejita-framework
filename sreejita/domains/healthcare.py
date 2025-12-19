@@ -1,14 +1,29 @@
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Set
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
+# Assuming these are from your local environment (keep them as is)
 from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
+# =====================================================
+# GLOBAL CONFIG: UNIVERSAL DICTIONARIES
+# =====================================================
+
+NEGATIVE_KEYWORDS = {
+    "abnormal", "failed", "deceased", "critical",
+    "positive", "poor", "expired", "high", "severe"
+}
+
+OUTCOME_COLUMN_HINTS = {
+    "result", "status", "outcome", "test", "finding", "evaluation"
+}
 
 # =====================================================
-# DATA NORMALIZATION
+# HELPER: DATA NORMALIZATION
 # =====================================================
 
 def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -38,76 +53,57 @@ def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
                 )
     return df
 
-
 # =====================================================
-# DATE INTELLIGENCE (DERIVED LOS)
+# HELPER: DATE INTELLIGENCE (DERIVED LOS)
 # =====================================================
 
 def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
     """
     Derive length_of_stay if missing but admission & discharge dates exist.
     """
+    # 1. If it already exists, do nothing
     if resolve_column(df, "length_of_stay"):
         return df
 
+    # 2. Try to find dates
     admit = resolve_column(df, "admission_date")
     discharge = resolve_column(df, "discharge_date")
 
     if admit and discharge:
         try:
+            # Convert to datetime safely
             df[admit] = pd.to_datetime(df[admit], errors="coerce")
             df[discharge] = pd.to_datetime(df[discharge], errors="coerce")
+            
+            # Calculate difference
             df["derived_length_of_stay"] = (
                 df[discharge] - df[admit]
             ).dt.days
         except Exception:
-            pass
+            pass # Fail silently if date formats are weird
 
     return df
 
-
 # =====================================================
-# CAPABILITY DETECTION
+# HELPER: DYNAMIC RISK SCANNER
 # =====================================================
-
-def _detect_capabilities(df: pd.DataFrame) -> Dict[str, bool]:
-    return {
-        "has_patient": resolve_column(df, "patient_id") is not None,
-        "has_clinical": any(
-            resolve_column(df, k) is not None
-            for k in ["length_of_stay", "derived_length_of_stay", "readmitted", "mortality"]
-        ),
-        "has_financials": resolve_column(df, "billing_amount") is not None,
-        "has_provider": resolve_column(df, "doctor") is not None,
-        "has_diagnosis": resolve_column(df, "diagnosis") is not None,
-        "has_insurance": resolve_column(df, "insurance") is not None,
-    }
-
-
-# =====================================================
-# DYNAMIC CATEGORICAL RISK SCANNER
-# =====================================================
-
-NEGATIVE_KEYWORDS = {
-    "abnormal", "failed", "deceased", "critical",
-    "positive", "poor", "expired", "high"
-}
-
-OUTCOME_COLUMN_HINTS = {
-    "result", "status", "outcome", "test", "finding"
-}
-
 
 def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Scans ALL columns for negative keywords (Universal Risk Detection).
+    """
     insights: List[Dict[str, Any]] = []
 
     for col in df.columns:
         col_l = col.lower()
+        
+        # Only check columns that sound like outcomes (to save time)
         if not any(h in col_l for h in OUTCOME_COLUMN_HINTS):
             continue
         if df[col].dtype != object:
             continue
 
+        # Check content
         values = df[col].dropna().astype(str).str.lower()
         if values.empty:
             continue
@@ -115,21 +111,23 @@ def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
         negatives = values[values.isin(NEGATIVE_KEYWORDS)]
         rate = len(negatives) / len(values)
 
+        # Threshold: If >15% are bad, flag it
         if rate >= 0.15:
             insights.append({
                 "level": "RISK" if rate >= 0.25 else "WARNING",
-                "title": f"High Rate of Negative Outcomes in {col}",
+                "title": f"High Rate of Negative Outcomes in '{col}'",
                 "so_what": (
                     f"{rate:.0%} of records contain negative values "
                     f"(e.g., {', '.join(negatives.unique()[:3])})."
-                )
+                ),
+                # Metadata to help the main engine know which column to blame
+                "detected_col": col 
             })
 
     return insights
 
-
 # =====================================================
-# HEALTHCARE DOMAIN
+# MAIN CLASS: HEALTHCARE DOMAIN
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -144,7 +142,6 @@ class HealthcareDomain(BaseDomain):
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         df = _normalize_binary_columns(df)
         df = _derive_length_of_stay(df)
-        self.capabilities = _detect_capabilities(df)
         return df
 
     # ---------------- KPIs ----------------
@@ -153,14 +150,17 @@ class HealthcareDomain(BaseDomain):
         kpis: Dict[str, Any] = {}
         pid = resolve_column(df, "patient_id")
 
+        # Dynamic LoS (Real or Derived)
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
         if los and pd.api.types.is_numeric_dtype(df[los]):
             kpis["avg_length_of_stay"] = df[los].mean()
 
+        # Dynamic Readmission (might not exist in Dataset B)
         readm = resolve_column(df, "readmitted")
         if readm and pd.api.types.is_numeric_dtype(df[readm]):
             kpis["readmission_rate"] = df[readm].mean()
 
+        # Financials
         bill = resolve_column(df, "billing_amount")
         if bill and pd.api.types.is_numeric_dtype(df[bill]):
             kpis["total_billing"] = df[bill].sum()
@@ -177,19 +177,15 @@ class HealthcareDomain(BaseDomain):
     # ---------------- VISUALS ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        import matplotlib.pyplot as plt
-        from matplotlib.ticker import FuncFormatter
-
         def human_axis(x, _):
-            if x >= 1_000_000:
-                return f"{x/1_000_000:.1f}M"
-            if x >= 1_000:
-                return f"{x/1_000:.0f}K"
+            if x >= 1_000_000: return f"{x/1_000_000:.1f}M"
+            if x >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
 
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # 1. Length of Stay (Real or Derived)
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
         if los and pd.api.types.is_numeric_dtype(df[los]):
             path = output_dir / "length_of_stay.png"
@@ -200,6 +196,7 @@ class HealthcareDomain(BaseDomain):
             plt.close()
             visuals.append({"path": path, "caption": "Length of stay distribution"})
 
+        # 2. Billing by Insurance
         bill = resolve_column(df, "billing_amount")
         ins = resolve_column(df, "insurance")
         if bill and ins and pd.api.types.is_numeric_dtype(df[bill]):
@@ -214,55 +211,76 @@ class HealthcareDomain(BaseDomain):
 
         return visuals
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- INSIGHTS (UNIVERSAL LOGIC) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
-        # Dynamic categorical risks
-        insights.extend(_scan_categorical_risks(df))
+        # 1. RUN THE UNIVERSAL SCANNER FIRST
+        # This detects "Abnormal" tests even if no Readmission column exists
+        risk_findings = _scan_categorical_risks(df)
+        insights.extend(risk_findings)
 
-        def pct_diff(v, r):
-            return 0 if r == 0 else (v - r) / r
+        # 2. DETERMINE PRIMARY RISK COLUMN (The "Source of Truth" for this dataset)
+        primary_risk_col = resolve_column(df, "readmitted")
+        
+        # If 'readmitted' is missing (Dataset B), use the column found by the scanner
+        if not primary_risk_col and risk_findings:
+            # Look for the column name in the scanner results
+            # We grab the first "RISK" level finding
+            for finding in risk_findings:
+                if "detected_col" in finding:
+                    col_name = finding["detected_col"]
+                    # We need to turn this text column (Normal/Abnormal) into a number (0/1) for analysis
+                    # Create a temporary flag for the "Worst Doctor" calculation
+                    df["_temp_risk_flag"] = df[col_name].astype(str).str.lower().isin(NEGATIVE_KEYWORDS).astype(int)
+                    primary_risk_col = "_temp_risk_flag"
+                    break
 
-        # Worst doctor by readmission
-        doc = resolve_column(df, "doctor")
-        readm = resolve_column(df, "readmitted")
-        if doc and readm and pd.api.types.is_numeric_dtype(df[readm]):
-            overall = df[readm].mean()
-            grp = df.groupby(doc)[readm].mean()
-            name = grp.idxmax()
-            val = grp.loc[name]
-            if pct_diff(val, overall) > 0.10:
-                insights.append({
-                    "level": "RISK",
-                    "title": f"Worst Performing Doctor: {name}",
-                    "so_what": f"Readmission rate {val:.1%} vs avg {overall:.1%}."
-                })
+        # 3. IDENTIFY WORST PERFORMERS (Universal)
+        # Now we calculate "Worst Doctor" regardless of whether the risk is "Readmission" or "Abnormal Tests"
+        if primary_risk_col:
+            overall_rate = df[primary_risk_col].mean()
+            
+            # Check Doctors and Hospitals
+            for segment_key, segment_label in [("doctor", "Doctor"), ("hospital_branch", "Hospital")]:
+                segment_col = resolve_column(df, segment_key)
+                
+                if segment_col and overall_rate > 0:
+                    grp = df.groupby(segment_col)[primary_risk_col].mean()
+                    worst_name = grp.idxmax()
+                    worst_rate = grp.max()
 
-        # Ranking fallback (ALWAYS)
-        if not insights:
-            bill = resolve_column(df, "billing_amount")
-            if bill:
-                for key, label in [
-                    ("insurance", "Insurance Provider"),
-                    ("diagnosis", "Diagnosis"),
-                    ("hospital_branch", "Hospital Branch"),
-                ]:
-                    col = resolve_column(df, key)
-                    if col:
-                        grp = df.groupby(col)[bill].sum()
-                        top = grp.idxmax()
-                        share = grp.loc[top] / grp.sum()
+                    # Only report if it's significantly worse (e.g., 20% worse than average)
+                    if worst_rate > (overall_rate * 1.2):
+                        
+                        # Formatting the message based on source
+                        source_msg = "Readmission Rate"
+                        if primary_risk_col == "_temp_risk_flag":
+                            source_msg = "Adverse Outcome Rate (e.g., Abnormal/Failed)"
+
                         insights.append({
-                            "level": "INFO",
-                            "title": f"Highest Billing Concentration: {top}",
+                            "level": "RISK",
+                            "title": f"Worst Performing {segment_label}: {worst_name}",
                             "so_what": (
-                                f"The top {label.lower()} contributes "
-                                f"{share:.0%} of total billing."
+                                f"{source_msg} is {worst_rate:.1%} "
+                                f"(Average: {overall_rate:.1%}). Investigate clinical drivers."
                             )
                         })
-                        break
+
+        # 4. FINANCIAL CONCENTRATION (Fallback if no risks)
+        if not any(i['level'] == 'RISK' for i in insights):
+            bill = resolve_column(df, "billing_amount")
+            if bill:
+                key_col = resolve_column(df, "diagnosis") or resolve_column(df, "insurance")
+                if key_col:
+                    grp = df.groupby(key_col)[bill].sum()
+                    top = grp.idxmax()
+                    insights.append({
+                        "level": "INFO",
+                        "title": f"Highest Cost Driver: {top}",
+                        "so_what": f"Accounts for {grp[top]/grp.sum():.0%} of total billing."
+                    })
 
         return insights
 
@@ -270,8 +288,9 @@ class HealthcareDomain(BaseDomain):
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs: List[Dict[str, Any]] = []
+        insights = self.generate_insights(df, kpis)
 
-        for i in self.generate_insights(df, kpis):
+        for i in insights:
             if i["level"] == "RISK":
                 recs.append({
                     "action": f"Investigate immediately: {i['title']}",
@@ -280,7 +299,7 @@ class HealthcareDomain(BaseDomain):
                 })
             elif i["level"] == "WARNING":
                 recs.append({
-                    "action": f"Review drivers for: {i['title']}",
+                    "action": f"Review protocols for: {i['title']}",
                     "priority": "MEDIUM",
                     "timeline": "4–6 weeks",
                 })
@@ -294,20 +313,19 @@ class HealthcareDomain(BaseDomain):
 
         return recs
 
-
 # =====================================================
-# DOMAIN DETECTOR
+# REGISTRATION (Keep as is)
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-
+    # Added "test", "result", "condition" to detection list for Dataset B
     HEALTHCARE_COLUMNS: Set[str] = {
         "patient", "patient_id", "pid",
-        "los", "length_of_stay",
-        "readmitted", "mortality",
+        "los", "length_of_stay", "admission_date",
+        "readmitted", "mortality", "test", "result",
         "billing", "insurance",
-        "doctor", "diagnosis",
+        "doctor", "diagnosis", "medical_condition"
     }
 
     def detect(self, df) -> DomainDetectionResult:
@@ -319,11 +337,6 @@ class HealthcareDomainDetector(BaseDomainDetector):
             confidence=confidence,
             signals={"matched_columns": list(matches)},
         )
-
-
-# =====================================================
-# REGISTRATION
-# =====================================================
 
 def register(registry):
     registry.register(
