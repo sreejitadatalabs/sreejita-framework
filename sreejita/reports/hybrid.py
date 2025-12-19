@@ -53,12 +53,17 @@ def format_value(value):
     if value is None:
         return "N/A"
 
-    if isinstance(value, float):
-        if 0 < value < 1:
+    if isinstance(value, (int, float)):
+        abs_val = abs(value)
+
+        if abs_val >= 1_000_000:
+            return f"{value / 1_000_000:.2f}M"
+        if abs_val >= 1_000:
+            return f"{value / 1_000:.1f}K"
+        if 0 < abs_val < 1:
             return f"{value:.1%}"
-        if abs(value) >= 100:
-            return f"{value:,.2f}"
-        return f"{value:.2f}"
+
+        return f"{value:,.2f}"
 
     return str(value)
 
