@@ -2,6 +2,7 @@ from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
 from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
+from sreejita.domains.ecommerce import EcommerceDomain, EcommerceDomainDetector
 from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
@@ -25,6 +26,7 @@ DOMAIN_DETECTORS = [
     CustomerDomainDetector(),
     FinanceDomainDetector(),
     HealthcareDomainDetector(),
+    EcommerceDomainDetector(),
     MarketingDomainDetector(),
     HRDomainDetector(),              # ✅ FIX
     SupplyChainDomainDetector(),     # ✅ FIX
@@ -39,6 +41,7 @@ DOMAIN_IMPLEMENTATIONS = {
     "customer": CustomerDomain(),
     "finance": FinanceDomain(),
     "healthcare": HealthcareDomain(),
+    "ecommerce": EcommerceDomain(),
     "marketing": MarketingDomain(),
     "hr": HRDomain(),                # ✅ FIX
     "supply_chain": SupplyChainDomain(),  # ✅ FIX
