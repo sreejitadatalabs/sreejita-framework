@@ -46,7 +46,7 @@ def header_footer(canvas, doc):
 
 
 # =====================================================
-# VALUE FORMATTER (EXECUTIVE-SAFE)
+# VALUE FORMATTER (EXECUTIVE SAFE)
 # =====================================================
 
 def format_value(value):
@@ -57,7 +57,7 @@ def format_value(value):
         if 0 < value < 1:
             return f"{value:.1%}"
         if abs(value) >= 100:
-            return f"${value:,.2f}"
+            return f"{value:,.2f}"
         return f"{value:.2f}"
 
     return str(value)
@@ -70,36 +70,42 @@ def format_value(value):
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
 
+    # Output path
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
         output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
+    # Load + clean data
     df = clean_dataframe(pd.read_csv(input_path, encoding="latin1"))["df"]
 
+    # Domain decision + policy
     decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
-    payload = generate_report_payload(df, decision, policy) or {}
+
+    # Domain-driven payload
+    payload = generate_report_payload(df, decision, policy)
 
     kpis = payload.get("kpis", {})
     insights = payload.get("insights", [])
     recommendations = payload.get("recommendations", [])
     visuals = payload.get("visuals", [])
 
+    # Styles
     styles = getSampleStyleSheet()
 
     brand = ParagraphStyle(
         "brand",
         parent=styles["Title"],
-        alignment=1,  # CENTER
-        fontSize=28,
+        alignment=1,
+        fontSize=26,
         spaceAfter=6,
     )
 
     tagline = ParagraphStyle(
         "tagline",
         parent=styles["Normal"],
-        alignment=1,  # CENTER
+        alignment=1,
         fontSize=14,
         textColor="#555555",
         spaceAfter=18,
@@ -109,6 +115,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     h2 = ParagraphStyle("h2", parent=styles["Heading2"])
     body = styles["BodyText"]
 
+    # Document
     doc = SimpleDocTemplate(
         str(output_path),
         pagesize=A4,
@@ -121,7 +128,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story = []
 
     # =====================================================
-    # PAGE 1 — BRAND + EXECUTIVE BRIEF
+    # PAGE 1 — EXECUTIVE BRIEF
     # =====================================================
 
     story.append(Paragraph("Sreejita Data Labs", brand))
@@ -145,10 +152,10 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             body
         ))
 
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 14))
 
     # =====================================================
-    # EXECUTIVE SNAPSHOT
+    # EXECUTIVE SNAPSHOT (KPIs)
     # =====================================================
 
     snapshot_rows = [["Metric", "Value"]]
@@ -166,22 +173,29 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         ("GRID", (0, 0), (-1, -1), 0.5, "#999999"),
         ("BACKGROUND", (0, 0), (-1, 0), "#EEEEEE"),
     ]))
-    story.append(table)
 
+    story.append(table)
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 2–3 — VISUALS
+    # PAGE 2–3 — VISUAL EVIDENCE
     # =====================================================
 
     story.append(Paragraph("Visual Evidence", h1))
 
-    for idx, v in enumerate(visuals[:4]):
-        story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
-        story.append(Paragraph(v.get("caption", ""), body))
-        story.append(Spacer(1, 14))
-        if idx == 1:
-            story.append(PageBreak())
+    if visuals:
+        for idx, v in enumerate(visuals[:4]):
+            story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
+            story.append(Paragraph(v.get("caption", ""), body))
+            story.append(Spacer(1, 14))
+            if idx == 1:
+                story.append(PageBreak())
+    else:
+        story.append(Paragraph(
+            "No meaningful visual evidence could be generated from the available data. "
+            "This typically indicates insufficient variation or missing fields.",
+            body
+        ))
 
     story.append(PageBreak())
 
@@ -191,29 +205,41 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(Paragraph("Key Insights", h1))
 
-    for i in insights:
+    if insights:
+        for i in insights:
+            story.append(Paragraph(
+                f"[{i.get('level','INFO')}] {i.get('title','Insight')}",
+                body
+            ))
+            story.append(Paragraph(i.get("so_what",""), body))
+            story.append(Spacer(1, 8))
+    else:
         story.append(Paragraph(
-            f"[{i.get('level','INFO')}] {i.get('title','Insight')}",
+            "No critical clinical or operational risks were identified. "
+            "Overall performance indicators appear stable.",
             body
         ))
-        story.append(Paragraph(i.get("so_what", ""), body))
-        story.append(Spacer(1, 8))
 
+    story.append(Spacer(1, 12))
     story.append(Paragraph("Recommendations", h1))
 
-    for r in recommendations:
-        story.append(Paragraph(f"<b>Action:</b> {r.get('action','')}", body))
-        story.append(Paragraph(f"Priority: {r.get('priority','Medium')}", body))
-        story.append(Paragraph(f"Timeline: {r.get('timeline','TBD')}", body))
-        story.append(Paragraph(f"Owner: {r.get('owner','Business Team')}", body))
-        story.append(Paragraph(f"Success Metric: {r.get('success_metric','')}", body))
-        story.append(Paragraph(f"Rationale: {r.get('rationale','')}", body))
-        story.append(Spacer(1, 10))
+    if recommendations:
+        for r in recommendations:
+            story.append(Paragraph(f"<b>Action:</b> {r.get('action','')}", body))
+            story.append(Paragraph(f"Priority: {r.get('priority','Medium')}", body))
+            story.append(Paragraph(f"Timeline: {r.get('timeline','')}", body))
+            story.append(Spacer(1, 10))
+    else:
+        story.append(Paragraph(
+            "No immediate corrective actions are recommended at this time. "
+            "Maintain current practices and continue monitoring.",
+            body
+        ))
 
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 5 — RISKS (PROGRESSIVE)
+    # PAGE 5 — RISKS
     # =====================================================
 
     story.append(Paragraph("Risks", h1))
@@ -227,10 +253,11 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             story.append(Spacer(1, 8))
     else:
         story.append(Paragraph(
-            "Low operational risk detected. No immediate or critical threats identified, "
-            "but continuous monitoring is recommended as data evolves.",
+            "No critical risks were identified in the current dataset. "
+            "Continued monitoring is recommended as conditions evolve.",
             body
         ))
 
+    # Build PDF
     doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return str(output_path)
