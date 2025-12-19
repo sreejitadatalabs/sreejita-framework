@@ -1,12 +1,15 @@
 """
-Sreejita Framework - Domains Package (v2.x FINAL)
+Sreejita Framework – Domains Package (v2.x FINAL)
 
-Exports public domain contracts AND registers domains.
+This module:
+- Exposes public domain contracts (BaseDomain, detectors)
+- Registers all domain implementations
+- Provides backward-compatible shims for v1.x API
 """
 
-# -------------------------
-# PUBLIC CONTRACTS
-# -------------------------
+# =========================
+# Core domain contracts
+# =========================
 
 from sreejita.domains.base import BaseDomain
 from sreejita.domains.contracts import (
@@ -14,41 +17,68 @@ from sreejita.domains.contracts import (
     DomainDetectionResult,
 )
 
-# -------------------------
-# REGISTRY (SINGLETON)
-# -------------------------
+# =========================
+# Registry (v2.x core)
+# =========================
 
 from sreejita.domains.registry import registry
 
-# -------------------------
-# DOMAIN IMPLEMENTATIONS
-# -------------------------
+# =========================
+# Domain implementations
+# =========================
 
 from sreejita.domains.retail import RetailDomain
 from sreejita.domains.customer import CustomerDomain
+from sreejita.domains.ecommerce import EcommerceDomain
 from sreejita.domains.finance import FinanceDomain
 from sreejita.domains.ops import OpsDomain
 from sreejita.domains.healthcare import HealthcareDomain
 from sreejita.domains.marketing import MarketingDomain
-from sreejita.domains.ecommerce import EcommerceDomain
-from sreejita.domains.text import TextDomain   # 🔒 REQUIRED
+from sreejita.domains.text import TextDomain  # REQUIRED for tests / fallback
 
-# -------------------------
-# REGISTER DOMAINS
-# -------------------------
+# =========================
+# Register domains (ONCE)
+# =========================
 
 registry.register("retail", RetailDomain)
 registry.register("customer", CustomerDomain)
+registry.register("ecommerce", EcommerceDomain)
 registry.register("finance", FinanceDomain)
 registry.register("ops", OpsDomain)
 registry.register("healthcare", HealthcareDomain)
 registry.register("marketing", MarketingDomain)
-registry.register("ecommerce", EcommerceDomain)
-registry.register("text", TextDomain)  # 🔒 REQUIRED
+registry.register("text", TextDomain)
 
-# -------------------------
-# PUBLIC EXPORTS
-# -------------------------
+# =========================
+# 🔁 BACKWARD COMPATIBILITY (v1.x)
+# =========================
+
+def get_domain(domain_name: str):
+    """
+    v1.x compatibility wrapper.
+    Returns a NEW domain instance.
+    """
+    return registry.get_domain(domain_name)
+
+
+# Read-only compatibility alias
+DOMAIN_REGISTRY = {
+    name: cls
+    for name, cls in {
+        "retail": RetailDomain,
+        "customer": CustomerDomain,
+        "ecommerce": EcommerceDomain,
+        "finance": FinanceDomain,
+        "ops": OpsDomain,
+        "healthcare": HealthcareDomain,
+        "marketing": MarketingDomain,
+        "text": TextDomain,
+    }.items()
+}
+
+# =========================
+# Public exports
+# =========================
 
 __all__ = [
     # contracts
@@ -59,10 +89,14 @@ __all__ = [
     # domains
     "RetailDomain",
     "CustomerDomain",
+    "EcommerceDomain",
     "FinanceDomain",
     "OpsDomain",
     "HealthcareDomain",
     "MarketingDomain",
-    "EcommerceDomain",
     "TextDomain",
+
+    # v1.x compatibility
+    "get_domain",
+    "DOMAIN_REGISTRY",
 ]
