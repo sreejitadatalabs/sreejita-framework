@@ -10,7 +10,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# HELPERS (PURE, SAFE)
+# HELPERS (PURE + DEFENSIVE)
 # =====================================================
 
 def _safe_div(n, d):
@@ -21,7 +21,8 @@ def _safe_div(n, d):
 
 def _detect_time_column(df: pd.DataFrame) -> str | None:
     """
-    Detect a usable time column without guessing.
+    Detect REAL time columns only.
+    (No fiscal codes, no posting keys, no transactions)
     """
     for key in ["date", "period", "month", "year"]:
         col = resolve_column(df, key)
@@ -31,9 +32,6 @@ def _detect_time_column(df: pd.DataFrame) -> str | None:
 
 
 def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    """
-    Safely sort dataframe by time column.
-    """
     df_out = df.copy()
     try:
         df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
@@ -50,13 +48,15 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 class FinanceDomain(BaseDomain):
     name = "finance"
-    description = "Defensible financial analytics (P&L, trends, ratios)"
+    description = "Defensible financial analytics (P&L, Budget, Ratios)"
 
     # ---------------- VALIDATION ----------------
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return resolve_column(df, "revenue") is not None or \
-               resolve_column(df, "income") is not None
+        return (
+            resolve_column(df, "revenue") is not None
+            or resolve_column(df, "income") is not None
+        )
 
     # ---------------- PREPROCESS ----------------
 
@@ -78,10 +78,11 @@ class FinanceDomain(BaseDomain):
         revenue = resolve_column(df, "revenue") or resolve_column(df, "income")
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
         profit = resolve_column(df, "profit")
+        budget = resolve_column(df, "budget") or resolve_column(df, "target")
         debt = resolve_column(df, "debt")
         equity = resolve_column(df, "equity")
 
-        # --- Core KPIs ---
+        # ---- Totals ----
         if revenue and pd.api.types.is_numeric_dtype(df[revenue]):
             kpis["total_revenue"] = df[revenue].sum()
 
@@ -90,77 +91,117 @@ class FinanceDomain(BaseDomain):
 
         if profit and pd.api.types.is_numeric_dtype(df[profit]):
             kpis["total_profit"] = df[profit].sum()
+        elif "total_revenue" in kpis and "total_expense" in kpis:
+            kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
-        # --- Derived KPIs ---
-        if revenue and expense:
-            r = df[revenue].sum()
-            e = df[expense].sum()
-            margin = _safe_div(r - e, r)
-            if margin is not None:
-                kpis["profit_margin"] = margin
+        # ---- Budget Variance (Always compute, but interpret carefully) ----
+        if budget and revenue:
+            actual = df[revenue].sum()
+            planned = df[budget].sum()
+            var = actual - planned
+            kpis["budget_variance_abs"] = var
+            kpis["budget_variance_pct"] = _safe_div(var, planned)
+
+        # ---- Ratios ----
+        if "total_profit" in kpis and "total_revenue" in kpis:
+            kpis["profit_margin"] = _safe_div(
+                kpis["total_profit"], kpis["total_revenue"]
+            )
 
         if debt and equity:
-            d = df[debt].sum()
-            e = df[equity].sum()
-            ratio = _safe_div(d, e)
-            if ratio is not None:
-                kpis["debt_to_equity"] = ratio
+            kpis["debt_to_equity"] = _safe_div(
+                df[debt].sum(), df[equity].sum()
+            )
 
-        # --- Growth (only if time-series) ---
-        if self.has_time_series and revenue:
+        # ---- Growth (STRICT) ----
+        if (
+            self.has_time_series
+            and revenue
+            and df[revenue].notna().sum() >= 2
+        ):
             first = df[revenue].iloc[0]
             last = df[revenue].iloc[-1]
-            growth = _safe_div(last - first, first)
-            if growth is not None:
-                kpis["revenue_growth"] = growth
+            kpis["revenue_growth"] = _safe_div(last - first, first)
 
         return kpis
 
     # ---------------- VISUALS ----------------
 
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+    def generate_visuals(
+        self, df: pd.DataFrame, output_dir: Path
+    ) -> List[Dict[str, Any]]:
+
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
         def human_fmt(x, _):
-            if x >= 1_000_000:
+            if abs(x) >= 1_000_000:
                 return f"{x/1_000_000:.1f}M"
-            if x >= 1_000:
+            if abs(x) >= 1_000:
                 return f"{x/1_000:.0f}K"
             return str(int(x))
 
         revenue = resolve_column(df, "revenue") or resolve_column(df, "income")
         expense = resolve_column(df, "expense") or resolve_column(df, "cost")
+        budget = resolve_column(df, "budget")
 
-        # --- Revenue Trend ---
+        # ---- Revenue Trend (ONLY if time-series) ----
         if self.has_time_series and revenue:
             p = output_dir / "revenue_trend.png"
-            plt.figure(figsize=(6, 4))
-            df[revenue].plot()
+            plt.figure(figsize=(7, 4))
+            plt.plot(df[self.time_col], df[revenue], label="Revenue", linewidth=2)
+            if budget:
+                plt.plot(
+                    df[self.time_col],
+                    df[budget],
+                    linestyle="--",
+                    label="Budget",
+                    alpha=0.7,
+                )
             plt.title("Revenue Trend")
-            plt.ylabel("Revenue")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            plt.legend()
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
             visuals.append({
                 "path": p,
-                "caption": "Revenue trend over time"
+                "caption": "Revenue performance over time"
             })
 
-        # --- Expense vs Revenue ---
-        if revenue and expense:
-            p = output_dir / "revenue_vs_expense.png"
-            plt.figure(figsize=(6, 4))
-            df[[revenue, expense]].sum().plot(kind="bar")
-            plt.title("Revenue vs Expense")
+        # ---- P&L Waterfall (ONLY if small aggregated dataset) ----
+        if revenue and expense and len(df) <= 12:
+            p = output_dir / "pnl_waterfall.png"
+
+            rev = df[revenue].sum()
+            exp = df[expense].sum()
+            profit = rev - exp
+
+            steps = ["Revenue", "Expenses", "Net Profit"]
+            values = [rev, -exp, profit]
+            bottoms = [0, rev, 0]
+            colors = ["#2ca02c", "#d62728", "#1f77b4"]
+
+            plt.figure(figsize=(7, 4))
+            bars = plt.bar(steps, values, bottom=bottoms, color=colors)
+            for bar, val in zip(bars, values):
+                plt.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_y() + bar.get_height() / 2,
+                    human_fmt(val, None),
+                    ha="center",
+                    va="center",
+                    color="white",
+                    fontweight="bold",
+                )
+            plt.title("P&L Waterfall")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
             visuals.append({
                 "path": p,
-                "caption": "Total revenue compared to expenses"
+                "caption": "Bridge from revenue to net profit"
             })
 
         return visuals
@@ -172,59 +213,77 @@ class FinanceDomain(BaseDomain):
 
         margin = kpis.get("profit_margin")
         growth = kpis.get("revenue_growth")
+        var_pct = kpis.get("budget_variance_pct")
 
-        # --- Margin health ---
+        # ---- Margin ----
         if margin is not None and margin < 0.10:
             insights.append({
                 "level": "WARNING",
                 "title": "Low Profit Margin",
-                "so_what": f"Profit margin is {margin:.1%}, indicating limited profitability."
+                "so_what": f"Profit margin is {margin:.1%}, indicating cost pressure."
             })
 
-        # --- Growth vs Margin ---
-        if growth is not None and margin is not None:
-            if growth > 0 and margin < 0.15:
+        # ---- Budget Variance (ONLY STRONG IF TIME-SERIES) ----
+        if var_pct is not None:
+            if var_pct < -0.05 and self.has_time_series:
                 insights.append({
                     "level": "RISK",
-                    "title": "Growth Without Profitability",
+                    "title": "Missed Budget Target",
+                    "so_what": f"Revenue is {abs(var_pct):.1%} below budget."
+                })
+            elif var_pct > 0.10:
+                insights.append({
+                    "level": "INFO",
+                    "title": "Exceeding Budget",
+                    "so_what": f"Revenue exceeds budget by {var_pct:.1%}."
+                })
+
+        # ---- Hollow Growth ----
+        if growth is not None and margin is not None:
+            if growth > 0.20 and margin < 0.05:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Unprofitable Growth",
                     "so_what": (
-                        f"Revenue grew by {growth:.1%}, "
-                        f"but profit margin remains low ({margin:.1%})."
+                        f"High growth ({growth:.1%}) with thin margins "
+                        f"({margin:.1%})."
                     )
                 })
 
-        # --- Fallback ---
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Financial Performance Stable",
-                "so_what": "No material financial risks detected based on available data."
+                "so_what": "Key financial indicators are within expected ranges."
             })
 
         return insights
 
     # ---------------- RECOMMENDATIONS ----------------
 
-    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_recommendations(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+
         recs: List[Dict[str, Any]] = []
 
         for i in self.generate_insights(df, kpis):
             if i["level"] == "RISK":
                 recs.append({
-                    "action": f"Immediate review required: {i['title']}",
+                    "action": f"URGENT: {i['title']}",
                     "priority": "HIGH",
-                    "timeline": "1–2 months",
+                    "timeline": "Immediate",
                 })
             elif i["level"] == "WARNING":
                 recs.append({
-                    "action": f"Monitor and optimize: {i['title']}",
+                    "action": f"Investigate: {i['title']}",
                     "priority": "MEDIUM",
-                    "timeline": "2–3 months",
+                    "timeline": "This Quarter",
                 })
 
         if not recs:
             recs.append({
-                "action": "Continue standard financial monitoring",
+                "action": "Maintain current financial controls",
                 "priority": "LOW",
                 "timeline": "Ongoing",
             })
@@ -240,16 +299,18 @@ class FinanceDomainDetector(BaseDomainDetector):
     domain_name = "finance"
 
     FINANCE_TOKENS: Set[str] = {
-        "revenue", "income", "expense", "cost",
-        "profit", "loss", "debt", "equity", "financial"
+        "revenue", "income", "expense", "cost", "cogs",
+        "profit", "loss", "debt", "equity", "budget", "forecast"
     }
 
     def detect(self, df) -> DomainDetectionResult:
         cols = {str(c).lower() for c in df.columns}
         hits = [c for c in cols if any(t in c for t in self.FINANCE_TOKENS)]
+        confidence = min(len(hits) / 3, 1.0)
+
         return DomainDetectionResult(
             domain="finance",
-            confidence=min(len(hits) / 3, 1.0),
+            confidence=confidence,
             signals={"matched_columns": hits},
         )
 
