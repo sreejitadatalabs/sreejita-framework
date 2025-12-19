@@ -1,11 +1,8 @@
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
-from sreejita.domains.ops import OpsDomain, OpsDomainDetector
 from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
 from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
-
-# 🔥 MISSING IMPORTS (FIX)
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
 
@@ -13,61 +10,62 @@ from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
 from sreejita.core.fingerprint import dataframe_fingerprint
 
-# Phase 2.1-B intelligence
+# Phase 2.x Intelligence
 from sreejita.domains.intelligence.detector_v2 import (
     compute_domain_scores,
     select_best_domain,
 )
 
-# ------------------------
-# Domain detectors (Phase 1)
-# ------------------------
+# =====================================================
+# DOMAIN DETECTORS (COMPLETE & ORDERED)
+# =====================================================
 
 DOMAIN_DETECTORS = [
-    RetailDomainDetector(),
-    CustomerDomainDetector(),
-    FinanceDomainDetector(),
-    OpsDomainDetector(),
-    HealthcareDomainDetector(),
-    MarketingDomainDetector(),
-
-    # ✅ ADD THESE
+    # Narrow / high-signal domains FIRST
     HRDomainDetector(),
     SupplyChainDomainDetector(),
+    HealthcareDomainDetector(),
+
+    # Business domains
+    FinanceDomainDetector(),
+    RetailDomainDetector(),
+    MarketingDomainDetector(),
+
+    # Broadest domain LAST
+    CustomerDomainDetector(),
 ]
 
-DOMAIN_IMPLEMENTATIONS = {
-    "retail": RetailDomain(),
-    "customer": CustomerDomain(),
-    "finance": FinanceDomain(),
-    "ops": OpsDomain(),
-    "healthcare": HealthcareDomain(),
-    "marketing": MarketingDomain(),
+# =====================================================
+# DOMAIN IMPLEMENTATIONS
+# =====================================================
 
-    # ✅ ADD THESE
+DOMAIN_IMPLEMENTATIONS = {
     "hr": HRDomain(),
     "supply_chain": SupplyChainDomain(),
+    "healthcare": HealthcareDomain(),
+    "finance": FinanceDomain(),
+    "retail": RetailDomain(),
+    "marketing": MarketingDomain(),
+    "customer": CustomerDomain(),
 }
 
-# ------------------------
-# Observability
-# ------------------------
+# =====================================================
+# OBSERVABILITY
+# =====================================================
 
 _OBSERVERS: list[DecisionObserver] = []
-
 
 def register_observer(observer: DecisionObserver):
     _OBSERVERS.append(observer)
 
-
-# ------------------------
-# Domain decision (v2.5 — Phase 2.1-B)
-# ------------------------
+# =====================================================
+# DOMAIN DECISION (v2.x FINAL)
+# =====================================================
 
 def decide_domain(df) -> DecisionExplanation:
     rule_results = {}
 
-    # 1️⃣ Phase-1: rule-based detectors
+    # Phase 1 — Rule-based detectors
     for detector in DOMAIN_DETECTORS:
         result = detector.detect(df)
         rule_results[result.domain] = {
@@ -75,13 +73,12 @@ def decide_domain(df) -> DecisionExplanation:
             "signals": result.signals,
         }
 
-    # 2️⃣ Phase-2: intent-weighted scoring
+    # Phase 2 — Intent-weighted scoring
     domain_scores = compute_domain_scores(df, rule_results)
 
-    # 3️⃣ Select best domain
+    # Phase 3 — Final selection
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
-    # 4️⃣ Alternatives
     alternatives = [
         {
             "domain": d,
@@ -95,7 +92,6 @@ def decide_domain(df) -> DecisionExplanation:
         if d != selected_domain
     ]
 
-    # 5️⃣ Decision object
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
@@ -112,16 +108,15 @@ def decide_domain(df) -> DecisionExplanation:
 
     decision.fingerprint = dataframe_fingerprint(df)
 
-    # Observability
     for observer in _OBSERVERS:
         observer.record(decision)
 
     return decision
 
 
-# ------------------------
-# Domain application
-# ------------------------
+# =====================================================
+# DOMAIN APPLICATION
+# =====================================================
 
 def apply_domain(df, domain_name: str):
     domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
