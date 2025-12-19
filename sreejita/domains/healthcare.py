@@ -1,409 +1,206 @@
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Set
-import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+import matplotlib.pyplot as plt
 
-# Assuming these are from your local environment (keep them as is)
 from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
+
 # =====================================================
-# GLOBAL CONFIG: UNIVERSAL DICTIONARIES
+# CONSTANTS
 # =====================================================
 
 NEGATIVE_KEYWORDS = {
     "abnormal", "failed", "deceased", "critical",
-    "positive", "poor", "expired", "high", "severe"
+    "positive", "expired", "severe"
 }
 
-OUTCOME_COLUMN_HINTS = {
-    "result", "status", "outcome", "test", "finding", "evaluation"
-}
+OUTCOME_HINTS = {"result", "outcome", "test", "finding"}
+
 
 # =====================================================
-# HELPER: DATA NORMALIZATION
+# HELPERS
 # =====================================================
 
 def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert Yes/No, Y/N, True/False columns to 1/0.
-    """
     for col in df.columns:
         if df[col].dtype == object:
-            values = set(
-                df[col]
-                .dropna()
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .unique()
-            )
-            if values and values.issubset({"yes", "no", "y", "n", "true", "false"}):
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .map({
-                        "yes": 1, "y": 1, "true": 1,
-                        "no": 0, "n": 0, "false": 0,
-                    })
+            vals = set(df[col].dropna().astype(str).str.lower().unique())
+            if vals and vals.issubset({"yes", "no", "true", "false"}):
+                df[col] = df[col].str.lower().map(
+                    {"yes": 1, "true": 1, "no": 0, "false": 0}
                 )
     return df
 
-# =====================================================
-# HELPER: DATE INTELLIGENCE (SMART DATE FIX)
-# =====================================================
 
 def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Derive length_of_stay if missing but admission & discharge dates exist.
-    Uses 'fuzzy matching' to find date columns even if names change.
-    """
-    # 1. If it already exists, do nothing
     if resolve_column(df, "length_of_stay"):
         return df
 
-    # 2. Smart Search: Look for ANY column containing specific keywords
-    admit = None
-    discharge = None
-    
-    for col in df.columns:
-        c_low = col.lower()
-        if "admission" in c_low and "date" in c_low:
-            admit = col
-        if "discharge" in c_low and "date" in c_low:
-            discharge = col
-            
-    # 3. Calculate if both found
+    admit = resolve_column(df, "admission_date")
+    discharge = resolve_column(df, "discharge_date")
+
     if admit and discharge:
-        try:
-            # Convert to datetime safely
-            df[admit] = pd.to_datetime(df[admit], errors="coerce")
-            df[discharge] = pd.to_datetime(df[discharge], errors="coerce")
-            
-            # Calculate difference
-            df["derived_length_of_stay"] = (
-                df[discharge] - df[admit]
-            ).dt.days
-            
-            # Clean up: Remove negative days (data errors)
-            df.loc[df["derived_length_of_stay"] < 0, "derived_length_of_stay"] = None
-            
-        except Exception:
-            pass # Fail silently if date formats are unrecognizable
+        a = pd.to_datetime(df[admit], errors="coerce")
+        d = pd.to_datetime(df[discharge], errors="coerce")
+        los = (d - a).dt.days
+        los = los.where(los >= 0)
+        if los.notna().any():
+            df["derived_length_of_stay"] = los
 
     return df
 
-# =====================================================
-# HELPER: DYNAMIC RISK SCANNER
-# =====================================================
 
 def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """
-    Scans ALL columns for negative keywords (Universal Risk Detection).
-    """
-    insights: List[Dict[str, Any]] = []
+    insights = []
 
     for col in df.columns:
-        col_l = col.lower()
-        
-        # Only check columns that sound like outcomes (to save time)
-        if not any(h in col_l for h in OUTCOME_COLUMN_HINTS):
+        c = col.lower()
+        if not any(h in c for h in OUTCOME_HINTS):
             continue
         if df[col].dtype != object:
             continue
 
-        # Check content
         values = df[col].dropna().astype(str).str.lower()
-        if values.empty:
+        neg = values[values.isin(NEGATIVE_KEYWORDS)]
+        if len(values) == 0:
             continue
 
-        negatives = values[values.isin(NEGATIVE_KEYWORDS)]
-        rate = len(negatives) / len(values)
-
-        # Threshold: If >15% are bad, flag it
+        rate = len(neg) / len(values)
         if rate >= 0.15:
             insights.append({
                 "level": "RISK" if rate >= 0.25 else "WARNING",
-                "title": f"High Rate of Negative Outcomes in '{col}'",
-                "so_what": (
-                    f"{rate:.0%} of records contain negative values "
-                    f"(e.g., {', '.join(negatives.unique()[:3])})."
-                ),
-                # Metadata to help the main engine know which column to blame
-                "detected_col": col 
+                "title": f"High Rate of Negative Outcomes in {col}",
+                "so_what": f"{rate:.0%} of records show adverse outcomes."
             })
 
     return insights
 
+
 # =====================================================
-# MAIN CLASS: HEALTHCARE DOMAIN
+# DOMAIN
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
-    description = "Universal healthcare analytics (clinical + financial + operational)"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        # Relaxed validation: Just needs SOME identifiable healthcare column
-        return (resolve_column(df, "patient_id") is not None) or \
-               (resolve_column(df, "billing_amount") is not None)
-
-    # ---------------- PREPROCESS ----------------
+        return resolve_column(df, "patient_id") is not None
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         df = _normalize_binary_columns(df)
         df = _derive_length_of_stay(df)
         return df
 
-    # ---------------- KPIs ----------------
-
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        kpis: Dict[str, Any] = {}
-        pid = resolve_column(df, "patient_id")
+        kpis = {}
 
-        # Dynamic LoS (Real or Derived)
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
-        if los and pd.api.types.is_numeric_dtype(df[los]):
+        if los and pd.api.types.is_numeric_dtype(df[los]) and df[los].notna().any():
             kpis["avg_length_of_stay"] = df[los].mean()
 
-        # Dynamic Readmission (might not exist in Dataset B)
-        readm = resolve_column(df, "readmitted")
-        if readm and pd.api.types.is_numeric_dtype(df[readm]):
-            kpis["readmission_rate"] = df[readm].mean()
-
-        # Financials
         bill = resolve_column(df, "billing_amount")
+        pid = resolve_column(df, "patient_id")
         if bill and pd.api.types.is_numeric_dtype(df[bill]):
             kpis["total_billing"] = df[bill].sum()
             if pid:
-                kpis["avg_billing_per_patient"] = (
-                    df.groupby(pid)[bill].sum().mean()
-                )
+                kpis["avg_billing_per_patient"] = df.groupby(pid)[bill].sum().mean()
 
         if pid:
             kpis["patient_volume"] = df[pid].nunique()
 
         return kpis
 
-    # ---------------- VISUALS (FULL DASHBOARD - 4 CHARTS) ----------------
+    def generate_visuals(self, df: pd.DataFrame, out: Path) -> List[Dict[str, Any]]:
+        visuals = []
+        out.mkdir(parents=True, exist_ok=True)
 
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        def human_axis(x, _):
+        def fmt(x, _):
             if x >= 1_000_000: return f"{x/1_000_000:.1f}M"
             if x >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
 
-        visuals: List[Dict[str, Any]] = []
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # CHART 1: Length of Stay
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
-        if los and pd.api.types.is_numeric_dtype(df[los]):
-            path = output_dir / "length_of_stay.png"
-            plt.figure(figsize=(6, 4))
-            df[los].dropna().hist(bins=15, color='skyblue', edgecolor='black')
-            plt.title("Distribution of Length of Stay")
-            plt.xlabel("Days")
-            plt.ylabel("Patient Count")
-            plt.tight_layout()
-            plt.savefig(path)
+        if los and df[los].notna().any():
+            p = out / "length_of_stay.png"
+            df[los].dropna().hist(bins=15)
+            plt.title("Length of Stay Distribution")
+            plt.savefig(p)
             plt.close()
-            visuals.append({"path": path, "caption": "Patient stay duration distribution"})
+            visuals.append({"path": p, "caption": "Patient stay duration distribution"})
 
-        # CHART 2: Billing by Insurance
         bill = resolve_column(df, "billing_amount")
         ins = resolve_column(df, "insurance")
         if bill and ins:
-            path = output_dir / "billing_by_insurance.png"
-            plt.figure(figsize=(6, 4))
-            ax = df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar", color='green')
-            ax.yaxis.set_major_formatter(FuncFormatter(human_axis))
-            plt.title("Total Billing by Payer")
-            plt.tight_layout()
-            plt.savefig(path)
+            p = out / "billing_by_insurance.png"
+            ax = df.groupby(ins)[bill].sum().plot(kind="bar")
+            ax.yaxis.set_major_formatter(FuncFormatter(fmt))
+            plt.title("Billing by Insurance Provider")
+            plt.savefig(p)
             plt.close()
-            visuals.append({"path": path, "caption": "Revenue concentration by payer"})
-
-        # CHART 3: Clinical Risk by Doctor (NEW)
-        # This visualizes the "Aaron Barrera" finding automatically
-        doc = resolve_column(df, "doctor")
-        # Find the risk column dynamically (like we did in insights)
-        risk_col = resolve_column(df, "readmitted")
-        risk_label = "Readmission Rate"
-        
-        # If no readmission, check for the temp risk flag from our scanner
-        if not risk_col and "_temp_risk_flag" in df.columns:
-            risk_col = "_temp_risk_flag"
-            risk_label = "Abnormal Outcome Rate"
-
-        if doc and risk_col:
-            path = output_dir / "risk_by_doctor.png"
-            plt.figure(figsize=(6, 4))
-            # Get top 5 worst doctors
-            grp = df.groupby(doc)[risk_col].mean().nlargest(5)
-            ax = grp.plot(kind="bar", color='red', alpha=0.7)
-            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: '{:.0%}'.format(y)))
-            plt.title(f"Top 5 Doctors by {risk_label}")
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            visuals.append({"path": path, "caption": f"Highest {risk_label} by provider"})
-
-        # CHART 4: Average Cost by Condition (NEW)
-        # Works for 'Diagnosis' (Dataset A) or 'Medical Condition' (Dataset B)
-        cond = resolve_column(df, "diagnosis") or resolve_column(df, "medical_condition")
-        if cond and bill:
-            path = output_dir / "cost_by_condition.png"
-            plt.figure(figsize=(6, 4))
-            ax = df.groupby(cond)[bill].mean().sort_values(ascending=False).head(7).plot(kind="barh", color='orange')
-            ax.xaxis.set_major_formatter(FuncFormatter(human_axis))
-            plt.title("Avg Cost by Condition (Top 7)")
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            visuals.append({"path": path, "caption": "Most expensive conditions to treat"})
+            visuals.append({"path": p, "caption": "Revenue concentration by payer"})
 
         return visuals
 
-    # ---------------- INSIGHTS (UNIVERSAL LOGIC) ----------------
-
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        insights: List[Dict[str, Any]] = []
+        insights = []
+        insights.extend(_scan_categorical_risks(df))
 
-        # 1. RUN THE UNIVERSAL SCANNER FIRST
-        # This detects "Abnormal" tests even if no Readmission column exists
-        risk_findings = _scan_categorical_risks(df)
-        insights.extend(risk_findings)
-
-        # 2. DETERMINE PRIMARY RISK COLUMN (The "Source of Truth" for this dataset)
-        primary_risk_col = resolve_column(df, "readmitted")
-        
-        # If 'readmitted' is missing (Dataset B), use the column found by the scanner
-        if not primary_risk_col and risk_findings:
-            # Look for the column name in the scanner results
-            # We grab the first "RISK" level finding
-            for finding in risk_findings:
-                if "detected_col" in finding:
-                    col_name = finding["detected_col"]
-                    # We need to turn this text column (Normal/Abnormal) into a number (0/1) for analysis
-                    # Create a temporary flag for the "Worst Doctor" calculation
-                    df["_temp_risk_flag"] = df[col_name].astype(str).str.lower().isin(NEGATIVE_KEYWORDS).astype(int)
-                    primary_risk_col = "_temp_risk_flag"
-                    break
-
-        # 3. IDENTIFY WORST PERFORMERS (Universal)
-        # Now we calculate "Worst Doctor" regardless of whether the risk is "Readmission" or "Abnormal Tests"
-        if primary_risk_col:
-            overall_rate = df[primary_risk_col].mean()
-            
-            # Check Doctors and Hospitals
-            for segment_key, segment_label in [("doctor", "Doctor"), ("hospital_branch", "Hospital")]:
-                segment_col = resolve_column(df, segment_key)
-                
-                if segment_col and overall_rate > 0:
-                    grp = df.groupby(segment_col)[primary_risk_col].mean()
-                    worst_name = grp.idxmax()
-                    worst_rate = grp.max()
-
-                    # Only report if it's significantly worse (e.g., 20% worse than average)
-                    if worst_rate > (overall_rate * 1.2):
-                        
-                        # Formatting the message based on source
-                        source_msg = "Readmission Rate"
-                        if primary_risk_col == "_temp_risk_flag":
-                            source_msg = "Adverse Outcome Rate (e.g., Abnormal/Failed)"
-
-                        insights.append({
-                            "level": "RISK",
-                            "title": f"Worst Performing {segment_label}: {worst_name}",
-                            "so_what": (
-                                f"{source_msg} is {worst_rate:.1%} "
-                                f"(Average: {overall_rate:.1%}). Investigate clinical drivers."
-                            )
-                        })
-
-        # 4. FINANCIAL CONCENTRATION (Fallback if no risks)
-        if not any(i['level'] == 'RISK' for i in insights):
+        if not insights:
             bill = resolve_column(df, "billing_amount")
-            if bill:
-                key_col = resolve_column(df, "diagnosis") or resolve_column(df, "insurance")
-                if key_col:
-                    grp = df.groupby(key_col)[bill].sum()
-                    top = grp.idxmax()
-                    insights.append({
-                        "level": "INFO",
-                        "title": f"Highest Cost Driver: {top}",
-                        "so_what": f"Accounts for {grp[top]/grp.sum():.0%} of total billing."
-                    })
+            diag = resolve_column(df, "diagnosis")
+            if bill and diag:
+                grp = df.groupby(diag)[bill].sum()
+                top = grp.idxmax()
+                insights.append({
+                    "level": "INFO",
+                    "title": f"Highest Cost Diagnosis: {top}",
+                    "so_what": f"Accounts for {grp[top]/grp.sum():.0%} of total billing."
+                })
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
-
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        recs: List[Dict[str, Any]] = []
-        insights = self.generate_insights(df, kpis)
-
-        for i in insights:
+        recs = []
+        for i in self.generate_insights(df, kpis):
             if i["level"] == "RISK":
                 recs.append({
                     "action": f"Investigate immediately: {i['title']}",
                     "priority": "HIGH",
-                    "timeline": "2–4 weeks",
+                    "timeline": "2–4 weeks"
                 })
-            elif i["level"] == "WARNING":
-                recs.append({
-                    "action": f"Review protocols for: {i['title']}",
-                    "priority": "MEDIUM",
-                    "timeline": "4–6 weeks",
-                })
-
         if not recs:
             recs.append({
                 "action": "Continue routine monitoring",
                 "priority": "LOW",
-                "timeline": "Ongoing",
+                "timeline": "Ongoing"
             })
-
         return recs
 
+
 # =====================================================
-# REGISTRATION
+# DETECTOR
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-    # Extended dictionary to catch columns from BOTH datasets
-    HEALTHCARE_COLUMNS: Set[str] = {
-        "patient", "patient_id", "pid",
-        "los", "length_of_stay", "admission_date", "date_of_admission",
-        "readmitted", "mortality", "test", "result",
-        "billing", "insurance",
-        "doctor", "diagnosis", "medical_condition"
+    HEALTHCARE_COLUMNS = {
+        "patient", "admission", "discharge",
+        "billing", "insurance", "doctor", "diagnosis"
     }
 
     def detect(self, df) -> DomainDetectionResult:
-        cols = {str(c).lower() for c in df.columns}
-        # Check for partial matches to be safe (e.g. "date of admission" contains "admission")
-        matched_count = 0
-        matches = []
-        for target in self.HEALTHCARE_COLUMNS:
-            for col in cols:
-                if target in col:
-                    matched_count += 1
-                    matches.append(col)
-                    break
-        
-        confidence = min(matched_count / 4, 1.0)
+        cols = {c.lower() for c in df.columns}
+        hits = [c for c in cols if any(h in c for h in self.HEALTHCARE_COLUMNS)]
         return DomainDetectionResult(
             domain="healthcare",
-            confidence=confidence,
-            signals={"matched_columns": matches},
+            confidence=min(len(hits) / 4, 1.0),
+            signals={"matched_columns": hits},
         )
+
 
 def register(registry):
     registry.register(
