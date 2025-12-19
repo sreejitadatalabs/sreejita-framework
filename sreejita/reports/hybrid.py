@@ -46,7 +46,7 @@ def header_footer(canvas, doc):
 
 
 # =====================================================
-# VALUE FORMATTER (EXECUTIVE SAFE)
+# VALUE FORMATTER
 # =====================================================
 
 def format_value(value):
@@ -75,20 +75,23 @@ def format_value(value):
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
 
-    # Output path
     if output_path is None:
         out_dir = input_path.parent / "reports"
         out_dir.mkdir(exist_ok=True)
         output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # Load + clean data
-    df = clean_dataframe(pd.read_csv(input_path, encoding="latin1"))["df"]
+    # --- FIX 1: Safe Encoding Fallback ---
+    try:
+        df_raw = pd.read_csv(input_path, encoding="utf-8")
+    except UnicodeDecodeError:
+        df_raw = pd.read_csv(input_path, encoding="latin1")
+
+    df = clean_dataframe(df_raw)["df"]
 
     # Domain decision + policy
     decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
 
-    # Domain-driven payload
     payload = generate_report_payload(df, decision, policy)
 
     kpis = payload.get("kpis", {})
@@ -96,7 +99,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     recommendations = payload.get("recommendations", [])
     visuals = payload.get("visuals", [])
 
-    # Styles
     styles = getSampleStyleSheet()
 
     brand = ParagraphStyle(
@@ -120,7 +122,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     h2 = ParagraphStyle("h2", parent=styles["Heading2"])
     body = styles["BodyText"]
 
-    # Document
     doc = SimpleDocTemplate(
         str(output_path),
         pagesize=A4,
@@ -160,15 +161,12 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(Spacer(1, 14))
 
     # =====================================================
-    # EXECUTIVE SNAPSHOT (KPIs)
+    # KPI SNAPSHOT
     # =====================================================
 
     snapshot_rows = [["Metric", "Value"]]
     for k, v in kpis.items():
-        snapshot_rows.append([
-            k.replace("_", " ").title(),
-            format_value(v),
-        ])
+        snapshot_rows.append([k.replace("_", " ").title(), format_value(v)])
 
     if len(snapshot_rows) == 1:
         snapshot_rows.append(["KPIs", "Not Available"])
@@ -183,29 +181,41 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 2–3 — VISUAL EVIDENCE
+    # VISUAL EVIDENCE (FIXED PAGINATION)
     # =====================================================
-
-    story.append(Paragraph("Visual Evidence", h1))
 
     if visuals:
-        for idx, v in enumerate(visuals[:4]):
-            story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
-            story.append(Paragraph(v.get("caption", ""), body))
-            story.append(Spacer(1, 14))
-            if idx == 1:
-                story.append(PageBreak())
-    else:
-        story.append(Paragraph(
-            "No meaningful visual evidence could be generated from the available data. "
-            "This typically indicates insufficient variation or missing fields.",
-            body
-        ))
+        story.append(Paragraph("Visual Evidence", h1))
+        story.append(Spacer(1, 12))
 
-    story.append(PageBreak())
+        VISUALS_PER_PAGE = 2
+
+        for idx, v in enumerate(visuals):
+            # --- FIX 2: Aspect Ratio Safety ---
+            # preserveAspectRatio=True prevents square charts from stretching
+            story.append(Image(
+                str(v["path"]), 
+                width=14 * cm, 
+                height=8 * cm, 
+                preserveAspectRatio=True
+            ))
+            story.append(Paragraph(v.get("caption", ""), body))
+            
+            # --- FIX 3: The "Blank Page" Fix ---
+            # Only add Spacer if it's NOT the last image.
+            # This prevents a stray spacer from pushing to a new blank page.
+            if idx < len(visuals) - 1:
+                story.append(Spacer(1, 14))
+
+            # Dynamic Page Break
+            # Note: We check idx+1 < len so we don't break on the very last item loop
+            if (idx + 1) % VISUALS_PER_PAGE == 0 and idx + 1 < len(visuals):
+                story.append(PageBreak())
+
+        story.append(PageBreak())
 
     # =====================================================
-    # PAGE 4 — INSIGHTS & RECOMMENDATIONS
+    # INSIGHTS & RECOMMENDATIONS
     # =====================================================
 
     story.append(Paragraph("Key Insights", h1))
@@ -220,8 +230,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             story.append(Spacer(1, 8))
     else:
         story.append(Paragraph(
-            "No critical clinical or operational risks were identified. "
-            "Overall performance indicators appear stable.",
+            "No critical risks were identified. Performance indicators appear stable.",
             body
         ))
 
@@ -236,19 +245,17 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             story.append(Spacer(1, 10))
     else:
         story.append(Paragraph(
-            "No immediate corrective actions are recommended at this time. "
-            "Maintain current practices and continue monitoring.",
+            "No immediate corrective actions are recommended.",
             body
         ))
 
     story.append(PageBreak())
 
     # =====================================================
-    # PAGE 5 — RISKS
+    # RISKS
     # =====================================================
 
     story.append(Paragraph("Risks", h1))
-
     risks = [i for i in insights if i.get("level") in {"WARNING", "RISK"}]
 
     if risks:
@@ -258,11 +265,9 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
             story.append(Spacer(1, 8))
     else:
         story.append(Paragraph(
-            "No critical risks were identified in the current dataset. "
-            "Continued monitoring is recommended as conditions evolve.",
+            "No material risks detected.",
             body
         ))
 
-    # Build PDF
     doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return str(output_path)
