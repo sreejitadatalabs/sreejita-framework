@@ -23,7 +23,6 @@ def _safe_div(n, d):
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
     Detects a time column suitable for retail analytics.
-    Prioritizes specific retail terms like 'order date'.
     """
     candidates = [
         "order date", "invoice date", "transaction date",
@@ -36,7 +35,6 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
         for low, real in cols.items():
             if key in low and not df[real].isna().all():
                 try:
-                    # Validate by attempting to parse a small sample
                     pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
                     return real
                 except Exception:
@@ -50,7 +48,7 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
 class RetailDomain(BaseDomain):
     name = "retail"
-    description = "Retail & Sales Analytics (Revenue, Orders, Products, Customers)"
+    description = "Retail & Sales Analytics (Revenue, Profit, Shipping, Discount)"
 
     # ---------------- VALIDATION ----------------
 
@@ -87,33 +85,54 @@ class RetailDomain(BaseDomain):
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Calculates key retail metrics: Total Revenue, AOV, Order Volume.
+        Calculates key retail metrics including Profit, Shipping, and Discounts.
         """
         kpis = {}
 
-        revenue = (
+        # 1. Resolve Columns
+        revenue_col = (
             resolve_column(df, "revenue")
             or resolve_column(df, "sales")
             or resolve_column(df, "amount")
         )
-
         order_id = resolve_column(df, "order_id") or resolve_column(df, "transaction")
         customer = resolve_column(df, "customer")
+        
+        profit_col = resolve_column(df, "profit") or resolve_column(df, "margin")
+        shipping_col = resolve_column(df, "shipping_cost") or resolve_column(df, "freight")
+        discount_col = resolve_column(df, "discount")
 
-        if revenue:
-            kpis["total_revenue"] = df[revenue].sum()
+        # 2. Base Metrics
+        if revenue_col:
+            total_rev = df[revenue_col].sum()
+            kpis["total_revenue"] = total_rev
             
-            # --- YOUR FIX: Validate Order ID is usable ---
             if order_id and df[order_id].notna().any():
-                kpis["avg_order_value"] = _safe_div(
-                    df[revenue].sum(), df[order_id].nunique()
-                )
+                kpis["avg_order_value"] = _safe_div(total_rev, df[order_id].nunique())
+
+            # 3. Profitability Metrics
+            if profit_col:
+                total_profit = df[profit_col].sum()
+                kpis["total_profit"] = total_profit
+                kpis["profit_margin"] = _safe_div(total_profit, total_rev)
+                kpis["target_profit_margin"] = 0.15  # Standard Retail Target (15%)
+
+            # 4. Cost Metrics
+            if shipping_col:
+                total_shipping = df[shipping_col].sum()
+                kpis["shipping_cost_ratio"] = _safe_div(total_shipping, total_rev)
+                kpis["target_shipping_ratio"] = 0.10 # Target < 10%
 
         if order_id:
             kpis["order_volume"] = df[order_id].nunique()
 
         if customer:
             kpis["customer_count"] = df[customer].nunique()
+
+        # 5. Discount Metrics
+        if discount_col:
+            # Assuming discount is a ratio (0.1) or percentage. Mean gives avg rate.
+            kpis["average_discount"] = df[discount_col].mean()
 
         return kpis
 
@@ -123,15 +142,14 @@ class RetailDomain(BaseDomain):
         self, df: pd.DataFrame, output_dir: Path
     ) -> List[Dict[str, Any]]:
         """
-        Generates visualizations for the report.
-        Includes safeguards for data types and aggregation for large datasets.
+        Generates visualizations: Trend, Category, Customers, and Discount Analysis.
         """
 
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
         def human_fmt(x, _):
-            """Format numbers for human readability (e.g., 1.5M, 10K)."""
+            """Format numbers for human readability."""
             if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
             if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
@@ -142,25 +160,21 @@ class RetailDomain(BaseDomain):
             or resolve_column(df, "amount")
         )
 
-        # --- SAFETY GUARD: Numeric Check ---
-        # If revenue column exists but contains non-numeric data (e.g., "$1,200"),
-        # stop generation to prevent crashes.
+        # --- SAFETY GUARD ---
         if revenue and not pd.api.types.is_numeric_dtype(df[revenue]):
             return visuals
-        # -----------------------------------
+        # --------------------
 
         category = resolve_column(df, "category") or resolve_column(df, "product")
         customer = resolve_column(df, "customer")
+        discount = resolve_column(df, "discount")
 
         # --- Visual 1: Sales Trend (Smart Aggregation) ---
         if self.has_time_series and revenue:
             p = output_dir / "sales_trend.png"
             plt.figure(figsize=(7, 4))
             
-            # --- AGGREGATION LOGIC ---
             plot_df = df.copy()
-            # If dataset is large (>100 rows), aggregate to Month End ('ME')
-            # to prevent messy charts.
             if len(df) > 100:
                 plot_df = (
                     df.set_index(self.time_col)
@@ -168,7 +182,6 @@ class RetailDomain(BaseDomain):
                     .sum()
                     .reset_index()
                 )
-            # -------------------------
 
             plt.plot(plot_df[self.time_col], plot_df[revenue], linewidth=2, color="#1f77b4")
             plt.title("Sales Trend")
@@ -181,8 +194,6 @@ class RetailDomain(BaseDomain):
         # --- Visual 2: Revenue by Category ---
         if revenue and category:
             p = output_dir / "revenue_by_category.png"
-            
-            # Get Top 7 Categories
             top_cats = df.groupby(category)[revenue].sum().sort_values(ascending=False).head(7)
             
             plt.figure(figsize=(7, 4))
@@ -198,8 +209,6 @@ class RetailDomain(BaseDomain):
         # --- Visual 3: Top Customers ---
         if revenue and customer:
             p = output_dir / "top_customers.png"
-            
-            # Get Top 7 Customers
             top_cust = df.groupby(customer)[revenue].sum().sort_values(ascending=True).tail(7)
             
             plt.figure(figsize=(7, 4))
@@ -211,36 +220,81 @@ class RetailDomain(BaseDomain):
             plt.close()
             visuals.append({"path": p, "caption": "Customer revenue concentration"})
 
+        # --- Visual 4: Discount Impact (Profit Leak Analysis) ---
+        if discount and category and pd.api.types.is_numeric_dtype(df[discount]):
+            p = output_dir / "discount_by_category.png"
+            
+            # Avg Discount by Category
+            disc_by_cat = df.groupby(category)[discount].mean().sort_values(ascending=False).head(7)
+            
+            # Only plot if meaningful discounts exist (> 1%)
+            if disc_by_cat.max() > 0.01:
+                plt.figure(figsize=(7, 4))
+                disc_by_cat.plot(kind="bar", color="#d62728") # Red for "Cost/Loss"
+                plt.title("Avg Discount Level by Category")
+                plt.gca().yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                plt.savefig(p)
+                plt.close()
+                visuals.append({"path": p, "caption": "Categories with highest discount rates"})
+
         return visuals[:4]
 
     # ---------------- INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        Generates text insights based on calculated KPIs.
+        Generates insights based on Retail Thresholds.
         """
         insights = []
 
-        revenue = kpis.get("total_revenue")
-        orders = kpis.get("order_volume")
-        aov = kpis.get("avg_order_value")
+        margin = kpis.get("profit_margin")
+        ship_ratio = kpis.get("shipping_cost_ratio")
+        avg_disc = kpis.get("average_discount")
 
-        if revenue and orders and aov:
+        # 1. Profitability Insights
+        if margin is not None:
+            if margin < 0:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Negative Profit Margin",
+                    "so_what": f"You are losing money on sales. Margin is {margin:.1%}."
+                })
+            elif margin < 0.10: # Below 10% is thin for retail
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Low Profit Margin",
+                    "so_what": f"Margin is {margin:.1%}, below the 15% target."
+                })
+
+        # 2. Shipping Cost Insights
+        if ship_ratio is not None:
+            if ship_ratio > 0.15: # >15% is very high
+                insights.append({
+                    "level": "WARNING",
+                    "title": "High Shipping Costs",
+                    "so_what": f"Shipping consumes {ship_ratio:.1%} of revenue (Target: <10%)."
+                })
+
+        # 3. Discounting Insights
+        if avg_disc is not None:
+            if avg_disc > 0.25: # >25% average discount is aggressive
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Heavy Discounting Detected",
+                    "so_what": f"Avg discount is {avg_disc:.1%}, eroding margins."
+                })
+
+        # Default Info
+        if not insights:
             insights.append({
                 "level": "INFO",
-                "title": "Revenue Composition",
-                "so_what": (
-                    f"Revenue is driven by {orders} orders "
-                    f"with an average order value of {aov:,.2f}."
-                )
+                "title": "Retail Performance Stable",
+                "so_what": "Key metrics (Margin, Shipping, Discounts) are within healthy ranges."
             })
 
-        # Default insight if nothing specific is found
-        return insights or [{
-            "level": "INFO",
-            "title": "Retail Performance Stable",
-            "so_what": "Sales metrics fall within expected operating ranges."
-        }]
+        return insights
 
     # ---------------- RECOMMENDATIONS ----------------
 
@@ -250,19 +304,48 @@ class RetailDomain(BaseDomain):
         """
         recs = []
 
-        # Simple threshold-based recommendation for AOV
-        if kpis.get("avg_order_value") and kpis["avg_order_value"] < 50:
+        margin = kpis.get("profit_margin")
+        ship_ratio = kpis.get("shipping_cost_ratio")
+        avg_disc = kpis.get("average_discount")
+        aov = kpis.get("avg_order_value")
+
+        # Prioritized Actions
+        if margin is not None and margin < 0.05:
             recs.append({
-                "action": "Increase average order value through bundling or upsell",
+                "action": "Audit product pricing and cost of goods sold (COGS)",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            })
+        
+        if avg_disc is not None and avg_disc > 0.25:
+            recs.append({
+                "action": "Tighten discount approval thresholds",
+                "priority": "HIGH",
+                "timeline": "Next Month"
+            })
+
+        if ship_ratio is not None and ship_ratio > 0.12:
+            recs.append({
+                "action": "Renegotiate carrier rates or adjust free shipping threshold",
                 "priority": "MEDIUM",
+                "timeline": "This Quarter"
+            })
+
+        if aov and aov < 50:
+            recs.append({
+                "action": "Implement bundles to boost Average Order Value",
+                "priority": "LOW",
                 "timeline": "Next Quarter"
             })
 
-        return recs or [{
-            "action": "Continue monitoring sales performance",
-            "priority": "LOW",
-            "timeline": "Ongoing"
-        }]
+        if not recs:
+            recs.append({
+                "action": "Continue monitoring sales performance",
+                "priority": "LOW",
+                "timeline": "Ongoing"
+            })
+
+        return recs
 
 
 # =====================================================
@@ -274,7 +357,8 @@ class RetailDomainDetector(BaseDomainDetector):
 
     RETAIL_TOKENS: Set[str] = {
         "order", "sales", "revenue", "customer",
-        "product", "sku", "category", "discount"
+        "product", "sku", "category", "discount",
+        "shipping", "margin"
     }
 
     def detect(self, df) -> DomainDetectionResult:
