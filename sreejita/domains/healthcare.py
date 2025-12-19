@@ -173,63 +173,119 @@ class HealthcareDomain(BaseDomain):
     ) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
-        # ---- Risk-based insights ----
-        if "readmission_rate" in kpis and kpis["readmission_rate"] > 0.20:
-            insights.append({
-                "level": "RISK",
-                "title": "High Readmission Rate",
-                "so_what": "Readmission rate exceeds acceptable thresholds, indicating potential discharge or follow-up gaps."
-            })
+    # ---------- Helper ----------
+        def pct_diff(val, ref):
+            if ref == 0:
+                return 0
+            return (val - ref) / ref
 
-        # ---- Provider outlier analysis ----
+    # ---------- Worst Performing Doctor (Readmission) ----------
         doc = resolve_column(df, "doctor")
-        los = resolve_column(df, "length_of_stay")
-        if doc and los and pd.api.types.is_numeric_dtype(df[los]):
-            grp = df.groupby(doc)[los].mean()
-            if not grp.empty:
-                threshold = grp.median() * 1.2
-                outliers = grp[grp > threshold]
-                if not outliers.empty:
-                    name = outliers.idxmax()
-                    insights.append({
-                        "level": "WARNING",
-                        "title": f"Provider LOS Outlier: {name}",
-                        "so_what": "This provider shows significantly longer average length of stay compared to peers."
-                    })
+        readm = resolve_column(df, "readmitted")
 
-        # ---- Stable state insight ----
-        if not insights:
+        if doc and readm and pd.api.types.is_numeric_dtype(df[readm]):
+            overall_rate = df[readm].mean()
+            grp = df.groupby(doc)[readm].mean()
+
+            worst = grp.loc[grp.idxmax()]
+            diff = pct_diff(worst, overall_rate)
+
+            if diff > 0.10:  # 10% worse than avg
+                insights.append({
+                    "level": "RISK",
+                    "title": f"Worst Performing Doctor: {grp.idxmax()}",
+                    "so_what": (
+                        f"Readmission rate ({worst:.1%}) is "
+                        f"{diff:.0%} higher than the overall average ({overall_rate:.1%})."
+                    )
+                })
+
+    # ---------- Highest Cost Diagnosis ----------
+        diag = resolve_column(df, "diagnosis")
+        bill = resolve_column(df, "billing_amount")
+
+        if diag and bill and pd.api.types.is_numeric_dtype(df[bill]):
+            overall_bill = df[bill].mean()
+            grp = df.groupby(diag)[bill].mean()
+
+            worst_diag = grp.idxmax()
+            worst_val = grp.loc[worst_diag]
+            diff = pct_diff(worst_val, overall_bill)
+
+            if diff > 0.25:  # 25% higher cost
+                insights.append({
+                    "level": "WARNING",
+                    "title": f"High-Cost Diagnosis: {worst_diag}",
+                    "so_what": (
+                        f"Average billing for this diagnosis is "
+                        f"{diff:.0%} higher than the overall average."
+                    )
+                })
+
+    # ---------- Most Expensive Branch ----------
+    branch = resolve_column(df, "hospital_branch")
+    if branch and bill and pd.api.types.is_numeric_dtype(df[bill]):
+        grp = df.groupby(branch)[bill].mean()
+        worst_branch = grp.idxmax()
+        worst_val = grp.loc[worst_branch]
+        avg_val = grp.mean()
+
+        diff = pct_diff(worst_val, avg_val)
+
+        if diff > 0.20:
             insights.append({
-                "level": "INFO",
-                "title": "Operational Performance Stable",
-                "so_what": "No critical clinical or financial risks were detected in the current dataset."
+                "level": "WARNING",
+                "title": f"Most Expensive Branch: {worst_branch}",
+                "so_what": (
+                    f"Average billing is {diff:.0%} higher than "
+                    f"the branch average."
+                )
             })
 
-        return insights
+    # ---------- Fallback (Should Almost Never Trigger Now) ----------
+    if not insights:
+        insights.append({
+            "level": "INFO",
+            "title": "No Extreme Outliers Detected",
+            "so_what": (
+                "All key metrics fall within normal variance ranges, "
+                "with no segment deviating materially from the mean."
+            )
+        })
+
+    return insights
 
     # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        recommendations: List[Dict[str, Any]] = []
+    self, df: pd.DataFrame, kpis: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    recs: List[Dict[str, Any]] = []
 
-        for i in self.generate_insights(df, kpis):
-            if i["level"] in {"RISK", "WARNING"}:
-                recommendations.append({
-                    "action": f"Investigate and address: {i['title']}",
-                    "priority": "HIGH" if i["level"] == "RISK" else "MEDIUM",
-                    "timeline": "4–6 weeks",
-                })
+    insights = self.generate_insights(df, kpis)
 
-        if not recommendations:
-            recommendations.append({
-                "action": "Continue monitoring clinical and financial performance",
-                "priority": "LOW",
-                "timeline": "Ongoing",
+    for i in insights:
+        if i["level"] == "RISK":
+            recs.append({
+                "action": f"Investigate and remediate: {i['title']}",
+                "priority": "HIGH",
+                "timeline": "2–4 weeks",
+            })
+        elif i["level"] == "WARNING":
+            recs.append({
+                "action": f"Review cost and efficiency drivers for: {i['title']}",
+                "priority": "MEDIUM",
+                "timeline": "4–6 weeks",
             })
 
-        return recommendations
+    if not recs:
+        recs.append({
+            "action": "Continue routine monitoring across all clinical and financial dimensions",
+            "priority": "LOW",
+            "timeline": "Ongoing",
+        })
+
+    return recs
 
 
 # =====================================================
