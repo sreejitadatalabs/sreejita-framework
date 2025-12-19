@@ -1,13 +1,11 @@
 """
 Sreejita Framework - Domains Package (v2.x FINAL)
 
-Responsibilities:
-1. Export core domain contracts (public API)
-2. Register all concrete domain implementations
+Exports public domain contracts AND registers domains.
 """
 
 # -------------------------
-# PUBLIC DOMAIN CONTRACTS
+# PUBLIC CONTRACTS
 # -------------------------
 
 from sreejita.domains.base import BaseDomain
@@ -23,7 +21,7 @@ from sreejita.domains.contracts import (
 from sreejita.domains.registry import registry
 
 # -------------------------
-# CONCRETE DOMAINS
+# DOMAIN IMPLEMENTATIONS
 # -------------------------
 
 from sreejita.domains.retail import RetailDomain
@@ -33,9 +31,10 @@ from sreejita.domains.ops import OpsDomain
 from sreejita.domains.healthcare import HealthcareDomain
 from sreejita.domains.marketing import MarketingDomain
 from sreejita.domains.ecommerce import EcommerceDomain
+from sreejita.domains.text import TextDomain   # 🔒 REQUIRED
 
 # -------------------------
-# REGISTER DOMAINS (ONCE)
+# REGISTER DOMAINS
 # -------------------------
 
 registry.register("retail", RetailDomain)
@@ -45,6 +44,7 @@ registry.register("ops", OpsDomain)
 registry.register("healthcare", HealthcareDomain)
 registry.register("marketing", MarketingDomain)
 registry.register("ecommerce", EcommerceDomain)
+registry.register("text", TextDomain)  # 🔒 REQUIRED
 
 # -------------------------
 # PUBLIC EXPORTS
@@ -64,4 +64,5 @@ __all__ = [
     "HealthcareDomain",
     "MarketingDomain",
     "EcommerceDomain",
+    "TextDomain",
 ]
