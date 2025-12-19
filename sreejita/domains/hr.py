@@ -411,16 +411,21 @@ class HRDomainDetector(BaseDomainDetector):
         # Base confidence
         confidence = min(len(hits) / 3, 1.0)
         
-        # 🔑 HR DOMINANCE RULE
-        # If specific "HR-Only" tokens appear, boost confidence to override weak Retail matches
-        hr_exclusive = any(
-            t in c 
-            for c in cols 
-            for t in {"salary", "compensation", "payroll", "attrition", "termination", "ctc"}
-        )
+        # 🔑 HR DOMINANCE RULE (MANDATORY FIX)
+        # If strong HR exclusive signals exist, HR overrides Customer
+        HR_STRONG_SIGNALS = {
+            "salary", "compensation", "payroll", "ctc",
+            "attrition", "termination", "resignation",
+            "performance", "rating", "leave", "attendance"
+        }
+
+        strong_hits = [
+            c for c in cols
+            if any(sig in c for sig in HR_STRONG_SIGNALS)
+        ]
         
-        if hr_exclusive:
-            confidence = max(confidence, 0.85)
+        if strong_hits:
+            confidence = max(confidence, 0.9)
 
         return DomainDetectionResult(
             domain="hr",
