@@ -1,14 +1,13 @@
 from datetime import datetime
 from pathlib import Path
 
-from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.reporting.generic_visuals import generate_generic_visuals
+from sreejita.reporting.recommendation_enricher import enrich_recommendations
 
 
 def generate_report_payload(df, decision, policy):
     domain = decision.selected_domain
     engine = getattr(decision, "engine", None)
-
     output_dir = Path("reports") / "visuals"
 
     if engine is None:
@@ -17,62 +16,58 @@ def generate_report_payload(df, decision, policy):
             "domain": domain,
             "kpis": {},
             "insights": [{
-                "level": "RISK",
-                "title": "Domain Resolution Failure",
-                "so_what": "No analytical domain could be applied."
+                "level": "CRITICAL",
+                "title": "Domain Resolution Failed",
+                "so_what": "No suitable analytical domain could be applied."
             }],
-            "recommendations": [{
-                "action": "Validate dataset structure",
-                "rationale": "Domain identification failed",
+            "recommendations": [],
+            "visuals": [],
+            "risks": [{
+                "level": "CRITICAL",
+                "description": "Analysis could not be completed."
             }],
-            "visuals": generate_generic_visuals(df, output_dir),
-            "policy": getattr(policy, "status", "UNKNOWN"),
+            "policy": policy.status,
         }
 
     # KPIs
     kpis = engine.calculate_kpis(df) or {}
 
-    # Insights
+    # Domain insights
     insights = engine.generate_insights(df, kpis) or []
 
-    if not insights:
-        insights = [{
-            "level": "INFO",
-            "title": "Baseline Data Review",
-            "so_what": "Dataset processed successfully with no threshold breaches."
-        }]
-
-    # Recommendations
+    # Domain recommendations ONLY
     raw_recs = engine.generate_recommendations(df, kpis) or []
-    recommendations = enrich_recommendations(raw_recs)
+    recommendations = enrich_recommendations(raw_recs) if raw_recs else []
 
-    if not recommendations:
-        recommendations = enrich_recommendations([{
-            "action": "Review top-performing metrics",
-            "rationale": "Identify opportunities for scaling strengths",
-        }])
-
-    # Visuals
+    # Visuals (domain first)
     visuals = engine.generate_visuals(df, output_dir) or []
-    if len(visuals) < 4:
+
+    # Generic visuals ONLY if domain visuals < 2
+    if len(visuals) < 2:
         visuals.extend(
-            generate_generic_visuals(df, output_dir, 4 - len(visuals))
+            generate_generic_visuals(df, output_dir, max_visuals=2 - len(visuals))
         )
 
     # Risks (progressive)
     risks = []
+
     if policy.status != "allowed":
         risks.append({
             "level": "WARNING",
-            "title": "Policy Constraint",
-            "description": policy.status,
+            "description": f"Policy status: {policy.status}"
         })
+
+    for i in insights:
+        if i.get("level") == "RISK":
+            risks.append({
+                "level": "CRITICAL",
+                "description": i.get("title")
+            })
 
     if not risks:
         risks.append({
             "level": "LOW",
-            "title": "Operational Risk",
-            "description": "No immediate risks detected based on available data."
+            "description": "No material operational risks identified."
         })
 
     return {
@@ -81,7 +76,7 @@ def generate_report_payload(df, decision, policy):
         "kpis": kpis,
         "insights": insights,
         "recommendations": recommendations,
-        "visuals": visuals[:4],
+        "visuals": visuals,
         "risks": risks,
         "policy": policy.status,
     }
