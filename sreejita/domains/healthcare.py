@@ -28,7 +28,7 @@ def resolve_column(df: pd.DataFrame, aliases: List[str]):
 
 
 # =====================================================
-# KPI RANKING PLAN
+# KPI PLAN (ORDER = BUSINESS PRIORITY)
 # =====================================================
 
 KPI_PLAN = [
@@ -42,7 +42,7 @@ KPI_PLAN = [
 
 
 # =====================================================
-# DOMAIN
+# DOMAIN ENGINE
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -51,21 +51,21 @@ class HealthcareDomain(BaseDomain):
 
     def validate_data(self, df: pd.DataFrame) -> bool:
         return any(
-            resolve_column(df, COLUMN_ALIASES[k]) is not None
-            for k in ["patient_id", "outcome_score", "readmitted"]
+            resolve_column(df, COLUMN_ALIASES[key]) is not None
+            for key in ["patient_id", "readmitted", "outcome_score"]
         )
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
 
-    # ---------------- KPI COMPUTATION ----------------
+    # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis = {}
 
         for kpi_name, canonical_col in KPI_PLAN:
             col = resolve_column(df, COLUMN_ALIASES.get(canonical_col, []))
-            if col is None:
+            if not col:
                 continue
 
             try:
@@ -76,7 +76,7 @@ class HealthcareDomain(BaseDomain):
             except Exception:
                 continue
 
-            if len(kpis) >= 4:  # executive discipline
+            if len(kpis) >= 4:  # executive limit
                 break
 
         return kpis
@@ -90,17 +90,16 @@ class HealthcareDomain(BaseDomain):
             insights.append({
                 "level": "RISK",
                 "title": "High Readmission Rate",
-                "so_what": "Indicates discharge or follow-up quality gaps."
+                "so_what": "Indicates potential discharge or follow-up gaps."
             })
 
         if "avg_length_of_stay" in kpis and kpis["avg_length_of_stay"] > 7:
             insights.append({
                 "level": "WARNING",
                 "title": "Extended Length of Stay",
-                "so_what": "Long stays increase cost and reduce bed availability."
+                "so_what": "Longer stays increase costs and reduce capacity."
             })
 
-        # ✅ IMPORTANT: Positive / INFO insight (clients expect this)
         if not insights and kpis:
             insights.append({
                 "level": "INFO",
@@ -131,7 +130,7 @@ class HealthcareDomain(BaseDomain):
 
         return recs
 
-    # ---------------- VISUAL INTELLIGENCE ----------------
+    # ---------------- VISUALS ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         import matplotlib.pyplot as plt
@@ -139,7 +138,6 @@ class HealthcareDomain(BaseDomain):
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # ALWAYS TRY THESE TWO FIRST (CLIENT TRUST)
         los_col = resolve_column(df, COLUMN_ALIASES["length_of_stay"])
         if los_col:
             path = output_dir / "length_of_stay.png"
@@ -167,3 +165,47 @@ class HealthcareDomain(BaseDomain):
             })
 
         return visuals
+
+
+# =====================================================
+# DOMAIN DETECTOR (RESTORED — TEST SAFE)
+# =====================================================
+
+class HealthcareDomainDetector(BaseDomainDetector):
+    domain_name = "healthcare"
+
+    HEALTHCARE_COLUMNS: Set[str] = {
+        "patient_id", "patientid", "pid",
+        "readmitted", "readmit",
+        "length_of_stay", "los",
+        "outcome_score", "outcome",
+        "mortality", "death",
+        "age", "patient_age",
+    }
+
+    def detect(self, df) -> DomainDetectionResult:
+        if df is None or not hasattr(df, "columns"):
+            return DomainDetectionResult("healthcare", 0.0, {"reason": "invalid_df"})
+
+        cols = {str(c).lower() for c in df.columns}
+        matches = cols.intersection(self.HEALTHCARE_COLUMNS)
+
+        confidence = min(len(matches) / 4, 1.0)
+
+        return DomainDetectionResult(
+            domain="healthcare",
+            confidence=confidence,
+            signals={"matched_columns": list(matches)}
+        )
+
+
+# =====================================================
+# REGISTRATION HOOK
+# =====================================================
+
+def register(registry):
+    registry.register(
+        name="healthcare",
+        domain_cls=HealthcareDomain,
+        detector_cls=HealthcareDomainDetector,
+    )
