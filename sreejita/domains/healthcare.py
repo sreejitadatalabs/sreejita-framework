@@ -25,27 +25,22 @@ def _detect_capabilities(df):
     }
 
 
-# =====================================================
-# DOMAIN ENGINE
-# =====================================================
-
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
-    description = "Generalized healthcare analytics (clinical + financial)"
+    description = "Generalized healthcare analytics"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
         return resolve_column(df, "patient_id") is not None
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 🔥 THIS IS CRITICAL
         self.capabilities = _detect_capabilities(df)
         return df
-
-    # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis = {}
 
-        if self.capabilities["has_clinical"]:
+        if self.capabilities.get("has_clinical"):
             los = resolve_column(df, "length_of_stay")
             if los:
                 kpis["avg_length_of_stay"] = df[los].mean()
@@ -54,7 +49,7 @@ class HealthcareDomain(BaseDomain):
             if readm:
                 kpis["readmission_rate"] = df[readm].mean()
 
-        if self.capabilities["has_financials"]:
+        if self.capabilities.get("has_financials"):
             bill = resolve_column(df, "billing_amount")
             pid = resolve_column(df, "patient_id")
             if bill:
@@ -70,8 +65,6 @@ class HealthcareDomain(BaseDomain):
 
         return kpis
 
-    # ---------------- VISUALS ----------------
-
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         import matplotlib.pyplot as plt
 
@@ -86,22 +79,26 @@ class HealthcareDomain(BaseDomain):
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({"path": path, "caption": "Length of stay distribution"})
+            visuals.append({
+                "path": path,
+                "caption": "Distribution of patient length of stay"
+            })
 
         bill = resolve_column(df, "billing_amount")
         ins = resolve_column(df, "insurance")
         if bill and ins:
             path = output_dir / "billing_by_insurance.png"
-            df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar")
+            df.groupby(ins)[bill].sum().plot(kind="bar")
             plt.title("Billing by Insurance Provider")
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({"path": path, "caption": "Billing by insurance provider"})
+            visuals.append({
+                "path": path,
+                "caption": "Billing by insurance provider"
+            })
 
         return visuals
-
-    # ---------------- INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -110,21 +107,8 @@ class HealthcareDomain(BaseDomain):
             insights.append({
                 "level": "RISK",
                 "title": "High Readmission Rate",
-                "so_what": "Indicates discharge or follow-up quality issues."
+                "so_what": "Potential discharge or follow-up gaps detected."
             })
-
-        doc = resolve_column(df, "doctor")
-        los = resolve_column(df, "length_of_stay")
-        if doc and los:
-            grp = df.groupby(doc)[los].mean()
-            outlier = grp[grp > grp.median() * 1.2]
-            if not outlier.empty:
-                name = outlier.idxmax()
-                insights.append({
-                    "level": "WARNING",
-                    "title": f"Provider LOS Outlier: {name}",
-                    "so_what": "This provider shows significantly longer patient stays."
-                })
 
         if not insights:
             insights.append({
@@ -135,32 +119,6 @@ class HealthcareDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
-
-    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        recs = []
-
-        for i in self.generate_insights(df, kpis):
-            if i["level"] in {"RISK", "WARNING"}:
-                recs.append({
-                    "action": f"Review issue: {i['title']}",
-                    "priority": "HIGH" if i["level"] == "RISK" else "MEDIUM",
-                    "timeline": "4–6 weeks",
-                })
-
-        if not recs:
-            recs.append({
-                "action": "Continue monitoring clinical and financial performance",
-                "priority": "LOW",
-                "timeline": "Ongoing",
-            })
-
-        return recs
-
-
-# =====================================================
-# DETECTOR (TEST SAFE)
-# =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
