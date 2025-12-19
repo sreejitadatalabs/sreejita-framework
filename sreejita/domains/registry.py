@@ -15,5 +15,5 @@ class DomainRegistry:
         return list(self._domains.keys())
 
 
-# 🔒 SINGLETON
+# SINGLETON
 registry = DomainRegistry()
