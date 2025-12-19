@@ -18,6 +18,9 @@ from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
 # reports
+# 🔥 DOMAIN BOOTSTRAP — MUST BE FIRST
+from sreejita.domains.bootstrap_v2 import *  # noqa: F401
+
 from sreejita.reports.hybrid import run as run_hybrid
 
 logger = logging.getLogger(__name__)
