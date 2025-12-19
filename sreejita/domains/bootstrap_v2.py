@@ -13,6 +13,7 @@ from sreejita.domains import (
     marketing,
     hr,
     supply_chain,
+    ecommerce,
 )
 
 retail.register(registry)
@@ -21,6 +22,7 @@ finance.register(registry)
 healthcare.register(registry)
 hr.register(registry)
 supply_chain.register(registry)
+ecommerce.register(registry)
 marketing.register(registry)
 
 
