@@ -88,7 +88,7 @@ class RetailDomain(BaseDomain):
         order_id = resolve_column(df, "order_id") or resolve_column(df, "transaction")
         customer = resolve_column(df, "customer")
         
-        # --- FIX 2: Semantic Separation (Profit vs Margin) ---
+        # Semantic Separation (Profit vs Margin)
         profit_col = resolve_column(df, "profit") # Absolute Currency
         margin_col = resolve_column(df, "margin") # Ratio/Percentage
         
@@ -124,6 +124,8 @@ class RetailDomain(BaseDomain):
             if shipping_col:
                 total_shipping = df[shipping_col].sum()
                 kpis["shipping_cost_ratio"] = _safe_div(total_shipping, total_rev)
+                # FIX 1: Explicitly store the target for consistency/explainability
+                kpis["target_shipping_ratio"] = 0.10 
 
         if order_id:
             kpis["order_volume"] = df[order_id].nunique()
@@ -131,7 +133,7 @@ class RetailDomain(BaseDomain):
         if customer:
             kpis["customer_count"] = df[customer].nunique()
 
-        # 5. Discount Metrics (with FIX 1: Normalization Guard)
+        # 5. Discount Metrics (with Normalization Guard)
         if discount_col:
             avg_disc = df[discount_col].mean()
             # If avg discount > 1 (e.g. 10.0), assume it's percentage and normalize to 0.10
@@ -222,8 +224,13 @@ class RetailDomain(BaseDomain):
             plt.close()
             visuals.append({"path": p, "caption": "Customer revenue concentration"})
 
-        # --- Visual 4: Discount Impact (Normalized) ---
-        if discount and category and pd.api.types.is_numeric_dtype(df[discount]):
+        # --- Visual 4: Discount Impact (FIX 2: Strict Safety) ---
+        if (
+            discount 
+            and category 
+            and pd.api.types.is_numeric_dtype(df[discount])
+            and df[discount].notna().any()
+        ):
             p = output_dir / "discount_by_category.png"
             
             # Avg Discount by Category
@@ -256,7 +263,9 @@ class RetailDomain(BaseDomain):
         ship_ratio = kpis.get("shipping_cost_ratio")
         avg_disc = kpis.get("average_discount")
 
-        # 1. Profitability Insights
+        # FIX 3: Reordered Priorities (Margin > Discount > Shipping)
+
+        # 1. Profitability Insights (Highest Priority)
         if margin is not None:
             if margin < 0:
                 insights.append({
@@ -271,22 +280,22 @@ class RetailDomain(BaseDomain):
                     "so_what": f"Margin is {margin:.1%}, below the 15% target."
                 })
 
-        # 2. Shipping Cost Insights
-        if ship_ratio is not None:
-            if ship_ratio > 0.15:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "High Shipping Costs",
-                    "so_what": f"Shipping consumes {ship_ratio:.1%} of revenue (Target: <10%)."
-                })
-
-        # 3. Discounting Insights
+        # 2. Discounting Insights (Strategic Priority)
         if avg_disc is not None:
             if avg_disc > 0.25:
                 insights.append({
                     "level": "WARNING",
                     "title": "Heavy Discounting Detected",
                     "so_what": f"Avg discount is {avg_disc:.1%}, potentially eroding brand value."
+                })
+
+        # 3. Shipping Cost Insights (Operational Priority)
+        if ship_ratio is not None:
+            if ship_ratio > 0.15:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "High Shipping Costs",
+                    "so_what": f"Shipping consumes {ship_ratio:.1%} of revenue (Target: <10%)."
                 })
 
         # Default Info
