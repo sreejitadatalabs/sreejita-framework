@@ -19,10 +19,6 @@ def _safe_div(n, d):
     return n / d
 
 
-from typing import Optional
-import pandas as pd
-import numpy as np
-
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
     Detect a real time column safely (Datetime, Numeric, or String-Date).
@@ -50,12 +46,13 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
             v_min, v_max = values.min(), values.max()
 
-            # Year-like (e.g. 1990–2050) - Tightened range for modern finance
+            # Year-like (e.g. 1950–2050)
             if 1950 <= v_min and v_max <= 2050:
                 return col
 
             # Month-like (1–12)
-            if 1 <= v_min and v_max <= 12:
+            # FIX 2: Added nunique check to avoid confusing category codes with months
+            if 1 <= v_min and v_max <= 12 and len(values) <= 12:
                 return col
 
         # C. Accept String Dates (The Missing Piece)
@@ -64,12 +61,13 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
             try:
                 # Test the first 10 non-null values to see if they parse
                 sample = df[col].dropna().iloc[:10]
-                pd.to_datetime(sample, errors = "raise") # Will raise error if not date-like
+                pd.to_datetime(sample, errors="raise") # Will raise error if not date-like
                 return col
             except (ValueError, TypeError):
                 continue
 
     return None
+
 
 def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     df_out = df.copy()
@@ -106,6 +104,7 @@ class FinanceDomain(BaseDomain):
 
         if self.time_col:
             df = _prepare_time_series(df, self.time_col)
+            # Need at least 2 points to draw a line
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -134,7 +133,7 @@ class FinanceDomain(BaseDomain):
         elif "total_revenue" in kpis and "total_expense" in kpis:
             kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
-        # ---- Budget Variance (Always compute, but interpret carefully) ----
+        # ---- Budget Variance ----
         if budget and revenue:
             actual = df[revenue].sum()
             planned = df[budget].sum()
@@ -154,6 +153,7 @@ class FinanceDomain(BaseDomain):
             )
 
         # ---- Growth (STRICT) ----
+        # Only calculate if we have time series AND enough data points
         if (
             self.has_time_series
             and revenue
@@ -190,7 +190,9 @@ class FinanceDomain(BaseDomain):
             p = output_dir / "revenue_trend.png"
             plt.figure(figsize=(7, 4))
             plt.plot(df[self.time_col], df[revenue], label="Revenue", linewidth=2)
-            if budget:
+            
+            # Show budget line only if data density is reasonable (<50 points)
+            if budget and len(df) < 50:
                 plt.plot(
                     df[self.time_col],
                     df[budget],
@@ -209,8 +211,14 @@ class FinanceDomain(BaseDomain):
                 "caption": "Revenue performance over time"
             })
 
-        # ---- P&L Waterfall (ONLY if small aggregated dataset) ----
-        if revenue and expense and len(df) <= 12:
+        # ---- P&L Waterfall (GATED & SAFE) ----
+        # FIX 3: Added checks ensuring columns are numeric to prevent crashes
+        if (
+            revenue and expense 
+            and len(df) <= 12
+            and pd.api.types.is_numeric_dtype(df[revenue])
+            and pd.api.types.is_numeric_dtype(df[expense])
+        ):
             p = output_dir / "pnl_waterfall.png"
 
             rev = df[revenue].sum()
@@ -224,6 +232,8 @@ class FinanceDomain(BaseDomain):
 
             plt.figure(figsize=(7, 4))
             bars = plt.bar(steps, values, bottom=bottoms, color=colors)
+            
+            # Add text labels on bars
             for bar, val in zip(bars, values):
                 plt.text(
                     bar.get_x() + bar.get_width() / 2,
@@ -234,6 +244,7 @@ class FinanceDomain(BaseDomain):
                     color="white",
                     fontweight="bold",
                 )
+            
             plt.title("P&L Waterfall")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
             plt.tight_layout()
@@ -263,11 +274,13 @@ class FinanceDomain(BaseDomain):
                 "so_what": f"Profit margin is {margin:.1%}, indicating cost pressure."
             })
 
-        # ---- Budget Variance (ONLY STRONG IF TIME-SERIES) ----
+        # ---- Budget Variance ----
         if var_pct is not None:
-            if var_pct < -0.05 and self.has_time_series:
+            # We treat missed budget as RISK only if we are confident in the time series
+            if var_pct < -0.05:
+                level = "RISK" if self.has_time_series else "INFO"
                 insights.append({
-                    "level": "RISK",
+                    "level": level,
                     "title": "Missed Budget Target",
                     "so_what": f"Revenue is {abs(var_pct):.1%} below budget."
                 })
