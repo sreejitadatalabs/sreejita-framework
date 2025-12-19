@@ -1,11 +1,9 @@
 """
-Sreejita Framework
+Domain modules for Sreejita Framework.
 
-Top-level package initializer.
-DO NOT import domain implementations here.
+Domains register themselves via bootstrap / auto_register.
 """
 
-__version__ = "2.0.0"
+from .base import BaseDomain
 
-# Public framework APIs only
-from sreejita.cli import main  # optional if used
+__all__ = ["BaseDomain"]
