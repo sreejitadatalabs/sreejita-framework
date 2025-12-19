@@ -14,7 +14,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
-    """Safely divides n by d."""
+    """Safely divides n by d, returning None if d is 0 or NaN."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
@@ -94,11 +94,12 @@ class SupplyChainDomain(BaseDomain):
         # 1. Order Volume
         if order_id:
             kpis["order_volume"] = df[order_id].nunique()
+        else:
+            kpis["order_volume"] = len(df) # Fallback: Count rows
 
         # 2. Lead Time (Actual Calculation)
         if order_date and delivery_date:
             try:
-                # Ensure datetime types
                 start = pd.to_datetime(df[order_date], errors='coerce')
                 end = pd.to_datetime(df[delivery_date], errors='coerce')
                 lead_time = (end - start).dt.days
@@ -110,11 +111,9 @@ class SupplyChainDomain(BaseDomain):
         kpis["target_otd_rate"] = 0.95 # Benchmark
 
         if delivery_date and promised_date:
-            # Gold Standard: Date Math
             try:
                 delivered = pd.to_datetime(df[delivery_date], errors='coerce')
                 promised = pd.to_datetime(df[promised_date], errors='coerce')
-                # Check valid dates only
                 mask = delivered.notna() & promised.notna()
                 if mask.sum() > 0:
                     on_time = (delivered[mask] <= promised[mask]).mean()
@@ -122,10 +121,9 @@ class SupplyChainDomain(BaseDomain):
             except Exception:
                 pass
         
-        # Fallback: Status Text Check (If date math failed or columns missing)
+        # Fallback: Status Text Check
         if "on_time_delivery_rate" not in kpis and status_col:
-            # Look for negative keywords
-            is_late = df[status_col].astype(str).str.lower().str.contains("late|delay|backorder", na=False)
+            is_late = df[status_col].astype(str).str.lower().str.contains("late|delay|backorder|fail", na=False)
             kpis["on_time_delivery_rate"] = 1.0 - is_late.mean()
 
         # 4. Inventory Health (Enhanced SKU Logic)
@@ -137,7 +135,6 @@ class SupplyChainDomain(BaseDomain):
                 stock_by_sku = df.groupby(sku)[inventory].sum()
                 kpis["stockout_rate"] = (stock_by_sku <= 0).mean()
             else:
-                # Row-based fallback
                 kpis["stockout_rate"] = (df[inventory] <= 0).mean()
                 
             kpis["target_stockout_rate"] = 0.05
@@ -164,12 +161,13 @@ class SupplyChainDomain(BaseDomain):
         inventory = resolve_column(df, "inventory") or resolve_column(df, "stock")
         supplier = resolve_column(df, "supplier") or resolve_column(df, "vendor")
         category = resolve_column(df, "category") or resolve_column(df, "product")
+        carrier = resolve_column(df, "carrier") or resolve_column(df, "shipping_carriers")
 
         delivery_date = resolve_column(df, "delivery_date") or resolve_column(df, "delivered")
         promised_date = resolve_column(df, "promised_date") or resolve_column(df, "expected_date")
 
-        # -------- Visual 1: Order Volume Trend (Smart Aggregation) --------
-        if self.has_time_series and order_id:
+        # -------- Visual 1: Order Volume Trend --------
+        if self.has_time_series:
             p = output_dir / "order_volume_trend.png"
             plt.figure(figsize=(7, 4))
 
@@ -178,45 +176,21 @@ class SupplyChainDomain(BaseDomain):
                 plot_df = (
                     df.set_index(self.time_col)
                     .resample("ME")
-                    .count() # Counts non-nulls
-                    .reset_index()
+                    .size()
+                    .reset_index(name="count")
                 )
+                plt.plot(plot_df[self.time_col], plot_df["count"], linewidth=2, color="#9467bd")
+            else:
+                # Simple count plot if dataset is small
+                df.groupby(self.time_col).size().plot(linewidth=2, color="#9467bd")
 
-            plt.plot(plot_df[self.time_col], plot_df[order_id], linewidth=2, color="#9467bd")
             plt.title("Order Fulfillment Trend")
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
             visuals.append({"path": p, "caption": "Order processing volume over time"})
 
-        # -------- Visual 2: Delivery Performance --------
-        if delivery_date and promised_date:
-            p = output_dir / "delivery_performance.png"
-            try:
-                d_dates = pd.to_datetime(df[delivery_date], errors='coerce')
-                p_dates = pd.to_datetime(df[promised_date], errors='coerce')
-                
-                # Filter to valid rows only
-                valid = d_dates.notna() & p_dates.notna()
-                if valid.sum() > 0:
-                    status = (d_dates[valid] <= p_dates[valid]).value_counts()
-                    
-                    plt.figure(figsize=(6, 4))
-                    # Map boolean to string labels
-                    status.rename({True: "On-Time", False: "Delayed"}).plot(
-                        kind="bar", color=["#2ca02c", "#d62728"]
-                    )
-                    plt.title("Delivery Performance")
-                    plt.xticks(rotation=0)
-                    plt.tight_layout()
-                    plt.savefig(p)
-                    plt.close()
-                    visuals.append({"path": p, "caption": "On-time vs delayed deliveries"})
-            except Exception:
-                pass
-
-        # -------- Visual 3: Inventory by Category (Actionable) --------
-        # Replaced Histogram with Category Bar Chart
+        # -------- Visual 2: Inventory by Category --------
         if inventory and category and pd.api.types.is_numeric_dtype(df[inventory]):
             p = output_dir / "inventory_by_cat.png"
             
@@ -232,13 +206,26 @@ class SupplyChainDomain(BaseDomain):
             plt.close()
             visuals.append({"path": p, "caption": "Stock distribution across key categories"})
 
-        # -------- Visual 4: Supplier Delay Analysis (High Value) --------
-        if supplier and delivery_date and promised_date:
+        # -------- Visual 3: Supplier / Carrier Performance --------
+        # Priority 1: Carrier Cost/Usage
+        if carrier:
+            p = output_dir / "carrier_usage.png"
+            c_counts = df[carrier].value_counts().head(7)
+            
+            plt.figure(figsize=(7, 4))
+            c_counts.plot(kind="barh", color="#bcbd22")
+            plt.title("Top Shipping Carriers by Volume")
+            plt.tight_layout()
+            plt.savefig(p)
+            plt.close()
+            visuals.append({"path": p, "caption": "Utilization of logistics providers"})
+            
+        # Priority 2: Supplier Delay (if dates available)
+        elif supplier and delivery_date and promised_date:
             try:
                 d_dates = pd.to_datetime(df[delivery_date], errors='coerce')
                 p_dates = pd.to_datetime(df[promised_date], errors='coerce')
                 
-                # Create boolean 'delayed' column
                 df_temp = df.copy()
                 df_temp['is_delayed'] = d_dates > p_dates
                 
@@ -345,22 +332,54 @@ class SupplyChainDomain(BaseDomain):
 
 
 # =====================================================
-# DOMAIN DETECTOR
+# DOMAIN DETECTOR (COLLISION PROOF)
 # =====================================================
 
 class SupplyChainDomainDetector(BaseDomainDetector):
     domain_name = "supply_chain"
 
+    # Expanded tokens including upstream keywords to distinguish from Retail
     SUPPLY_CHAIN_TOKENS: Set[str] = {
-        "order", "shipment", "delivery",
-        "inventory", "stock", "supplier",
-        "lead", "logistics"
+        # Inventory & Stock
+        "inventory", "stock", "onhand", "warehouse",
+
+        # Logistics & Fulfillment
+        "shipment", "delivery", "dispatch", "carrier",
+        "freight", "logistics", "route", "transport", "transportation",
+
+        # Performance & Timing
+        "lead_time", "cycle_time", "turnaround",
+        "delay", "on_time", "backorder",
+
+        # Operations
+        "sku", "quantity", "units", "volume",
+        "supplier", "vendor", "procurement",
+        "manufacturing", "production", "defect"
     }
 
     def detect(self, df) -> DomainDetectionResult:
         cols = {str(c).lower() for c in df.columns}
+        
         hits = [c for c in cols if any(t in c for t in self.SUPPLY_CHAIN_TOKENS)]
+        
+        # Base confidence calculation
         confidence = min(len(hits) / 3, 1.0)
+
+        # 🔑 SUPPLY CHAIN DOMINANCE RULE
+        # These words strongly imply upstream/logistics operations, overruling generic "Sales" signals
+        sc_exclusive = any(
+            t in c
+            for c in cols
+            for t in {
+                "inventory", "stock", "warehouse",
+                "delivery", "shipment", "lead_time",
+                "carrier", "supplier", "freight",
+                "manufacturing", "production"
+            }
+        )
+
+        if sc_exclusive:
+            confidence = max(confidence, 0.85)
 
         return DomainDetectionResult(
             domain="supply_chain",
