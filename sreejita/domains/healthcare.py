@@ -1,44 +1,28 @@
-from typing import Dict, Any, List, Set
-from pathlib import Path
 import pandas as pd
+from pathlib import Path
+from typing import Dict, Any, List, Set
 
+from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# COLUMN ALIAS MAP (DATASET INTELLIGENCE v2.x)
+# CAPABILITY DETECTION
 # =====================================================
 
-COLUMN_ALIASES = {
-    "readmitted": ["readmitted", "readmit", "re_admitted", "readdmitted"],
-    "length_of_stay": ["length_of_stay", "los", "stay_length", "lengthofstay"],
-    "outcome_score": ["outcome_score", "outcome", "clinical_score"],
-    "mortality": ["mortality", "death", "is_dead"],
-    "patient_id": ["patient_id", "patientid", "pid", "patient"],
-    "age": ["age", "patient_age"],
-}
-
-
-def resolve_column(df: pd.DataFrame, aliases: List[str]):
-    for col in aliases:
-        if col in df.columns:
-            return col
-    return None
-
-
-# =====================================================
-# KPI PLAN (ORDER = BUSINESS PRIORITY)
-# =====================================================
-
-KPI_PLAN = [
-    ("readmission_rate", "readmitted"),
-    ("avg_length_of_stay", "length_of_stay"),
-    ("avg_outcome_score", "outcome_score"),
-    ("mortality_rate", "mortality"),
-    ("patient_volume", "patient_id"),
-    ("avg_age", "age"),
-]
+def _detect_capabilities(df):
+    return {
+        "has_patient": resolve_column(df, "patient_id") is not None,
+        "has_clinical": any(
+            resolve_column(df, k) is not None
+            for k in ["length_of_stay", "readmitted", "mortality"]
+        ),
+        "has_financials": resolve_column(df, "billing_amount") is not None,
+        "has_provider": resolve_column(df, "doctor") is not None,
+        "has_diagnosis": resolve_column(df, "diagnosis") is not None,
+        "has_insurance": resolve_column(df, "insurance") is not None,
+    }
 
 
 # =====================================================
@@ -47,39 +31,75 @@ KPI_PLAN = [
 
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
-    description = "Healthcare analytics with dataset-aware intelligence"
+    description = "Generalized healthcare analytics (clinical + financial)"
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        return any(
-            resolve_column(df, COLUMN_ALIASES[key]) is not None
-            for key in ["patient_id", "readmitted", "outcome_score"]
-        )
+        return resolve_column(df, "patient_id") is not None
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df.copy()
+        self.capabilities = _detect_capabilities(df)
+        return df
 
     # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis = {}
 
-        for kpi_name, canonical_col in KPI_PLAN:
-            col = resolve_column(df, COLUMN_ALIASES.get(canonical_col, []))
-            if not col:
-                continue
+        if self.capabilities["has_clinical"]:
+            los = resolve_column(df, "length_of_stay")
+            if los:
+                kpis["avg_length_of_stay"] = df[los].mean()
 
-            try:
-                if kpi_name == "patient_volume":
-                    kpis[kpi_name] = int(df[col].nunique())
-                else:
-                    kpis[kpi_name] = float(df[col].mean())
-            except Exception:
-                continue
+            readm = resolve_column(df, "readmitted")
+            if readm:
+                kpis["readmission_rate"] = df[readm].mean()
 
-            if len(kpis) >= 4:  # executive limit
-                break
+        if self.capabilities["has_financials"]:
+            bill = resolve_column(df, "billing_amount")
+            pid = resolve_column(df, "patient_id")
+            if bill:
+                kpis["total_billing"] = df[bill].sum()
+                if pid:
+                    kpis["avg_billing_per_patient"] = (
+                        df.groupby(pid)[bill].sum().mean()
+                    )
+
+        pid = resolve_column(df, "patient_id")
+        if pid:
+            kpis["patient_volume"] = df[pid].nunique()
 
         return kpis
+
+    # ---------------- VISUALS ----------------
+
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        import matplotlib.pyplot as plt
+
+        visuals = []
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        los = resolve_column(df, "length_of_stay")
+        if los:
+            path = output_dir / "length_of_stay.png"
+            df[los].hist(bins=15)
+            plt.title("Length of Stay Distribution")
+            plt.tight_layout()
+            plt.savefig(path)
+            plt.close()
+            visuals.append({"path": path, "caption": "Length of stay distribution"})
+
+        bill = resolve_column(df, "billing_amount")
+        ins = resolve_column(df, "insurance")
+        if bill and ins:
+            path = output_dir / "billing_by_insurance.png"
+            df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar")
+            plt.title("Billing by Insurance Provider")
+            plt.tight_layout()
+            plt.savefig(path)
+            plt.close()
+            visuals.append({"path": path, "caption": "Billing by insurance provider"})
+
+        return visuals
 
     # ---------------- INSIGHTS ----------------
 
@@ -90,21 +110,27 @@ class HealthcareDomain(BaseDomain):
             insights.append({
                 "level": "RISK",
                 "title": "High Readmission Rate",
-                "so_what": "Indicates potential discharge or follow-up gaps."
+                "so_what": "Indicates discharge or follow-up quality issues."
             })
 
-        if "avg_length_of_stay" in kpis and kpis["avg_length_of_stay"] > 7:
-            insights.append({
-                "level": "WARNING",
-                "title": "Extended Length of Stay",
-                "so_what": "Longer stays increase costs and reduce capacity."
-            })
+        doc = resolve_column(df, "doctor")
+        los = resolve_column(df, "length_of_stay")
+        if doc and los:
+            grp = df.groupby(doc)[los].mean()
+            outlier = grp[grp > grp.median() * 1.2]
+            if not outlier.empty:
+                name = outlier.idxmax()
+                insights.append({
+                    "level": "WARNING",
+                    "title": f"Provider LOS Outlier: {name}",
+                    "so_what": "This provider shows significantly longer patient stays."
+                })
 
-        if not insights and kpis:
+        if not insights:
             insights.append({
                 "level": "INFO",
-                "title": "Clinical Performance Stable",
-                "so_what": "No major clinical risks detected in the current dataset."
+                "title": "Operational Performance Stable",
+                "so_what": "No critical clinical or financial risks detected."
             })
 
         return insights
@@ -114,82 +140,39 @@ class HealthcareDomain(BaseDomain):
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
 
-        if "readmission_rate" in kpis and kpis["readmission_rate"] > 0.2:
-            recs.append({
-                "action": "Improve discharge planning and post-care follow-ups",
-                "priority": "HIGH",
-                "timeline": "4–6 weeks",
-            })
+        for i in self.generate_insights(df, kpis):
+            if i["level"] in {"RISK", "WARNING"}:
+                recs.append({
+                    "action": f"Review issue: {i['title']}",
+                    "priority": "HIGH" if i["level"] == "RISK" else "MEDIUM",
+                    "timeline": "4–6 weeks",
+                })
 
-        if not recs and kpis:
+        if not recs:
             recs.append({
-                "action": "Maintain current clinical protocols and monitoring",
+                "action": "Continue monitoring clinical and financial performance",
                 "priority": "LOW",
                 "timeline": "Ongoing",
             })
 
         return recs
 
-    # ---------------- VISUALS ----------------
-
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        import matplotlib.pyplot as plt
-
-        visuals = []
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        los_col = resolve_column(df, COLUMN_ALIASES["length_of_stay"])
-        if los_col:
-            path = output_dir / "length_of_stay.png"
-            df[los_col].dropna().hist(bins=15)
-            plt.title("Length of Stay Distribution")
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            visuals.append({
-                "path": path,
-                "caption": "Distribution of patient length of stay"
-            })
-
-        readmit_col = resolve_column(df, COLUMN_ALIASES["readmitted"])
-        if readmit_col:
-            path = output_dir / "readmission.png"
-            df[readmit_col].value_counts().plot(kind="bar")
-            plt.title("Readmission Overview")
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            visuals.append({
-                "path": path,
-                "caption": "Readmission frequency overview"
-            })
-
-        return visuals
-
 
 # =====================================================
-# DOMAIN DETECTOR (RESTORED — TEST SAFE)
+# DETECTOR (TEST SAFE)
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
 
     HEALTHCARE_COLUMNS: Set[str] = {
-        "patient_id", "patientid", "pid",
-        "readmitted", "readmit",
-        "length_of_stay", "los",
-        "outcome_score", "outcome",
-        "mortality", "death",
-        "age", "patient_age",
+        "patient", "patient_id", "los", "readmitted",
+        "billing", "insurance", "doctor", "diagnosis"
     }
 
     def detect(self, df) -> DomainDetectionResult:
-        if df is None or not hasattr(df, "columns"):
-            return DomainDetectionResult("healthcare", 0.0, {"reason": "invalid_df"})
-
-        cols = {str(c).lower() for c in df.columns}
+        cols = {c.lower() for c in df.columns}
         matches = cols.intersection(self.HEALTHCARE_COLUMNS)
-
         confidence = min(len(matches) / 4, 1.0)
 
         return DomainDetectionResult(
@@ -199,13 +182,5 @@ class HealthcareDomainDetector(BaseDomainDetector):
         )
 
 
-# =====================================================
-# REGISTRATION HOOK
-# =====================================================
-
 def register(registry):
-    registry.register(
-        name="healthcare",
-        domain_cls=HealthcareDomain,
-        detector_cls=HealthcareDomainDetector,
-    )
+    registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
