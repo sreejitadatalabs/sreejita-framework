@@ -189,7 +189,7 @@ class HealthcareDomain(BaseDomain):
 
         return kpis
 
-    # ---------------- VISUALS ----------------
+    # ---------------- VISUALS (FULL DASHBOARD - 4 CHARTS) ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         def human_axis(x, _):
@@ -200,29 +200,72 @@ class HealthcareDomain(BaseDomain):
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Length of Stay (Real or Derived)
+        # CHART 1: Length of Stay
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
         if los and pd.api.types.is_numeric_dtype(df[los]):
             path = output_dir / "length_of_stay.png"
-            df[los].dropna().hist(bins=15)
-            plt.title("Length of Stay Distribution")
+            plt.figure(figsize=(6, 4))
+            df[los].dropna().hist(bins=15, color='skyblue', edgecolor='black')
+            plt.title("Distribution of Length of Stay")
+            plt.xlabel("Days")
+            plt.ylabel("Patient Count")
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({"path": path, "caption": "Length of stay distribution"})
+            visuals.append({"path": path, "caption": "Patient stay duration distribution"})
 
-        # 2. Billing by Insurance
+        # CHART 2: Billing by Insurance
         bill = resolve_column(df, "billing_amount")
         ins = resolve_column(df, "insurance")
-        if bill and ins and pd.api.types.is_numeric_dtype(df[bill]):
+        if bill and ins:
             path = output_dir / "billing_by_insurance.png"
-            ax = df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar")
+            plt.figure(figsize=(6, 4))
+            ax = df.groupby(ins)[bill].sum().sort_values(ascending=False).plot(kind="bar", color='green')
             ax.yaxis.set_major_formatter(FuncFormatter(human_axis))
-            plt.title("Billing by Insurance Provider")
+            plt.title("Total Billing by Payer")
             plt.tight_layout()
             plt.savefig(path)
             plt.close()
-            visuals.append({"path": path, "caption": "Billing by insurance provider"})
+            visuals.append({"path": path, "caption": "Revenue concentration by payer"})
+
+        # CHART 3: Clinical Risk by Doctor (NEW)
+        # This visualizes the "Aaron Barrera" finding automatically
+        doc = resolve_column(df, "doctor")
+        # Find the risk column dynamically (like we did in insights)
+        risk_col = resolve_column(df, "readmitted")
+        risk_label = "Readmission Rate"
+        
+        # If no readmission, check for the temp risk flag from our scanner
+        if not risk_col and "_temp_risk_flag" in df.columns:
+            risk_col = "_temp_risk_flag"
+            risk_label = "Abnormal Outcome Rate"
+
+        if doc and risk_col:
+            path = output_dir / "risk_by_doctor.png"
+            plt.figure(figsize=(6, 4))
+            # Get top 5 worst doctors
+            grp = df.groupby(doc)[risk_col].mean().nlargest(5)
+            ax = grp.plot(kind="bar", color='red', alpha=0.7)
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: '{:.0%}'.format(y)))
+            plt.title(f"Top 5 Doctors by {risk_label}")
+            plt.tight_layout()
+            plt.savefig(path)
+            plt.close()
+            visuals.append({"path": path, "caption": f"Highest {risk_label} by provider"})
+
+        # CHART 4: Average Cost by Condition (NEW)
+        # Works for 'Diagnosis' (Dataset A) or 'Medical Condition' (Dataset B)
+        cond = resolve_column(df, "diagnosis") or resolve_column(df, "medical_condition")
+        if cond and bill:
+            path = output_dir / "cost_by_condition.png"
+            plt.figure(figsize=(6, 4))
+            ax = df.groupby(cond)[bill].mean().sort_values(ascending=False).head(7).plot(kind="barh", color='orange')
+            ax.xaxis.set_major_formatter(FuncFormatter(human_axis))
+            plt.title("Avg Cost by Condition (Top 7)")
+            plt.tight_layout()
+            plt.savefig(path)
+            plt.close()
+            visuals.append({"path": path, "caption": "Most expensive conditions to treat"})
 
         return visuals
 
