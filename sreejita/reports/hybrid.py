@@ -244,7 +244,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Path:
     # 2. Build domain_results
     # Now we pass 'df' correctly
     domain_results = generate_report_payload(
-        input_path=inputh_path, 
+        input_path=input_path, 
         config=config
     )
 
