@@ -2,9 +2,6 @@ name: Generate Sreejita PDFs
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "runs/**.md"
 
 jobs:
   build-pdf:
@@ -14,10 +11,20 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Pandoc & LaTeX
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install system dependencies (Pandoc + LaTeX)
         run: |
           sudo apt-get update
           sudo apt-get install -y pandoc texlive-xetex
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
 
       - name: Generate PDFs
         run: |
@@ -36,4 +43,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sreejita-pdfs
-          path: runs/**/*.pdf 
+          path: runs/**/*.pdf
