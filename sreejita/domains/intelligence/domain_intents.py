@@ -127,19 +127,24 @@ DOMAIN_INTENTS = {
     # =====================================================
     # FINANCE 💰
     # =====================================================
-    "finance": {
-        "high": {
-            "portfolio", "asset", "liability", "equity", "dividend",
-            "ticker", "volatility", "beta", "market_cap",
-            "general_ledger", "balance_sheet", "net_income", 
-            "ebitda", "cash_flow", "fiscal_year", "tax"
-        },
-        "ambiguous": {
-            "amount", "date", "account", "currency", 
-            "value", "revenue", "profit"
-        }
-    },
+    ""finance": {
+    "high": {
+        # corporate finance
+        "portfolio", "asset", "liability", "equity",
+        "dividend", "interest_rate", "ticker",
+        "transaction_type", "balance", "net_income", 
+        "cash_flow", "ebitda", "volatility", "beta",
 
+        # 🔥 MARKET DATA (MISSING)
+        "open", "close", "high", "low",
+        "adj_close", "adjusted_close",
+        "volume", "market_cap",
+        "price", "returns"
+    },
+    "ambiguous": {
+        "date", "value", "amount"
+    }
+}
     # =====================================================
     # SALES (B2B) 💼
     # =====================================================
