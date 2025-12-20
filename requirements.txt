@@ -9,3 +9,4 @@ apscheduler
 scikit-learn
 streamlit
 openpyxl
+pandoc
