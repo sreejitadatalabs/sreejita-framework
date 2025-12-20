@@ -460,5 +460,4 @@ def register(registry):
         name="supply_chain",
         domain_cls=SupplyChainDomain,
         detector_cls=SupplyChainDomainDetector,
-    )
-
+    ) 
