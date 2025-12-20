@@ -36,20 +36,6 @@ class PandocPDFRenderer:
     ) -> Path:
         """
         Convert a Markdown file to PDF.
-
-        Parameters
-        ----------
-        md_path : Path
-            Path to the generated Markdown report
-        output_dir : Path | None
-            Directory to place the PDF (defaults to MD parent)
-        title : str
-            PDF document title
-
-        Returns
-        -------
-        Path
-            Generated PDF file path
         """
 
         if not md_path.exists():
