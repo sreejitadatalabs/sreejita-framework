@@ -20,7 +20,6 @@ if str(ROOT) not in sys.path:
 # -------------------------------------------------
 from ui.backend import run_analysis_from_ui
 
-
 # -------------------------------------------------
 # Page Configuration
 # -------------------------------------------------
@@ -35,10 +34,9 @@ st.set_page_config(
 # -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
-st.markdown("**Version:** UI v1.9 / Engine v2.4")
-st.info("Demo build — v1 report stability with v2 intelligence (shadow mode).")
+st.markdown("**Version:** UI v2.0 / Engine v3.0")
+st.info("Hybrid Intelligence + Client-ready PDF reports")
 st.divider()
-
 
 # -------------------------------------------------
 # 1️⃣ Upload Dataset
@@ -54,7 +52,6 @@ if uploaded_file:
     st.success(f"Uploaded: {uploaded_file.name}")
     st.write(f"File size: {uploaded_file.size / 1024:.1f} KB")
 
-
 # -------------------------------------------------
 # 2️⃣ Configuration
 # -------------------------------------------------
@@ -62,16 +59,15 @@ st.subheader("2️⃣ Configuration")
 
 domain = st.selectbox(
     "Select domain",
-    options=["Auto", "Retail"],
-    help="Auto domain detection powered by v2.4 engine"
+    options=["Auto", "Retail", "Finance", "HR", "Healthcare", "Supply Chain"],
+    help="Auto domain detection powered by v3 engine"
 )
 
 report_type = st.selectbox(
     "Report type",
-    options=["Hybrid PDF"],
+    options=["Hybrid (PDF)"],
     index=0
 )
-
 
 # -------------------------------------------------
 # 3️⃣ Run Analysis
@@ -109,31 +105,53 @@ if run_clicked:
                 st.error("❌ Analysis failed")
                 st.exception(e)
 
-
 # -------------------------------------------------
-# 4️⃣ Output
+# 4️⃣ Output (PDF Delivery)
 # -------------------------------------------------
 if result:
     st.divider()
     st.subheader("4️⃣ Output")
 
-    st.success("✅ Report generated successfully")
+    st.success("✅ Analysis completed")
 
+    # -----------------------------
+    # Direct PDF from backend (preferred)
+    # -----------------------------
     report_path = result.get("report_path")
 
-    if report_path and os.path.exists(report_path):
+    if report_path and Path(report_path).exists():
         with open(report_path, "rb") as f:
             st.download_button(
                 label="📄 Download PDF Report",
                 data=f,
-                file_name=os.path.basename(report_path),
+                file_name=Path(report_path).name,
                 mime="application/pdf"
             )
 
     # -----------------------------
-    # v2 Intelligence Preview
+    # Fallback: Show ALL PDFs (batch / GitHub Actions)
     # -----------------------------
-    with st.expander("🧠 Decision Intelligence (v2.4 preview)"):
+    st.markdown("### 📂 Available Reports")
+
+    pdfs = list(Path("runs").rglob("*.pdf"))
+
+    if not pdfs:
+        st.info("No historical PDF reports found yet.")
+    else:
+        for pdf in sorted(pdfs, reverse=True)[:10]:
+            with open(pdf, "rb") as f:
+                st.download_button(
+                    label=f"📄 Download {pdf.name}",
+                    data=f,
+                    file_name=pdf.name,
+                    mime="application/pdf",
+                    key=str(pdf)
+                )
+
+    # -----------------------------
+    # Intelligence metadata
+    # -----------------------------
+    with st.expander("🧠 Decision Intelligence"):
         st.json({
             "selected_domain": result.get("domain"),
             "confidence": result.get("domain_confidence"),
@@ -141,11 +159,8 @@ if result:
             "fingerprint": result.get("decision_fingerprint"),
         })
 
-    # -----------------------------
-    # Run metadata
-    # -----------------------------
     with st.expander("Run details"):
         st.json({
             "generated_at": result.get("generated_at"),
-            "version": result.get("version")
+            "version": result.get("version"),
         })
