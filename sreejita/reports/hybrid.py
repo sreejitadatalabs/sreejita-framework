@@ -196,4 +196,3 @@ class HybridReport(BaseReport):
         if isinstance(v, int):
             return f"{v:,}"
         return str(v)
-
