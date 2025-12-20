@@ -56,7 +56,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# E-COMMERCE DOMAIN (v3.2 - POLISHED INTELLIGENCE)
+# E-COMMERCE DOMAIN (v3.0 - FULL AUTHORITY)
 # =====================================================
 
 class EcommerceDomain(BaseDomain):
@@ -110,7 +110,6 @@ class EcommerceDomain(BaseDomain):
         if sessions and pd.api.types.is_numeric_dtype(df[sessions]):
             kpis["total_sessions"] = df[sessions].sum()
         elif users:
-            # If numeric (count of users per day), sum it. If ID column, count unique.
             if pd.api.types.is_numeric_dtype(df[users]):
                 kpis["total_users"] = df[users].sum()
             else:
@@ -256,17 +255,37 @@ class EcommerceDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
+
+        # === STEP 1: Composite FIRST (Authority Layer) ===
+        composite: List[Dict[str, Any]] = []
+        # Guard: Only run deep analysis if dataset is sufficient
+        if len(df) > 30:
+            composite = self.generate_composite_insights(df, kpis)
+
+        dominant_titles = {
+            i["title"] for i in composite
+            if i["level"] in {"RISK", "WARNING"}
+        }
+
+        # === STEP 2: Suppression Rules ===
+        # If "Bot Traffic" is suspected, suppress generic "Low Conversion" alerts
+        suppress_cr = "Empty Calorie Traffic (Possible Bots)" in dominant_titles
+        
+        # If "Payment Gateway Friction" is suspected, suppress generic "Cart Abandonment"
+        suppress_abandonment = "Payment Gateway Friction" in dominant_titles
 
         cr = kpis.get("conversion_rate")
         abandonment = kpis.get("cart_abandonment_rate")
         aov = kpis.get("aov")
 
-        # 1. Conversion Rate
-        if cr is not None:
+        # === STEP 3: Guarded Atomic Insights ===
+        
+        # Conversion Rate
+        if cr is not None and not suppress_cr:
             if cr < 0.01:
                 insights.append({
                     "level": "RISK",
@@ -280,8 +299,8 @@ class EcommerceDomain(BaseDomain):
                     "so_what": f"CR is {cr:.2%}, slightly below the 2.5% e-commerce benchmark."
                 })
 
-        # 2. Cart Abandonment
-        if abandonment is not None:
+        # Cart Abandonment
+        if abandonment is not None and not suppress_abandonment:
             if abandonment > 0.80:
                 insights.append({
                     "level": "RISK",
@@ -295,7 +314,7 @@ class EcommerceDomain(BaseDomain):
                     "so_what": f"Abandonment rate is {abandonment:.1%}, monitor checkout flow."
                 })
 
-        # 3. AOV
+        # AOV
         if aov is not None:
              insights.append({
                 "level": "INFO",
@@ -303,10 +322,8 @@ class EcommerceDomain(BaseDomain):
                 "so_what": f"Average Order Value (AOV) is holding at {aov:,.0f}."
             })
 
-        # === CALL COMPOSITE LAYER (v3.0) ===
-        # Guard against small datasets
-        if len(df) > 30:
-            insights += self.generate_composite_insights(df, kpis)
+        # === STEP 4: Composite LAST (Authority Wins) ===
+        insights += composite
 
         if not insights:
             insights.append({
@@ -371,11 +388,34 @@ class EcommerceDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
         
+        # 1. Check Composite Context
+        composite = []
+        if len(df) > 30:
+            composite = self.generate_composite_insights(df, kpis)
+        
+        titles = [i["title"] for i in composite]
+
+        # AUTHORITY RULES: Mandatory Actions
+        if "Payment Gateway Friction" in titles:
+            return [{
+                "action": "Audit payment gateway errors, latency, and hidden charges",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }]
+
+        if "Empty Calorie Traffic (Possible Bots)" in titles:
+            return [{
+                "action": "Block bot traffic and audit traffic sources for fraud",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }]
+
+        # 2. Fallback to Atomic Recs
         cr = kpis.get("conversion_rate")
         abandonment = kpis.get("cart_abandonment_rate")
         checkout_drop = kpis.get("checkout_dropoff_rate")
@@ -468,3 +508,4 @@ def register(registry):
         domain_cls=EcommerceDomain,
         detector_cls=EcommerceDomainDetector,
     )
+``` [Image of eCommerce payment gateway]
