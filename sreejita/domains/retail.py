@@ -55,7 +55,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# RETAIL DOMAIN (v3.0 - FULL AUTHORITY)
+# RETAIL DOMAIN (v3.1 - FULL AUTHORITY)
 # =====================================================
 
 class RetailDomain(BaseDomain):
@@ -326,11 +326,11 @@ class RetailDomain(BaseDomain):
                 })
         
         # 3. Demand Outpacing Inventory (Proxy)
-        # If we have growth but zero inventory checks (Assuming inventory cols might exist in some datasets)
-        # This is a placeholder for datasets that might have 'stock_level'
-        inventory = resolve_column(df, "quantity_in_stock")
+        # FIX: Expanded resolution logic for robust inventory detection
+        inventory = resolve_column(df, "quantity") or resolve_column(df, "stock")
+        
         if growth is not None and inventory:
-             # Just an example logic: High growth + Low Stock avg
+             # Just an example logic: High growth + assumed supply constraint
              if growth > 0.20:
                  insights.append({
                     "level": "INFO",
