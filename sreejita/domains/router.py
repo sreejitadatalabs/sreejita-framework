@@ -102,6 +102,9 @@ def decide_domain(df) -> DecisionExplanation:
         domain_scores=domain_scores,
     )
 
+    # ✅ THIS IS THE MISSING LINE (CRITICAL)
+    decision.engine = DOMAIN_IMPLEMENTATIONS.get(selected_domain)
+
     decision.fingerprint = dataframe_fingerprint(df)
 
     for observer in _OBSERVERS:
