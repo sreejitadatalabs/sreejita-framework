@@ -45,7 +45,7 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
 
 # =====================================================
-# HR / WORKFORCE DOMAIN (v3.1 - POLISHED INTELLIGENCE)
+# HR / WORKFORCE DOMAIN (v3.0 - FULL AUTHORITY)
 # =====================================================
 
 class HRDomain(BaseDomain):
@@ -198,7 +198,6 @@ class HRDomain(BaseDomain):
             })
 
         # -------- Visual 2: Salary Distribution --------
-        # SAFETY: Ensure salary is numeric
         if salary and pd.api.types.is_numeric_dtype(df[salary]):
             p = output_dir / "salary_distribution.png"
 
@@ -216,7 +215,6 @@ class HRDomain(BaseDomain):
             })
 
         # -------- Visual 3: Performance Distribution OR Status Pie --------
-        # Priority 1: Performance Histogram
         if performance and pd.api.types.is_numeric_dtype(df[performance]):
             p = output_dir / "performance_distribution.png"
 
@@ -231,10 +229,8 @@ class HRDomain(BaseDomain):
                 "path": p,
                 "caption": "Employee performance score spread"
             })
-        # Priority 2: Status Pie (if performance is missing)
         elif status:
             p = output_dir / "status_breakdown.png"
-            # Cap categories to prevent clutter
             counts = df[status].value_counts().head(5)
             
             plt.figure(figsize=(6, 4))
@@ -251,7 +247,6 @@ class HRDomain(BaseDomain):
             })
 
         # -------- Visual 4: Absence Analysis OR Perf vs Salary --------
-        # Priority 1: Performance vs Salary (Scatter) - Needs both numeric
         if (
             performance and salary 
             and pd.api.types.is_numeric_dtype(df[performance]) 
@@ -274,7 +269,6 @@ class HRDomain(BaseDomain):
                 "caption": "Relationship between pay and performance"
             })
             
-        # Priority 2: Absence by Dept (if scatter not possible)
         elif absence and department and pd.api.types.is_numeric_dtype(df[absence]):
             p = output_dir / "absence_by_department.png"
 
@@ -295,7 +289,7 @@ class HRDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -305,17 +299,26 @@ class HRDomain(BaseDomain):
         low_perf = kpis.get("low_performance_rate")
         absence = kpis.get("avg_absence_days")
 
-        # 1. Generate Composite Insights FIRST
+        # === STEP 1: Generate Composite Insights FIRST ===
         composite_insights = self.generate_composite_insights(df, kpis)
         
-        # Check if we have specific attrition insights
-        has_composite_attrition = any(
-            "Talent Drain" in i["title"] or "Retention Risk" in i["title"] 
-            for i in composite_insights
-        )
+        dominant_titles = {
+            i["title"] for i in composite_insights
+            if i["level"] in {"RISK", "WARNING"}
+        }
 
-        # 2. Attrition (Atomic) - Suppress if better insight exists
-        if attrition is not None and not has_composite_attrition:
+        # Suppression Rules
+        suppress_attrition = any(
+            t in dominant_titles 
+            for t in {"Talent Drain (Regrettable Attrition)", "Retention Risk Likely Linked to Compensation"}
+        )
+        
+        suppress_absence = any("Burnout Risk" in t for t in dominant_titles)
+
+        # === STEP 2: Atomic Insights (Guarded) ===
+        
+        # Attrition
+        if attrition is not None and not suppress_attrition:
             if attrition > 0.20:
                 insights.append({
                     "level": "RISK",
@@ -329,7 +332,7 @@ class HRDomain(BaseDomain):
                     "so_what": f"Turnover is {attrition:.1%}, slightly above healthy limits."
                 })
 
-        # 3. Performance
+        # Performance
         if perf is not None and perf < 3.5:
             insights.append({
                 "level": "WARNING",
@@ -344,15 +347,15 @@ class HRDomain(BaseDomain):
                 "so_what": f"{low_perf:.1%} of employees are underperforming."
             })
 
-        # 4. Absenteeism
-        if absence is not None and absence > 10:
+        # Absenteeism
+        if absence is not None and absence > 10 and not suppress_absence:
             insights.append({
                 "level": "INFO",
                 "title": "Elevated Absenteeism",
                 "so_what": f"Average absence is {absence:.1f} days per employee."
             })
 
-        # 5. Add Composite Insights (Append at end)
+        # === STEP 3: Append Composite Insights LAST ===
         insights += composite_insights
 
         if not insights:
@@ -364,7 +367,7 @@ class HRDomain(BaseDomain):
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (HR v3.1) ----------------
+    # ---------------- COMPOSITE INSIGHTS (HR v3.0) ----------------
 
     def generate_composite_insights(
         self, df: pd.DataFrame, kpis: Dict[str, Any]
@@ -434,11 +437,49 @@ class HRDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
         
+        # 1. Check Composite Context for Action Authority
+        composite = self.generate_composite_insights(df, kpis)
+        composite_titles = [i["title"] for i in composite]
+
+        # AUTHORITY RULES: Root causes mandate specific actions
+        if any("Talent Drain" in t for t in composite_titles):
+            recs.append({
+                "action": "Conduct immediate retention audit and compensation review for high performers",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            })
+            return recs
+
+        if any("Burnout Risk" in t for t in composite_titles):
+            recs.append({
+                "action": "Initiate workload balancing and mandatory leave review for high-risk teams",
+                "priority": "HIGH",
+                "timeline": "This Month"
+            })
+            return recs
+
+        if any("Retention Risk" in t for t in composite_titles):
+            recs.append({
+                "action": "Review compensation benchmarks against market rates immediately",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            })
+            return recs
+
+        if any("Steep Compensation Hierarchy" in t for t in composite_titles):
+            recs.append({
+                "action": "Review pay bands and equity distribution for fairness",
+                "priority": "MEDIUM",
+                "timeline": "Next Quarter"
+            })
+            # Don't return, allow other recs as this is INFO/MEDIUM
+
+        # 2. Fallback to Atomic Recommendations
         attrition = kpis.get("attrition_rate")
         low_perf = kpis.get("low_performance_rate")
 
@@ -532,4 +573,3 @@ def register(registry):
         domain_cls=HRDomain,
         detector_cls=HRDomainDetector,
     )
-
