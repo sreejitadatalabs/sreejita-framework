@@ -29,7 +29,7 @@ class HybridReport(BaseReport):
         self,
         domain_results: Dict[str, Dict[str, Any]],
         output_dir: Path,
-        metadata: Dict[str, Any] | None = None
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Path:
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -59,7 +59,7 @@ class HybridReport(BaseReport):
     # SECTIONS
     # -------------------------------------------------
 
-    def _write_header(self, f, metadata: Dict[str, Any] | None):
+    def _write_header(self, f, metadata: Optional[Dict[str, Any]]):
         f.write("# 📊 Executive Decision Report\n")
         f.write(f"**Generated:** {datetime.now():%Y-%m-%d %H:%M}\n\n")
 
@@ -220,7 +220,7 @@ class HybridReport(BaseReport):
 # BACKWARD-COMPATIBILITY ADAPTER
 # =====================================================
 
-def run(domain_results: Dict[str, Any], output_dir: Path, metadata: Optional[Dict[str, Any]] = None):
+def run(domain_results: Dict[str, Any], output_dir: Path, metadata: Optional[Dict[str, Any]]):
     """
     Legacy entry point to maintain compatibility with existing pipelines.
     Delegates to the HybridReport engine.
