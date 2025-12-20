@@ -1,4 +1,3 @@
-
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
@@ -491,4 +490,3 @@ def register(registry):
         domain_cls=MarketingDomain,
         detector_cls=MarketingDomainDetector,
     )
-``` [attachment_0](attachment)
