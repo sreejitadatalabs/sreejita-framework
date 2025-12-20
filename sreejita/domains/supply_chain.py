@@ -58,7 +58,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# SUPPLY CHAIN / OPERATIONS DOMAIN (v3.1 - ENTERPRISE)
+# SUPPLY CHAIN / OPERATIONS DOMAIN (v3.0 - FULL AUTHORITY)
 # =====================================================
 
 class SupplyChainDomain(BaseDomain):
@@ -267,16 +267,33 @@ class SupplyChainDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        insights = []
+        insights: List[Dict[str, Any]] = []
+
+        # === STEP 1: Composite FIRST (Authority Layer) ===
+        composite_insights: List[Dict[str, Any]] = []
+        if len(df) > 30:
+            composite_insights = self.generate_composite_insights(df, kpis)
+
+        dominant_titles = {
+            i["title"] for i in composite_insights
+            if i["level"] in {"RISK", "WARNING"}
+        }
+
+        # === STEP 2: Suppression Rules ===
+        # If "Fulfillment Bottleneck" exists, suppress generic "Delivery Delays"
+        suppress_delivery = "Severe Fulfillment Bottleneck" in dominant_titles
+        
+        # If "Inventory Imbalance" exists, suppress generic "Stockout" warnings
+        suppress_inventory = "Inventory Imbalance Detected" in dominant_titles
 
         on_time = kpis.get("on_time_delivery_rate")
         stockout = kpis.get("stockout_rate")
 
-        # 1. Delivery Insights
-        if on_time is not None:
+        # === STEP 3: Guarded Atomic Insights ===
+        if on_time is not None and not suppress_delivery:
             if on_time < 0.85:
                 insights.append({
                     "level": "RISK",
@@ -290,8 +307,7 @@ class SupplyChainDomain(BaseDomain):
                     "so_what": f"On-time rate is {on_time:.1%}, slightly below target."
                 })
 
-        # 2. Inventory Insights
-        if stockout is not None:
+        if stockout is not None and not suppress_inventory:
             if stockout > 0.10:
                 insights.append({
                     "level": "RISK",
@@ -304,11 +320,9 @@ class SupplyChainDomain(BaseDomain):
                     "title": "Inventory Gaps Detected",
                     "so_what": f"Stockout rate is {stockout:.1%}."
                 })
-        
-        # === CALL COMPOSITE LAYER (v3.1) ===
-        # Guard: Only call composite insights if dataset is significant enough
-        if len(df) > 30:
-            insights += self.generate_composite_insights(df, kpis)
+
+        # === STEP 4: Composite LAST (Authority Wins) ===
+        insights += composite_insights
 
         if not insights:
             insights.append({
@@ -319,13 +333,13 @@ class SupplyChainDomain(BaseDomain):
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (SC v3.1) ----------------
+    # ---------------- COMPOSITE INSIGHTS (SC v3.0) ----------------
 
     def generate_composite_insights(
         self, df: pd.DataFrame, kpis: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Supply Chain v3.1 Composite Intelligence Layer.
+        Supply Chain v3 Composite Intelligence Layer.
         Detects Inventory Imbalance, Fulfillment Bottlenecks.
         """
         insights: List[Dict[str, Any]] = []
@@ -336,7 +350,6 @@ class SupplyChainDomain(BaseDomain):
         inventory_lvl = kpis.get("avg_inventory_level")
 
         # 1. Inventory Imbalance (High Stock + High Stockouts)
-        # Means we are holding a lot of "Dead Stock" while popular items are missing.
         if inventory_lvl is not None and stockout is not None:
             if inventory_lvl > 0 and stockout > 0.10:
                  insights.append({
@@ -362,11 +375,34 @@ class SupplyChainDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
         
+        # 1. Check Composite Context for Action Authority
+        composite = []
+        if len(df) > 30:
+            composite = self.generate_composite_insights(df, kpis)
+        
+        titles = [i["title"] for i in composite]
+
+        # AUTHORITY RULES: Mandatory actions for specific risks
+        if "Severe Fulfillment Bottleneck" in titles:
+             return [{
+                "action": "Audit logistics carriers and lead times immediately",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }]
+
+        if "Inventory Imbalance Detected" in titles:
+            return [{
+                "action": "Initiate stock rebalancing: Markdown overstock and expedite OOS items",
+                "priority": "HIGH",
+                "timeline": "This Week"
+            }]
+
+        # 2. Fallback to Atomic Recs
         stockout = kpis.get("stockout_rate")
         on_time = kpis.get("on_time_delivery_rate")
 
@@ -460,4 +496,4 @@ def register(registry):
         name="supply_chain",
         domain_cls=SupplyChainDomain,
         detector_cls=SupplyChainDomainDetector,
-    ) 
+    )
