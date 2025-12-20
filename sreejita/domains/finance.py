@@ -126,21 +126,26 @@ class FinanceDomain(BaseDomain):
         volume_col = resolve_column(df, "volume")
         
         if close_col and pd.api.types.is_numeric_dtype(df[close_col]):
-            prices = df[close_col]
+            prices = df[close_col].dropna()
+            
             if len(prices) > 1:
                 start = prices.iloc[0]
                 end = prices.iloc[-1]
                 
-                # OPTIONAL 1: Guard against divide-by-zero
+                # Total Return
                 if start != 0:
-                    total_return = (end - start) / start
-                    kpis["total_return"] = total_return
+                    kpis["total_return"] = (end - start) / start
                 
                 kpis["current_price"] = end
                 
-                # Volatility
+                # Volatility (Daily Standard Deviation)
                 daily_returns = prices.pct_change().dropna()
                 kpis["volatility"] = daily_returns.std()
+                
+                # ---------------- MAX DRAWDOWN (PRO GRADE) ----------------
+                running_max = prices.cummax()
+                drawdowns = (prices - running_max) / running_max
+                kpis["max_drawdown"] = drawdowns.min()
 
         if volume_col and pd.api.types.is_numeric_dtype(df[volume_col]):
             kpis["avg_volume"] = df[volume_col].mean()
@@ -270,6 +275,7 @@ class FinanceDomain(BaseDomain):
         
         ret = kpis.get("total_return")
         vol = kpis.get("volatility")
+        drawdown = kpis.get("max_drawdown")
         margin = kpis.get("profit_margin")
         var_pct = kpis.get("budget_variance_pct")
         
@@ -282,13 +288,28 @@ class FinanceDomain(BaseDomain):
                 "so_what": f"Total return over the period is {ret:.2%}."
             })
             
-        # OPTIONAL 2: Cap volatility insight spam
+        # Volatility Cap (Risk: High)
         if vol is not None and 0.02 < vol < 0.20:
             insights.append({
                 "level": "RISK",
                 "title": "High Volatility",
                 "so_what": f"Daily fluctuation is {vol:.2%}. Asset is risky."
             })
+            
+        # Drawdown Risk (Professional Insight)
+        if drawdown is not None:
+            if drawdown < -0.30:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Severe Drawdown Detected",
+                    "so_what": f"The asset experienced a maximum drawdown of {abs(drawdown):.1%}, indicating high downside risk."
+                })
+            elif drawdown < -0.15:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Moderate Drawdown Observed",
+                    "so_what": f"Maximum drawdown reached {abs(drawdown):.1%}. Risk management may be required."
+                })
 
         # 2. Corporate Insights
         if margin is not None:
@@ -329,11 +350,11 @@ class FinanceDomain(BaseDomain):
         recs = []
         
         # Market Recs
-        if kpis.get("volatility", 0) > 0.02:
+        if kpis.get("volatility", 0) > 0.02 or kpis.get("max_drawdown", 0) < -0.20:
             recs.append({
-                "action": "Monitor volatility and key support levels",
-                "priority": "MEDIUM",
-                "timeline": "Ongoing"
+                "action": "Review risk exposure and stop-loss levels",
+                "priority": "HIGH",
+                "timeline": "Immediate"
             })
             
         # Corporate Recs
@@ -405,3 +426,4 @@ def register(registry):
         domain_cls=FinanceDomain,
         detector_cls=FinanceDomainDetector,
     )
+
