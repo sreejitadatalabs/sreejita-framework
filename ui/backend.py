@@ -4,7 +4,7 @@ from typing import Optional
 
 import pandas as pd
 
-# v1 report pipeline (DO NOT TOUCH)
+# v1 report pipeline (AUTHORITATIVE – DO NOT TOUCH)
 from sreejita.cli import run_single_file
 
 # v2 decision engine (shadow mode)
@@ -13,43 +13,40 @@ from sreejita.domains.router import decide_domain
 # v2.5 policy engine (shadow mode)
 from sreejita.policy.engine import PolicyEngine
 
-# v3 rendering layer (NEW – SAFE)
-from sreejita.reporting.pdf_renderer import PandocPDFRenderer
-
 
 def run_analysis_from_ui(
     input_path: str,
     domain: str = "Auto",
     output_dir: str = "reports",
-    config_path: Optional[str] = None
+    config_path: Optional[str] = None,
 ) -> dict:
     """
-    Streamlit → Framework adapter
+    Streamlit → Framework adapter (v3.3 SAFE)
 
     Layers:
-    - v1.9 : Report generation (authoritative, MUST NOT break)
-    - v2.4 : Domain decision intelligence (shadow mode)
-    - v2.5 : Policy & governance layer (shadow mode)
-    - v3.0 : PDF rendering (optional, delivery layer)
+    - v1.x : Report generation (AUTHORITATIVE)
+    - v2.x : Domain intelligence (SHADOW)
+    - v2.5 : Policy engine (SHADOW)
+    - v3.x : PDF delivery (PASSIVE ONLY)
 
-    RULES:
-    - v1 pipeline is sacred
-    - v2/v2.5 failures must degrade safely
-    - PDF rendering must NEVER break analysis
+    HARD RULES:
+    - v1 pipeline must NEVER break
+    - UI must NEVER require Pandoc
+    - PDFs are CONSUMED, not GENERATED, here
     """
 
     input_path = Path(input_path)
     output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # v2.4 / v2.5 SHADOW INTELLIGENCE (SAFE)
+    # v2 / v2.5 SHADOW INTELLIGENCE (NON-BLOCKING)
     # -------------------------------------------------
     decision = None
     policy_decision = None
 
     try:
-        # Robust CSV / Excel loading
+        # Robust file loading
         if input_path.suffix.lower() == ".csv":
             try:
                 df = pd.read_csv(input_path, encoding="utf-8")
@@ -65,53 +62,49 @@ def run_analysis_from_ui(
 
     except Exception as e:
         # ABSOLUTE RULE: NEVER BREAK v1
-        print("⚠️ v2/v2.5 engine failed, falling back to v1 only")
+        print("⚠️ Shadow intelligence failed — continuing safely")
         print("Reason:", e)
 
     # -------------------------------------------------
-    # v1.9 REPORT GENERATION (AUTHORITATIVE)
+    # v1 REPORT GENERATION (AUTHORITATIVE)
     # -------------------------------------------------
     # This MUST remain untouched
-    md_report_path = run_single_file(
-        input_path=str(input_path),
-        config_path=config_path
+    report_path = Path(
+        run_single_file(
+            input_path=str(input_path),
+            config_path=config_path,
+        )
     )
 
-    # -------------------------------------------------
-    # v3.0 PDF DELIVERY (OPTIONAL & SAFE)
-    # -------------------------------------------------
-    pdf_report_path = None
-
-    try:
-        renderer = PandocPDFRenderer()
-        pdf_report_path = renderer.render(
-            md_path=Path(md_report_path),
-            output_dir=Path(md_report_path).parent
-        )
-    except Exception as e:
-        # PDF must NEVER block analysis
-        print("⚠️ PDF generation failed (non-fatal)")
-        print("Reason:", e)
+    # Determine MD path safely
+    if report_path.suffix.lower() == ".pdf":
+        md_report_path = report_path.with_suffix(".md")
+        pdf_report_path = report_path if report_path.exists() else None
+    else:
+        md_report_path = report_path
+        pdf_report_path = report_path.with_suffix(".pdf")
+        if not pdf_report_path.exists():
+            pdf_report_path = None
 
     # -------------------------------------------------
-    # UNIFIED RETURN PAYLOAD (UI SAFE)
+    # RETURN UI-SAFE PAYLOAD
     # -------------------------------------------------
     return {
         # v1 output
-        "report_path": md_report_path,
-        "pdf_report_path": pdf_report_path,
+        "md_report_path": str(md_report_path),
+        "pdf_report_path": str(pdf_report_path) if pdf_report_path else None,
 
-        # v2.4 decision intelligence
+        # v2 decision intelligence
         "domain": decision.selected_domain if decision else domain,
         "domain_confidence": decision.confidence if decision else None,
-        "decision_rules": decision.rules_applied if decision else None,
+        "decision_rules": getattr(decision, "rules_applied", None),
         "decision_fingerprint": getattr(decision, "fingerprint", None),
 
         # v2.5 policy
-        "policy_status": policy_decision.status if policy_decision else None,
-        "policy_reasons": policy_decision.reasons if policy_decision else None,
+        "policy_status": getattr(policy_decision, "status", None),
+        "policy_reasons": getattr(policy_decision, "reasons", None),
 
         # metadata
         "generated_at": datetime.utcnow().isoformat(),
-        "version": "UI v1.9 / Engine v2.4 / Policy v2.5 / PDF v3.0"
+        "version": "UI v1.x / Engine v2.x / Policy v2.5 / PDF v3.x",
     }
