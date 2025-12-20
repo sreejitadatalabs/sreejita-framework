@@ -3,7 +3,6 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from sreejita.reporting.base import BaseReport
-from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
 
 # =====================================================
@@ -97,7 +96,10 @@ class HybridReport(BaseReport):
             f.write("| :--- | :--- |\n")
 
             for k, v in list(kpis.items())[:8]:
-                f.write(f"| {k.replace('_', ' ').title()} | **{self._format_value(k, v)}** |\n")
+                f.write(
+                    f"| {k.replace('_', ' ').title()} | "
+                    f"**{self._format_value(k, v)}** |\n"
+                )
 
             f.write("\n")
 
@@ -148,35 +150,25 @@ class HybridReport(BaseReport):
 
 
 # =====================================================
-# BACKWARD-COMPATIBLE ENTRY POINT (CLI / UI / BATCH)
+# BACKWARD-COMPATIBLE ENTRY POINT (NO PDF HERE)
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Path:
     """
-    Single entry point used by CLI, BatchRunner, Streamlit UI
+    Single entry point used by CLI, BatchRunner, Streamlit UI.
+    Generates Markdown ONLY.
     """
 
     from sreejita.reporting.orchestrator import generate_report_payload
 
-    # 1. Generate domain intelligence
     domain_results = generate_report_payload(
         input_path=input_path,
         config=config
     )
 
-    # 2. Create run directory
     output_root = Path(config.get("output_dir", "runs"))
     run_dir = output_root / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 3. Generate Markdown report
     engine = HybridReport()
-    md_path = engine.build(domain_results, run_dir, config.get("metadata"))
-
-    # 4. OPTIONAL PDF generation (safe, isolated)
-    if config.get("export_pdf", True):
-        renderer = PandocPDFRenderer()
-        pdf_path = renderer.render(md_path)
-        return pdf_path
-
-    return md_path
+    return engine.build(domain_results, run_dir, config.get("metadata"))
