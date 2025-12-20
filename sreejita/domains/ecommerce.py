@@ -508,4 +508,3 @@ def register(registry):
         domain_cls=EcommerceDomain,
         detector_cls=EcommerceDomainDetector,
     )
-``` [Image of eCommerce payment gateway]
