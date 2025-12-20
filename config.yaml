@@ -1,5 +1,39 @@
+# =====================================================
+# SREEJITA FRAMEWORK CONFIG (v3.x)
+# =====================================================
+
+# -------------------------------------
+# Decision Engine (unchanged)
+# -------------------------------------
 decision_engine:
   observers:
     - type: console
     - type: file
-      path: decision_audit.jsonl
+      path: decision_audit.json
+
+
+# -------------------------------------
+# Reporting & Delivery
+# -------------------------------------
+reporting:
+  format: hybrid            # hybrid / executive / dynamic (future)
+  export_pdf: true           # 🔥 ENABLE PDF DELIVERY
+  pdf_renderer: pandoc       # pandoc | future: weasyprint, playwright
+  pdf_title: "Sreejita Executive Report"
+
+
+# -------------------------------------
+# Output Management
+# -------------------------------------
+output:
+  root_dir: runs             # Base folder for all outputs
+  keep_markdown: false       # false = clients only see PDF
+  overwrite: false
+
+
+# -------------------------------------
+# Automation (future-safe)
+# -------------------------------------
+automation:
+  retries: 3
+  retry_delay_seconds: 5
