@@ -72,6 +72,29 @@ def format_value(value):
 # HYBRID REPORT
 # =====================================================
 
+def robust_read_csv(path: Path) -> pd.DataFrame:
+    """
+    Robust CSV reader for real-world messy files
+    (Yahoo Finance, exports, logs, scraped data).
+    """
+    # 1️⃣ Fast path (clean CSVs)
+    try:
+        return pd.read_csv(path, encoding="utf-8")
+    except Exception:
+        pass
+
+    # 2️⃣ Relaxed parsing for malformed rows
+    try:
+        return pd.read_csv(
+            path,
+            encoding="latin1",
+            engine="python",
+            on_bad_lines="skip"
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse CSV file: {e}")
+
+
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
 
@@ -81,10 +104,7 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
     # Safe encoding fallback
-    try:
-        df_raw = pd.read_csv(input_path, encoding="utf-8")
-    except UnicodeDecodeError:
-        df_raw = pd.read_csv(input_path, encoding="latin1")
+    df_raw = robust_read_csv(input_path)
 
     df = clean_dataframe(df_raw)["df"]
 
