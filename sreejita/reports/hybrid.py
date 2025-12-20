@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -6,23 +5,24 @@ from datetime import datetime
 from sreejita.reporting.base import BaseReport
 
 # =====================================================
-# HYBRID REPORT (v3.2 - ROBUST DECISION ENGINE)
+# HYBRID REPORT (v3.2 – ROBUST DECISION ENGINE)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
     Hybrid v3.2 Report Engine
-    - Decision-first Narrative
-    - Visual Evidence Integration
-    - Composite Authority Logic
-    - Context-Aware Formatting
-    - Robustness Guards (No crashes on malformed data)
+
+    Responsibilities:
+    - Convert domain intelligence into executive narrative
+    - Present insights BEFORE metrics (decision-first)
+    - Keep visuals and actions tightly scoped
+    - Never load data or infer domains (handled by Orchestrator)
     """
 
     name = "hybrid"
 
     # -------------------------------------------------
-    # ENTRY POINT
+    # ENTRY POINT (FRAMEWORK CONTRACT)
     # -------------------------------------------------
 
     def build(
@@ -31,17 +31,22 @@ class HybridReport(BaseReport):
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Path:
+        """
+        Build the Hybrid executive report.
+        """
+
+        # Safety guard
+        if not isinstance(output_dir, Path):
+            raise TypeError("output_dir must be a pathlib.Path")
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Timestamped filename for version control
         filename = f"Sreejita_Executive_Report_{datetime.now():%Y-%m-%d}.md"
         report_path = output_dir / filename
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, metadata)
 
-            # Sort critical domains (Finance/Retail) to the top
             ordered_domains = self._sort_domains(domain_results.keys())
 
             for domain in ordered_domains:
@@ -69,7 +74,7 @@ class HybridReport(BaseReport):
             f.write("\n")
 
         f.write(
-            "> ⚠️ **Executive Summary**: This report uses **v3.0 Composite Intelligence** "
+            "> ⚠️ **Executive Summary**: This report uses **v3 Composite Intelligence** "
             "to prioritize root-cause risks over raw metrics. "
             "Actions listed below are authoritative mandates.\n\n"
         )
@@ -88,52 +93,48 @@ class HybridReport(BaseReport):
         recs = result.get("recommendations", [])
         visuals = result.get("visuals", [])
 
-        # 1️⃣ Strategic Intelligence (The "Why")
+        # 1️⃣ Strategic Intelligence (WHY)
         authoritative_insights = self._prioritize_insights(insights)
 
         if authoritative_insights:
             f.write("### 🧠 Strategic Intelligence\n")
             for ins in authoritative_insights:
-                # --- ROBUSTNESS GUARD ---
                 if "title" not in ins or "so_what" not in ins:
                     continue
-                # ------------------------
-
                 icon = self._level_icon(ins.get("level"))
                 f.write(f"#### {icon} {ins['title']}\n")
                 f.write(f"{ins['so_what']}\n\n")
         else:
             f.write("✅ _Operations within normal parameters._\n\n")
 
-        # 2️⃣ Key Metrics (The "What" - as a Table)
+        # 2️⃣ KPIs (WHAT)
         if kpis:
             f.write("### 📉 Key Performance Indicators\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
 
-            # Filter internal/debug keys
-            clean_kpis = {k: v for k, v in kpis.items() if not k.startswith("_")}
+            clean_kpis = {
+                k: v for k, v in kpis.items()
+                if not k.startswith("_")
+            }
 
-            # Limit to top 8 to prevent report bloat
             for k, v in list(clean_kpis.items())[:8]:
                 label = k.replace("_", " ").title().replace("Kpi", "KPI")
-                # Pass 'k' to format_value so it knows if it's a Rate/Margin
-                formatted_v = self._format_value(k, v)
-                f.write(f"| {label} | **{formatted_v}** |\n")
+                value = self._format_value(k, v)
+                f.write(f"| {label} | **{value}** |\n")
 
             f.write("\n")
 
-        # 3️⃣ Visual Evidence (The "Proof")
+        # 3️⃣ Visual Evidence (PROOF)
         if visuals:
             f.write("### 👁️ Visual Evidence\n")
             for vis in visuals[:2]:
-                # Assuming images are in the same folder as the Markdown file
-                img_filename = Path(vis["path"]).name
+                img_name = Path(vis.get("path")).name
                 caption = vis.get("caption", "Data Visualization")
-                f.write(f"![{caption}]({img_filename})\n")
+                f.write(f"![{caption}]({img_name})\n")
                 f.write(f"> *{caption}*\n\n")
 
-        # 4️⃣ Required Actions (The "How")
+        # 4️⃣ Required Actions (HOW)
         if recs:
             f.write("### 🚀 Required Actions\n")
 
@@ -143,13 +144,11 @@ class HybridReport(BaseReport):
                 key=lambda r: priority_order.get(r.get("priority", "LOW"), 3)
             )
 
-            # Primary Mandate
             primary = sorted_recs[0]
             f.write(f"**PRIMARY MANDATE:** {primary['action']}\n")
             f.write(f"- 🚨 **Priority:** {primary.get('priority', 'HIGH')}\n")
             f.write(f"- ⏱️ **Timeline:** {primary.get('timeline', 'Immediate')}\n\n")
 
-            # Secondary Actions
             if len(sorted_recs) > 1:
                 f.write("**Supporting Actions:**\n")
                 for r in sorted_recs[1:3]:
@@ -158,14 +157,13 @@ class HybridReport(BaseReport):
 
     def _write_footer(self, f):
         f.write("\n---\n")
-        f.write("_Powered by Sreejita Framework v3.1 | Enterprise Decision Engine_")
+        f.write("_Powered by Sreejita Framework v3.2 | Enterprise Decision Engine_")
 
     # -------------------------------------------------
     # INTELLIGENCE LOGIC
     # -------------------------------------------------
 
     def _prioritize_insights(self, insights: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sorts insights: RISK > WARNING > INFO."""
         if not insights:
             return []
 
@@ -175,8 +173,16 @@ class HybridReport(BaseReport):
         return sorted(insights, key=rank)[:5]
 
     def _sort_domains(self, domains):
-        """Puts critical financial/commercial domains first."""
-        priority = ["finance", "retail", "ecommerce", "supply_chain", "marketing", "hr"]
+        priority = [
+            "finance",
+            "retail",
+            "ecommerce",
+            "supply_chain",
+            "marketing",
+            "hr",
+            "customer",
+            "healthcare"
+        ]
 
         def sorter(d):
             return priority.index(d) if d in priority else 99
@@ -191,68 +197,45 @@ class HybridReport(BaseReport):
         }.get(level, "ℹ️")
 
     def _format_value(self, key: str, v: Any) -> str:
-        """
-        Smart Formatter:
-        - Percentages: Only if value is float AND key implies rate/margin.
-        - Currency/Numbers: Standard formatting.
-        """
         if isinstance(v, float):
-            key_lower = key.lower()
-            is_percentage_key = any(x in key_lower for x in [
-                "rate", "ratio", "margin", "percent", "pct", "share", "bounce", "conversion"
-            ])
-            
-            # Context-Aware Percentage Rule
-            if is_percentage_key and abs(v) <= 2.0: 
+            key_l = key.lower()
+            if any(x in key_l for x in [
+                "rate", "ratio", "margin", "percent",
+                "pct", "share", "bounce", "conversion"
+            ]) and abs(v) <= 2.0:
                 return f"{v:.1%}"
-            
-            # Standard Float
             return f"{v:,.2f}"
-            
+
         if isinstance(v, int):
             return f"{v:,}"
-            
+
         return str(v)
 
 
 # =====================================================
-# BACKWARD-COMPATIBILITY ADAPTER (CLI ENTRY POINT)
+# BACKWARD-COMPATIBLE ENTRY POINT (CLI / UI / BATCH)
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Path:
     """
-    Legacy CLI/UI entry point.
-    Keeps backward compatibility with existing CLI calls.
-    HANDLES DATA LOADING to prevent Orchestrator TypeErrors.
+    v3-compatible entry point.
+    This is the ONLY place Hybrid touches input_path.
     """
-    import pandas as pd
+
     from sreejita.reporting.orchestrator import generate_report_payload
 
-    # 1. LOAD DATA (The Fix)
-    # The orchestrator expects a DataFrame 'df', not a string 'input_path'
-    path_obj = Path(input_path)
-    
-    try:
-        if path_obj.suffix.lower() == '.csv':
-            df = pd.read_csv(input_path)
-        else:
-            # Assumes Excel for .xlsx, .xls
-            df = pd.read_excel(input_path)
-    except Exception as e:
-        raise ValueError(f"Failed to load data from {input_path}. Error: {e}")
-
-    # 2. Build domain_results
-    # Now we pass 'df' correctly
     domain_results = generate_report_payload(
-        input_path=input_path, 
+        input_path=input_path,
         config=config
     )
 
-    # 3. Decide output directory (SAFE)
     output_root = Path(config.get("output_dir", "runs"))
     run_dir = output_root / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 4. Build report
     engine = HybridReport()
-    return engine.build(domain_results, run_dir, metadata=config.get("metadata"))
+    return engine.build(
+        domain_results=domain_results,
+        output_dir=run_dir,
+        metadata=config.get("metadata")
+    )
