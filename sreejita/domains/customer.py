@@ -56,7 +56,7 @@ def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
 
 
 # =====================================================
-# CUSTOMER / CX DOMAIN (v3.2 - POLISHED INTELLIGENCE)
+# CUSTOMER / CX DOMAIN (v3.0 - FULL AUTHORITY)
 # =====================================================
 
 class CustomerDomain(BaseDomain):
@@ -110,7 +110,7 @@ class CustomerDomain(BaseDomain):
         if customer:
             kpis["customer_count"] = df[customer].nunique()
 
-        # 2. Satisfaction Metrics (IMPROVED: Pre-Normalization)
+        # 2. Satisfaction Metrics (Pre-Normalization)
         kpis["target_satisfaction_score"] = 4.0 # Benchmark (1-5 scale)
 
         if satisfaction and pd.api.types.is_numeric_dtype(df[satisfaction]):
@@ -123,9 +123,8 @@ class CustomerDomain(BaseDomain):
 
             kpis["avg_satisfaction_score"] = sat_series.mean()
             
-            # Now thresholds apply correctly regardless of original scale
+            # Thresholds apply correctly regardless of original scale
             kpis["low_satisfaction_rate"] = (sat_series < 3).mean()
-            # High Satisfaction Rate (> 4.5)
             kpis["high_satisfaction_rate"] = (sat_series > 4.5).mean()
 
         # 3. Churn / Retention
@@ -177,7 +176,7 @@ class CustomerDomain(BaseDomain):
 
             plt.figure(figsize=(7, 4))
             
-            # FIX: Normalize data for plotting to match KPI scale (1-5)
+            # Normalize data for plotting to match KPI scale (1-5)
             plot_series = df[satisfaction].dropna()
             if plot_series.mean() > 5:
                 plot_series = plot_series / 2
@@ -264,17 +263,40 @@ class CustomerDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
+
+        # === STEP 1: Composite FIRST (Authority Layer) ===
+        composite: List[Dict[str, Any]] = []
+        # Only run deep analysis if we have enough customers (or rows)
+        base_size = kpis.get("customer_count", len(df))
+        if base_size > 30:
+            composite = self.generate_composite_insights(df, kpis)
+
+        dominant_titles = {
+            i["title"] for i in composite
+            if i["level"] in {"RISK", "WARNING"}
+        }
+
+        # === STEP 2: Suppression Rules ===
+        # If "Service-Driven Churn" is found, suppress generic "High Churn"
+        suppress_churn = "Service-Driven Churn Risk" in dominant_titles
+        
+        # If "Silent Attrition" is found, suppress atomic "Low Satisfaction" or "Churn"
+        suppress_sat = "Silent Attrition Detected" in dominant_titles
+        if suppress_sat:
+            suppress_churn = True # Silent attrition IS the churn story
 
         churn = kpis.get("churn_rate")
         sat = kpis.get("avg_satisfaction_score")
         low_sat = kpis.get("low_satisfaction_rate")
 
-        # 1. Churn Insight
-        if churn is not None:
+        # === STEP 3: Guarded Atomic Insights ===
+        
+        # Churn Insight
+        if churn is not None and not suppress_churn:
             if churn > 0.10:
                 insights.append({
                     "level": "RISK",
@@ -288,26 +310,23 @@ class CustomerDomain(BaseDomain):
                     "so_what": f"Churn rate is {churn:.1%}, exceeding the acceptable threshold."
                 })
 
-        # 2. Satisfaction Insight
-        if sat is not None and sat < 3.5:
+        # Satisfaction Insight
+        if sat is not None and sat < 3.5 and not suppress_sat:
             insights.append({
                 "level": "WARNING",
                 "title": "Low Customer Satisfaction",
                 "so_what": f"Average satisfaction is {sat:.2f}/5."
             })
 
-        if low_sat is not None and low_sat > 0.20:
+        if low_sat is not None and low_sat > 0.20 and not suppress_sat:
             insights.append({
                 "level": "WARNING",
                 "title": "Large Dissatisfied Segment",
                 "so_what": f"{low_sat:.1%} of customers report low satisfaction."
             })
 
-        # === CALL COMPOSITE LAYER (v3.0) ===
-        # Guard: Only run deep analysis if we have enough customers (or rows)
-        base_size = kpis.get("customer_count", len(df))
-        if base_size > 30:
-            insights += self.generate_composite_insights(df, kpis)
+        # === STEP 4: Composite LAST (Authority Wins) ===
+        insights += composite
 
         if not insights:
             insights.append({
@@ -371,11 +390,42 @@ class CustomerDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
 
+        # 1. Check Composite Context
+        composite = []
+        base_size = kpis.get("customer_count", len(df))
+        if base_size > 30:
+            composite = self.generate_composite_insights(df, kpis)
+        
+        titles = [i["title"] for i in composite]
+
+        # AUTHORITY RULES: Mandatory Actions
+        if "Service-Driven Churn Risk" in titles:
+            return [{
+                "action": "Improve support SLAs, reduce repeat tickets, and audit support workflows",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }]
+
+        if "Silent Attrition Detected" in titles:
+            return [{
+                "action": "Launch proactive outreach campaign (NPS/Feedback) to at-risk silent customers",
+                "priority": "HIGH",
+                "timeline": "This Week"
+            }]
+
+        if "Potential Price/Value Mismatch" in titles:
+            return [{
+                "action": "Review pricing tiers and conduct competitive feature benchmarking",
+                "priority": "MEDIUM",
+                "timeline": "Next Quarter"
+            }]
+
+        # 2. Fallback to Atomic Recs
         churn = kpis.get("churn_rate")
         low_sat = kpis.get("low_satisfaction_rate")
 
