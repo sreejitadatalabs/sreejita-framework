@@ -14,7 +14,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
-    """Safely divides n by d."""
+    """Safely divides n by d, returning None if d is 0 or NaN."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
@@ -23,7 +23,7 @@ def _safe_div(n, d):
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     """
     E-com-safe time detector:
-    session time, order time, event time.
+    Prioritizes session/event times over generic dates.
     """
     candidates = [
         "session_date", "visit_date", "event_time", "timestamp",
@@ -43,8 +43,20 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    """Ensures time column is datetime type and sorted."""
+    df_out = df.copy()
+    try:
+        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
+        df_out = df_out.dropna(subset=[time_col])
+        df_out = df_out.sort_values(time_col)
+    except Exception:
+        pass
+    return df_out
+
+
 # =====================================================
-# E-COMMERCE DOMAIN
+# E-COMMERCE DOMAIN (v3.2 - POLISHED INTELLIGENCE)
 # =====================================================
 
 class EcommerceDomain(BaseDomain):
@@ -60,10 +72,10 @@ class EcommerceDomain(BaseDomain):
         return any(
             resolve_column(df, c) is not None
             for c in [
-                "session_id", "visit_id", "visitor",
+                "session_id", "visit_id", "visitor", "user_id",
                 "pageviews", "bounce_rate", "traffic_source",
                 "add_to_cart", "checkout", "conversion",
-                "order_id", "transaction_id" # Overlaps with Retail, but context differs
+                "order_id", "transaction_id" 
             ]
         )
 
@@ -74,10 +86,7 @@ class EcommerceDomain(BaseDomain):
         self.has_time_series = False
 
         if self.time_col:
-            df = df.copy()
-            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
-            df = df.dropna(subset=[self.time_col])
-            df = df.sort_values(self.time_col)
+            df = _prepare_time_series(df, self.time_col)
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -90,38 +99,51 @@ class EcommerceDomain(BaseDomain):
         # Traffic Metrics
         sessions = resolve_column(df, "sessions") or resolve_column(df, "visits")
         users = resolve_column(df, "users") or resolve_column(df, "visitors")
-        pageviews = resolve_column(df, "pageviews")
         
         # Funnel Metrics
         orders = resolve_column(df, "orders") or resolve_column(df, "transactions")
         revenue = resolve_column(df, "revenue") or resolve_column(df, "sales")
         add_to_cart = resolve_column(df, "add_to_cart") or resolve_column(df, "atc")
+        checkout = resolve_column(df, "checkout") or resolve_column(df, "begin_checkout")
         
         # 1. Traffic Volume
         if sessions and pd.api.types.is_numeric_dtype(df[sessions]):
             kpis["total_sessions"] = df[sessions].sum()
         elif users:
-            kpis["total_users"] = df[users].nunique() if not pd.api.types.is_numeric_dtype(df[users]) else df[users].sum()
+            # If numeric (count of users per day), sum it. If ID column, count unique.
+            if pd.api.types.is_numeric_dtype(df[users]):
+                kpis["total_users"] = df[users].sum()
+            else:
+                kpis["total_users"] = df[users].nunique()
 
         # 2. Conversion Rate (CR)
-        # Formula: Orders / Sessions (if both exist)
         if orders and sessions and pd.api.types.is_numeric_dtype(df[orders]) and pd.api.types.is_numeric_dtype(df[sessions]):
             total_orders = df[orders].sum()
             total_sessions = df[sessions].sum()
             kpis["conversion_rate"] = _safe_div(total_orders, total_sessions)
             kpis["target_conversion_rate"] = 0.025 # 2.5% Benchmark
 
-        # 3. Cart Abandonment Rate
-        # Formula: 1 - (Orders / Add To Carts)
+        # 3. Cart Abandonment Rate (Guarded)
         if orders and add_to_cart and pd.api.types.is_numeric_dtype(df[orders]) and pd.api.types.is_numeric_dtype(df[add_to_cart]):
             total_orders = df[orders].sum()
             total_atc = df[add_to_cart].sum()
             
             if total_atc > 0:
-                kpis["cart_abandonment_rate"] = 1.0 - (total_orders / total_atc)
-                kpis["target_abandonment_rate"] = 0.70 # < 70% is good
+                raw_rate = 1.0 - (total_orders / total_atc)
+                kpis["cart_abandonment_rate"] = max(0.0, min(1.0, raw_rate))
+                kpis["target_abandonment_rate"] = 0.70 # < 70% is good target
 
-        # 4. Average Order Value (AOV)
+        # 4. Checkout Drop-off
+        kpis["target_checkout_dropoff_rate"] = 0.40 # < 40% is good target
+
+        if checkout and orders and pd.api.types.is_numeric_dtype(df[checkout]) and pd.api.types.is_numeric_dtype(df[orders]):
+            total_checkouts = df[checkout].sum()
+            total_orders = df[orders].sum()
+            if total_checkouts > 0:
+                raw_drop = 1.0 - (total_orders / total_checkouts)
+                kpis["checkout_dropoff_rate"] = max(0.0, min(1.0, raw_drop))
+
+        # 5. Average Order Value (AOV)
         if revenue and orders and pd.api.types.is_numeric_dtype(df[revenue]) and pd.api.types.is_numeric_dtype(df[orders]):
             kpis["aov"] = _safe_div(df[revenue].sum(), df[orders].sum())
 
@@ -136,6 +158,7 @@ class EcommerceDomain(BaseDomain):
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Calculate KPIs once
         kpis = self.calculate_kpis(df)
 
         sessions = resolve_column(df, "sessions") or resolve_column(df, "visits")
@@ -173,7 +196,7 @@ class EcommerceDomain(BaseDomain):
 
         # -------- Visual 2: Conversion Funnel (Bar) --------
         if sessions and add_to_cart and orders:
-            # Check numeric types
+            # Check numeric types safety
             cols = [sessions, add_to_cart, orders]
             if all(pd.api.types.is_numeric_dtype(df[c]) for c in cols):
                 p = output_dir / "conversion_funnel.png"
@@ -189,7 +212,7 @@ class EcommerceDomain(BaseDomain):
                 plt.title("Conversion Funnel")
                 plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
                 
-                # Add text labels
+                # Add text labels on bars
                 for i, v in enumerate(funnel_data.values()):
                     plt.text(i, v, human_fmt(v, None), ha='center', va='bottom')
 
@@ -199,7 +222,8 @@ class EcommerceDomain(BaseDomain):
                 visuals.append({"path": p, "caption": "User journey drop-off points"})
 
         # -------- Visual 3: Traffic Source Breakdown --------
-        metric = sessions or orders # Use sessions if avail, else orders
+        # Use Sessions for volume, or Orders if Sessions missing
+        metric = sessions or orders 
         if source and metric and pd.api.types.is_numeric_dtype(df[metric]):
             p = output_dir / "traffic_source.png"
             
@@ -232,7 +256,7 @@ class EcommerceDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -276,8 +300,13 @@ class EcommerceDomain(BaseDomain):
              insights.append({
                 "level": "INFO",
                 "title": "Order Value Healthy",
-                "so_what": f"Average Order Value (AOV) is holding at {int(aov)}."
+                "so_what": f"Average Order Value (AOV) is holding at {aov:,.0f}."
             })
+
+        # === CALL COMPOSITE LAYER (v3.0) ===
+        # Guard against small datasets
+        if len(df) > 30:
+            insights += self.generate_composite_insights(df, kpis)
 
         if not insights:
             insights.append({
@@ -288,6 +317,60 @@ class EcommerceDomain(BaseDomain):
 
         return insights
 
+    # ---------------- COMPOSITE INSIGHTS (E-COM v3.0) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        E-Commerce v3 Composite Intelligence Layer.
+        Detects Bot Traffic, Checkout Leaks, and Traffic Quality issues.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        sessions = kpis.get("total_sessions", 0)
+        cr = kpis.get("conversion_rate")
+        checkout_drop = kpis.get("checkout_dropoff_rate")
+        abandonment = kpis.get("cart_abandonment_rate")
+
+        # 1. High Traffic, Zero/Low Conversion (Bot Traffic or Bad Landing Page)
+        if sessions > 1000 and cr is not None:
+            if cr < 0.005: # < 0.5%
+                insights.append({
+                    "level": "RISK",
+                    "title": "Empty Calorie Traffic (Possible Bots)",
+                    "so_what": (
+                        f"High traffic ({sessions:,.0f}) but near-zero conversion ({cr:.2%}). "
+                        f"Investigate bot traffic or landing page relevance immediately."
+                    )
+                })
+
+        # 2. Checkout Funnel Leak (High ATC, but High Dropoff at Checkout)
+        if abandonment is not None and checkout_drop is not None:
+            if abandonment < 0.60 and checkout_drop > 0.70:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Payment Gateway Friction",
+                    "so_what": (
+                        f"Users are adding to cart (low abandonment), but 70%+ drop off "
+                        f"during checkout. Payment gateway or shipping cost surprise likely."
+                    )
+                })
+
+        # 3. High Intent, Low Closure
+        if abandonment is not None and cr is not None:
+            if abandonment > 0.85 and cr < 0.01:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Window Shopper Behavior",
+                    "so_what": (
+                        f"Extreme cart abandonment ({abandonment:.1%}) suggests pricing "
+                        f"or shipping costs are deterring high-intent visitors."
+                    )
+                })
+
+        return insights
+
     # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -295,6 +378,7 @@ class EcommerceDomain(BaseDomain):
         
         cr = kpis.get("conversion_rate")
         abandonment = kpis.get("cart_abandonment_rate")
+        checkout_drop = kpis.get("checkout_dropoff_rate")
 
         if abandonment is not None and abandonment > 0.75:
             recs.append({
@@ -303,11 +387,18 @@ class EcommerceDomain(BaseDomain):
                 "timeline": "Immediate"
             })
         
+        if checkout_drop is not None and checkout_drop > 0.60:
+            recs.append({
+                "action": "Audit checkout flow for technical errors or hidden costs",
+                "priority": "HIGH",
+                "timeline": "This Week"
+            })
+        
         if cr is not None and cr < 0.02:
             recs.append({
-                "action": "Audit landing pages and checkout flow for friction",
+                "action": "Audit landing pages for relevance and speed",
                 "priority": "MEDIUM",
-                "timeline": "This Week"
+                "timeline": "Next Sprint"
             })
 
         if not recs:
@@ -350,10 +441,11 @@ class EcommerceDomainDetector(BaseDomainDetector):
 
         # 🔑 E-COM DOMINANCE RULE
         # Distinguish from Retail: Retail focuses on "Store/Product", E-com focuses on "Session/Web"
+        # Distinguish from Marketing: Marketing focuses on "Ad Spend/Impressions", E-com focuses on "On-Site Behavior"
         ecom_exclusive = any(
             t in c 
             for c in cols 
-            for t in {"session", "pageview", "bounce", "traffic", "browser", "device"}
+            for t in {"session", "pageview", "bounce", "traffic", "browser", "device", "cart"}
         )
         
         if ecom_exclusive:
