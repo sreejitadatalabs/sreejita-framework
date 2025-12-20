@@ -95,7 +95,7 @@ def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 # =====================================================
-# HEALTHCARE DOMAIN (v3.0 - ENTERPRISE INTELLIGENCE)
+# HEALTHCARE DOMAIN (v3.0 - FULL AUTHORITY)
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -125,7 +125,7 @@ class HealthcareDomain(BaseDomain):
 
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
         readm = resolve_column(df, "readmitted")
-        bill = resolve_column(df, "billing_amount")
+        bill = resolve_column(df, "billing_amount") or resolve_column(df, "cost")
         pid = resolve_column(df, "patient_id")
 
         # 1. Operational: Length of Stay
@@ -138,13 +138,13 @@ class HealthcareDomain(BaseDomain):
             kpis["readmission_rate"] = df[readm].mean()
             kpis["target_readmission_rate"] = 0.10 # Benchmark target
 
-        # 3. Financial: Billing
+        # 3. Financial: Billing/Cost
         if bill and pd.api.types.is_numeric_dtype(df[bill]):
             kpis["total_billing"] = df[bill].sum()
-            kpis["avg_billing"] = df[bill].mean()
+            # Map to standardized key for insights
+            kpis["avg_treatment_cost"] = df[bill].mean()
             
             if pid:
-                # Billing per patient (handling multiple visits)
                 kpis["avg_billing_per_patient"] = df.groupby(pid)[bill].sum().mean()
 
         # 4. Volume
@@ -211,48 +211,76 @@ class HealthcareDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
-        # 1. Categorical clinical risks (Text Scanning)
+        # 1. Text Scanning (Categorical Risks)
         insights.extend(_scan_categorical_risks(df))
 
-        readm_rate = kpis.get("readmission_rate")
-        avg_los = kpis.get("avg_length_of_stay")
+        # === STEP 1: Composite FIRST (Authority Layer) ===
+        composite_insights = []
+        if len(df) > 30:
+            composite_insights = self.generate_composite_insights(df, kpis)
 
-        # 2. Readmission Insight
-        if readm_rate is not None:
-            if readm_rate > 0.15:
+        dominant_titles = {
+            i["title"] for i in composite_insights
+            if i["level"] in {"RISK", "WARNING"}
+        }
+
+        # === STEP 2: Suppression Rules ===
+        # If "Operational Strain" is found, suppress atomic "High LOS" and "Readmission"
+        suppress_los = "Operational Strain Detected" in dominant_titles
+        suppress_readmission = "Operational Strain Detected" in dominant_titles
+        
+        # If "Financial Toxicity" is found, suppress atomic "High Cost"
+        suppress_cost = "Financial Toxicity Risk" in dominant_titles
+
+        # === STEP 3: Guarded Atomic Insights ===
+        los = kpis.get("avg_length_of_stay")
+        readm = kpis.get("readmission_rate")
+        cost = kpis.get("avg_treatment_cost")
+
+        if los is not None and not suppress_los:
+            if los > 7:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Extended Length of Stay",
+                    "so_what": f"Average LOS is {los:.1f} days, increasing bed occupancy pressure."
+                })
+
+        if readm is not None and not suppress_readmission:
+            if readm > 0.15:
                 insights.append({
                     "level": "RISK",
                     "title": "High Readmission Rate",
-                    "so_what": f"Rate is {readm_rate:.1%}, significantly above the 10% benchmark."
+                    "so_what": f"Readmission rate is {readm:.1%}, indicating post-discharge gaps."
                 })
-            elif readm_rate > 0.10:
+            elif readm > 0.10:
                 insights.append({
                     "level": "WARNING",
                     "title": "Elevated Readmissions",
-                    "so_what": f"Rate is {readm_rate:.1%}."
+                    "so_what": f"Rate is {readm:.1%}."
                 })
 
-        # 3. LOS Insight
-        if avg_los is not None and avg_los > 7.0:
-            insights.append({
-                "level": "INFO",
-                "title": "Extended Length of Stay",
-                "so_what": f"Average LOS is {avg_los:.1f} days, indicating complex caseloads."
-            })
+        if cost is not None and not suppress_cost:
+            # Simple threshold for demo; ideally benchmarked
+            if cost > 50000: 
+                insights.append({
+                    "level": "WARNING",
+                    "title": "High Treatment Cost",
+                    "so_what": f"Average treatment cost is elevated at {cost:,.0f}."
+                })
 
-        # === CALL COMPOSITE LAYER (v3.0) ===
-        insights += self.generate_composite_insights(df, kpis)
+        # === STEP 4: Composite Insights LAST (Authority Wins) ===
+        insights += composite_insights
 
         if not insights:
             insights.append({
                 "level": "INFO",
-                "title": "Clinical Operations Stable",
-                "so_what": "Key metrics (LOS, Readmission, Billing) are within normal ranges."
+                "title": "Healthcare Operations Stable",
+                "so_what": "Clinical, operational, and financial indicators are within acceptable limits."
             })
 
         return insights
@@ -268,49 +296,46 @@ class HealthcareDomain(BaseDomain):
         """
         insights: List[Dict[str, Any]] = []
 
-        readm_rate = kpis.get("readmission_rate")
-        avg_los = kpis.get("avg_length_of_stay")
-        avg_cost = kpis.get("avg_billing")
-        
-        # 1. Operational Strain: High LOS + High Readmission
-        if avg_los is not None and readm_rate is not None:
-            if avg_los > 7 and readm_rate > 0.15:
+        los = kpis.get("avg_length_of_stay")
+        readm = kpis.get("readmission_rate")
+        cost = kpis.get("avg_treatment_cost")
+
+        # 1. Operational Strain (High LOS + High Readmission)
+        if los is not None and readm is not None:
+            if los > 7 and readm > 0.15:
                 insights.append({
                     "level": "RISK",
-                    "title": "Operational Strain (High LOS + Readmissions)",
+                    "title": "Operational Strain Detected",
                     "so_what": (
-                        f"Patients are staying long ({avg_los:.1f} days) yet returning frequently "
-                        f"({readm_rate:.1%}). Review discharge planning protocols."
+                        f"Extended LOS ({los:.1f} days) combined with high readmissions "
+                        f"({readm:.1%}) suggests discharge workflow and capacity strain."
                     )
                 })
 
-        # 2. "High Cost, Poor Outcome" (Financial Toxicity)
-        if avg_cost is not None and readm_rate is not None:
-            # Thresholds are illustrative; ideally derived from dataset
-            if avg_cost > 15000 and readm_rate > 0.15:
+        # 2. Financial Toxicity (High Cost + Poor Outcome)
+        if cost is not None and readm is not None:
+            if cost > 50000 and readm > 0.15:
                 insights.append({
                     "level": "WARNING",
-                    "title": "High Cost / High Readmission Cluster",
+                    "title": "Financial Toxicity Risk",
                     "so_what": (
-                        f"Average treatment cost is high ({int(avg_cost)}) but readmission "
-                        f"rates remain elevated ({readm_rate:.1%}). Efficiency audit recommended."
+                        f"High treatment costs ({cost:,.0f}) with poor outcomes "
+                        f"(readmissions {readm:.1%}) indicate inefficiencies."
                     )
                 })
-
-        # 3. Doctor Performance Deviation (Explicit Logic)
+                
+        # 3. Provider Variance (Doctor Specific)
         doc = resolve_column(df, "doctor")
-        readm = resolve_column(df, "readmitted")
+        readm_col = resolve_column(df, "readmitted")
         
-        if doc and readm and pd.api.types.is_numeric_dtype(df[readm]):
-            # Only run if we have enough doctors
+        if doc and readm_col and pd.api.types.is_numeric_dtype(df[readm_col]):
             if df[doc].nunique() > 2:
-                overall = df[readm].mean()
-                grp = df.groupby(doc)[readm].mean()
+                overall = df[readm_col].mean()
+                grp = df.groupby(doc)[readm_col].mean()
                 worst_doc = grp.idxmax()
                 worst_val = grp.max()
                 
-                # If worst doctor is > 20% worse than average
-                if worst_val > (overall * 1.20) and overall > 0:
+                if worst_val > (overall * 1.30) and overall > 0:
                      insights.append({
                         "level": "RISK",
                         "title": "Provider Performance Variance",
@@ -322,33 +347,60 @@ class HealthcareDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs: List[Dict[str, Any]] = []
-        
-        readm = kpis.get("readmission_rate")
-        los = kpis.get("avg_length_of_stay")
-        
-        if readm is not None and readm > 0.15:
-            recs.append({
-                "action": "Review discharge planning and post-acute care follow-ups",
+
+        # 1. Check Composite Context
+        composite = []
+        if len(df) > 30:
+            composite = self.generate_composite_insights(df, kpis)
+
+        titles = [i["title"] for i in composite]
+
+        # === AUTHORITY RULES (Mandatory Actions) ===
+        if "Operational Strain Detected" in titles:
+            return [{
+                "action": "Audit discharge planning, bed management, and care coordination workflows",
                 "priority": "HIGH",
-                "timeline": "Immediate",
+                "timeline": "Immediate"
+            }]
+
+        if "Financial Toxicity Risk" in titles:
+            return [{
+                "action": "Review treatment protocols and cost-efficiency for high-risk cases",
+                "priority": "HIGH",
+                "timeline": "This Month"
+            }]
+
+        if "Provider Performance Variance" in titles:
+             return [{
+                "action": "Initiate peer review and clinical standardization for outlier providers",
+                "priority": "HIGH",
+                "timeline": "This Quarter"
+            }]
+
+        # === FALLBACK (Atomic Recs) ===
+        if kpis.get("readmission_rate", 0) > 0.15:
+            recs.append({
+                "action": "Strengthen post-discharge follow-up programs",
+                "priority": "MEDIUM",
+                "timeline": "This Quarter"
             })
             
-        if los is not None and los > 8.0:
-             recs.append({
-                "action": "Audit patient flow to identify bottlenecks in care delivery",
+        if kpis.get("avg_length_of_stay", 0) > 8.0:
+            recs.append({
+                "action": "Investigate patient flow bottlenecks",
                 "priority": "MEDIUM",
-                "timeline": "Next Month",
+                "timeline": "Next Month"
             })
 
         if not recs:
             recs.append({
-                "action": "Continue routine clinical monitoring",
+                "action": "Continue monitoring healthcare performance indicators",
                 "priority": "LOW",
-                "timeline": "Ongoing",
+                "timeline": "Ongoing"
             })
 
         return recs
@@ -373,9 +425,7 @@ class HealthcareDomainDetector(BaseDomainDetector):
         confidence = min(len(hits) / 3, 1.0)
         
         # 🔑 HEALTHCARE DOMINANCE RULE
-        # Strong terms that almost guarantee healthcare data
         STRONG_SIGNALS = {"diagnosis", "clinical", "patient", "readmitted", "physician"}
-        
         if any(t in c for c in cols for t in STRONG_SIGNALS):
             confidence = max(confidence, 0.9)
 
