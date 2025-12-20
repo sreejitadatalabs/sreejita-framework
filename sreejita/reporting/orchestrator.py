@@ -40,29 +40,36 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     # -------------------------------------------------
     # 2. DOMAIN ROUTING
     # -------------------------------------------------
-    decision = decide_domain(df)
-    domain = decision.selected_domain
-    engine = decision.engine
+    # -------------------------------------------------
+# 2. DOMAIN ROUTING
+# -------------------------------------------------
+decision = decide_domain(df)
 
-    # Fallback for unknown data
-    if engine is None:
-        log.warning(f"No matching domain found for {input_path.name}")
-        return {
-            "unknown": {
-                "kpis": {"rows": len(df), "cols": len(df.columns)},
-                "insights": [{
-                    "level": "RISK",
-                    "title": "Unrecognized Data Structure",
-                    "so_what": "The system could not map this dataset to a known business domain."
-                }],
-                "recommendations": [{
-                    "action": "Check data schema against supported domain templates",
-                    "priority": "HIGH",
-                    "timeline": "Immediate"
-                }],
-                "visuals": []
-            }
+domain = decision.selected_domain
+domain_cls = decision.domain_cls
+
+# Fallback for unknown data
+if domain_cls is None:
+    log.warning(f"No matching domain found for {input_path.name}")
+    return {
+        "unknown": {
+            "kpis": {"rows": len(df), "cols": len(df.columns)},
+            "insights": [{
+                "level": "RISK",
+                "title": "Unrecognized Data Structure",
+                "so_what": "The system could not map this dataset to a known business domain."
+            }],
+            "recommendations": [{
+                "action": "Check data schema against supported domain templates",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }],
+            "visuals": []
         }
+    }
+
+# ✅ v3-compliant engine instantiation
+engine = domain_cls()
 
     # -------------------------------------------------
     # 3. DOMAIN LIFECYCLE EXECUTION
