@@ -92,6 +92,7 @@ class HybridReport(BaseReport):
         if authoritative_insights:
             f.write("### 🧠 Strategic Intelligence\n")
             for ins in authoritative_insights:
+                # Robustness: Skip malformed insights
                 if "title" not in ins or "so_what" not in ins:
                     continue
 
@@ -109,6 +110,7 @@ class HybridReport(BaseReport):
 
             clean_kpis = {k: v for k, v in kpis.items() if not k.startswith("_")}
 
+            # Top 8 KPIs
             for k, v in list(clean_kpis.items())[:8]:
                 label = k.replace("_", " ").title().replace("Kpi", "KPI")
                 formatted_v = self._format_value(k, v)
@@ -120,7 +122,8 @@ class HybridReport(BaseReport):
         if visuals:
             f.write("### 👁️ Visual Evidence\n")
             for vis in visuals[:2]:
-                img_filename = Path(vis["path"]).name
+                path_obj = Path(vis["path"])
+                img_filename = path_obj.name
                 caption = vis.get("caption", "Data Visualization")
                 f.write(f"![{caption}]({img_filename})\n")
                 f.write(f"> *{caption}*\n\n")
@@ -168,7 +171,11 @@ class HybridReport(BaseReport):
         return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
     def _level_icon(self, level: str) -> str:
-        return {"RISK": "🔴", "WARNING": "🟠", "INFO": "🔵"}.get(level, "ℹ️")
+        return {
+            "RISK": "🔴",
+            "WARNING": "🟠",
+            "INFO": "🔵"
+        }.get(level, "ℹ️")
 
     def _format_value(self, key: str, v: Any) -> str:
         if isinstance(v, float):
