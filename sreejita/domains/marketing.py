@@ -1,3 +1,4 @@
+
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
@@ -33,7 +34,8 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
     for key in candidates:
         for low, real in cols.items():
-            if key == low and not df[real].isna().all():
+            # FIX 1: Substring match instead of strict equality
+            if key in low and not df[real].isna().all():
                 try:
                     pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
                     return real
@@ -42,8 +44,20 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    """Ensures time column is datetime type and sorted."""
+    df_out = df.copy()
+    try:
+        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
+        df_out = df_out.dropna(subset=[time_col])
+        df_out = df_out.sort_values(time_col)
+    except Exception:
+        pass
+    return df_out
+
+
 # =====================================================
-# MARKETING DOMAIN
+# MARKETING DOMAIN (v3.1 - POLISHED INTELLIGENCE)
 # =====================================================
 
 class MarketingDomain(BaseDomain):
@@ -73,10 +87,7 @@ class MarketingDomain(BaseDomain):
         self.has_time_series = False
 
         if self.time_col:
-            df = df.copy()
-            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
-            df = df.dropna(subset=[self.time_col])
-            df = df.sort_values(self.time_col)
+            df = _prepare_time_series(df, self.time_col)
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -111,6 +122,9 @@ class MarketingDomain(BaseDomain):
 
         if clicks and pd.api.types.is_numeric_dtype(df[clicks]):
             kpis["total_clicks"] = df[clicks].sum()
+        
+        if impressions and pd.api.types.is_numeric_dtype(df[impressions]):
+            kpis["total_impressions"] = df[impressions].sum()
 
         if campaign:
             kpis["active_campaigns"] = df[campaign].nunique()
@@ -126,9 +140,8 @@ class MarketingDomain(BaseDomain):
             kpis["cpa"] = _safe_div(kpis["total_spend"], kpis["total_conversions"])
 
         # CTR (Click Through Rate)
-        if "total_clicks" in kpis and impressions and pd.api.types.is_numeric_dtype(df[impressions]):
-            total_imps = df[impressions].sum()
-            kpis["ctr"] = _safe_div(kpis["total_clicks"], total_imps)
+        if "total_clicks" in kpis and "total_impressions" in kpis:
+            kpis["ctr"] = _safe_div(kpis["total_clicks"], kpis["total_impressions"])
             kpis["target_ctr"] = 0.01 # 1% benchmark
 
         # CPC (Cost Per Click)
@@ -158,12 +171,12 @@ class MarketingDomain(BaseDomain):
         revenue = resolve_column(df, "revenue") or resolve_column(df, "conversion_value")
         clicks = resolve_column(df, "clicks")
         conversions = resolve_column(df, "conversions") or resolve_column(df, "leads")
+        impressions = resolve_column(df, "impressions")
         
         channel = resolve_column(df, "source") or resolve_column(df, "medium") or resolve_column(df, "platform")
         campaign = resolve_column(df, "campaign") or resolve_column(df, "campaign_name")
 
         # -------- Visual 1: ROAS / Efficiency Trend --------
-        # If we have time, spend, and revenue -> Plot ROAS over time
         if (
             self.has_time_series 
             and spend and revenue 
@@ -184,7 +197,6 @@ class MarketingDomain(BaseDomain):
                 )
             
             # Calculate ROAS for the plot
-            # Avoid division by zero with numpy or simple check
             s_series = plot_df[spend].replace(0, 1) # Safety
             plot_df["_roas"] = plot_df[revenue] / s_series
 
@@ -207,7 +219,6 @@ class MarketingDomain(BaseDomain):
             grp = df.groupby(channel)[[spend, revenue]].sum().sort_values(by=spend, ascending=False).head(7)
             
             plt.figure(figsize=(7, 4))
-            # Stacked bar or side-by-side? Side-by-side is clearer for comparison
             grp.plot(kind="bar", color=["#d62728", "#2ca02c"]) # Red Spend, Green Revenue
             plt.title("Spend vs Revenue by Channel")
             plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
@@ -222,8 +233,6 @@ class MarketingDomain(BaseDomain):
             })
 
         # -------- Visual 3: The Marketing Funnel --------
-        # Simple bar chart of Impressions -> Clicks -> Conversions
-        impressions = resolve_column(df, "impressions")
         if impressions and clicks and conversions:
             if all(pd.api.types.is_numeric_dtype(df[c]) for c in [impressions, clicks, conversions]):
                 p = output_dir / "marketing_funnel.png"
@@ -237,7 +246,6 @@ class MarketingDomain(BaseDomain):
                 plt.title("Marketing Funnel Volume")
                 plt.gca().xaxis.set_major_formatter(FuncFormatter(human_fmt))
                 
-                # Add text annotations because scale diff is huge
                 for i, v in enumerate(vals):
                     plt.text(v, i, " " + human_fmt(v, None), va='center')
 
@@ -251,7 +259,6 @@ class MarketingDomain(BaseDomain):
                 })
 
         # -------- Visual 4: Campaign Scatter (Spend vs CPA) --------
-        # To find expensive campaigns with high costs per lead
         if (
             campaign and spend and conversions 
             and pd.api.types.is_numeric_dtype(df[spend]) 
@@ -259,15 +266,11 @@ class MarketingDomain(BaseDomain):
         ):
             p = output_dir / "campaign_scatter.png"
             
-            # Group first
             c_data = df.groupby(campaign)[[spend, conversions]].sum()
-            c_data = c_data[c_data[spend] > 0] # Filter zero spend
+            c_data = c_data[c_data[spend] > 0]
             
-            # Calculate CPA
             c_data["cpa"] = c_data[spend] / c_data[conversions].replace(0, 1)
-            
-            # Filter outliers for clean chart
-            c_data = c_data.head(20) # Top 20 campaigns
+            c_data = c_data.head(20) # Top 20
 
             plt.figure(figsize=(7, 4))
             plt.scatter(c_data[spend], c_data["cpa"], alpha=0.6, color="#9467bd")
@@ -286,7 +289,7 @@ class MarketingDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -294,6 +297,7 @@ class MarketingDomain(BaseDomain):
         roas = kpis.get("roas")
         ctr = kpis.get("ctr")
         cpa = kpis.get("cpa")
+        target_ctr = kpis.get("target_ctr", 0.01)
 
         # 1. ROAS Insight
         if roas is not None:
@@ -316,9 +320,9 @@ class MarketingDomain(BaseDomain):
                     "so_what": f"ROAS is strong at {roas:.2f}x."
                 })
 
-        # 2. CTR Insight (Creative Quality)
+        # 2. CTR Insight (FIX 3: Dynamic Threshold)
         if ctr is not None:
-            if ctr < 0.005: # < 0.5%
+            if ctr < target_ctr * 0.5: 
                 insights.append({
                     "level": "WARNING",
                     "title": "Low Click-Through Rate",
@@ -333,12 +337,72 @@ class MarketingDomain(BaseDomain):
                 "so_what": f"You are paying approx {cpa:.2f} to acquire a conversion."
             })
 
+        # === CALL COMPOSITE LAYER (v3.1) ===
+        # FIX 2: Guard against small datasets
+        if len(df) > 30:
+            insights += self.generate_composite_insights(df, kpis)
+
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Marketing Metrics Stable",
                 "so_what": "Spend and conversion metrics are tracking within normal ranges."
             })
+
+        return insights
+
+    # ---------------- COMPOSITE INSIGHTS (MARKETING v3.1) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Marketing v3 Composite Intelligence Layer.
+        Detects Fatigue, Inefficiency, and Scaling Issues.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        spend = kpis.get("total_spend", 0)
+        ctr = kpis.get("ctr")
+        roas = kpis.get("roas")
+        cpa = kpis.get("cpa")
+        imps = kpis.get("total_impressions", 0)
+
+        # 1. Creative Fatigue: High Spend + High Impressions + Low CTR
+        if spend > 1000 and imps > 50000 and ctr is not None:
+            if ctr < 0.008: # < 0.8%
+                insights.append({
+                    "level": "RISK",
+                    "title": "Creative Fatigue Detected",
+                    "so_what": (
+                        f"High impressions ({imps:,.0f}) but very low CTR ({ctr:.2%}). "
+                        f"Your audience is tired of current ads. Refresh creatives immediately."
+                    )
+                })
+
+        # 2. Inefficient Scaling: High Spend + Low ROAS
+        if spend > 5000 and roas is not None:
+            if roas < 2.5:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Inefficient Scaling",
+                    "so_what": (
+                        f"You are spending heavily ({spend:,.0f}) but returns are diminishing "
+                        f"(ROAS {roas:.2f}x). Tighten targeting or reduce budget."
+                    )
+                })
+
+        # 3. High Quality Traffic (Good CTR + Good ROAS)
+        if ctr is not None and roas is not None:
+            if ctr > 0.02 and roas > 4.5:
+                insights.append({
+                    "level": "INFO",
+                    "title": "High-Quality Traffic Source",
+                    "so_what": (
+                        f"Ads are engaging (CTR {ctr:.1%}) and converting well "
+                        f"(ROAS {roas:.2f}x). Recommendation: Scale this segment."
+                    )
+                })
 
         return insights
 
@@ -401,9 +465,6 @@ class MarketingDomainDetector(BaseDomainDetector):
         confidence = min(len(hits) / 3, 1.0)
 
         # 🔑 MARKETING DOMINANCE RULE
-        # Distinguish from E-Com/Retail:
-        # Marketing focuses on "Campaigns" and "Ad Costs" (Upstream)
-        # Retail focuses on "Products" and "Transactions" (Downstream)
         mkt_exclusive = any(
             t in c 
             for c in cols 
@@ -430,3 +491,4 @@ def register(registry):
         domain_cls=MarketingDomain,
         detector_cls=MarketingDomainDetector,
     )
+``` [attachment_0](attachment)
