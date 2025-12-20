@@ -4,25 +4,25 @@ from datetime import datetime
 
 from sreejita.reporting.base import BaseReport
 
+
 # =====================================================
-# HYBRID REPORT (v3.2 – ROBUST DECISION ENGINE)
+# HYBRID REPORT — v3.2 (FINAL, STABLE)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
-    Hybrid v3.2 Report Engine
+    Hybrid Executive Report Engine (v3.2)
 
     Responsibilities:
     - Convert domain intelligence into executive narrative
-    - Present insights BEFORE metrics (decision-first)
-    - Keep visuals and actions tightly scoped
-    - Never load data or infer domains (handled by Orchestrator)
+    - Decision-first structure (Insights → KPIs → Visuals → Actions)
+    - Zero data loading, zero domain routing
     """
 
     name = "hybrid"
 
     # -------------------------------------------------
-    # ENTRY POINT (FRAMEWORK CONTRACT)
+    # FRAMEWORK CONTRACT
     # -------------------------------------------------
 
     def build(
@@ -31,25 +31,18 @@ class HybridReport(BaseReport):
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Path:
-        """
-        Build the Hybrid executive report.
-        """
 
-        # Safety guard
         if not isinstance(output_dir, Path):
-            raise TypeError("output_dir must be a pathlib.Path")
+            raise TypeError("output_dir must be pathlib.Path")
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"Sreejita_Executive_Report_{datetime.now():%Y-%m-%d}.md"
-        report_path = output_dir / filename
+        report_path = output_dir / f"Sreejita_Executive_Report_{datetime.now():%Y-%m-%d}.md"
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, metadata)
 
-            ordered_domains = self._sort_domains(domain_results.keys())
-
-            for domain in ordered_domains:
+            for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
                     f,
                     domain,
@@ -75,16 +68,10 @@ class HybridReport(BaseReport):
 
         f.write(
             "> ⚠️ **Executive Summary**: This report uses **v3 Composite Intelligence** "
-            "to prioritize root-cause risks over raw metrics. "
-            "Actions listed below are authoritative mandates.\n\n"
+            "to prioritize root-cause risks over raw metrics.\n\n"
         )
 
-    def _write_domain_section(
-        self,
-        f,
-        domain: str,
-        result: Dict[str, Any]
-    ):
+    def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
         f.write("\n---\n\n")
         f.write(f"## 🔹 {domain.replace('_', ' ').title()}\n\n")
 
@@ -93,135 +80,76 @@ class HybridReport(BaseReport):
         recs = result.get("recommendations", [])
         visuals = result.get("visuals", [])
 
-        # 1️⃣ Strategic Intelligence (WHY)
-        authoritative_insights = self._prioritize_insights(insights)
-
-        if authoritative_insights:
+        # INSIGHTS
+        insights = self._prioritize_insights(insights)
+        if insights:
             f.write("### 🧠 Strategic Intelligence\n")
-            for ins in authoritative_insights:
-                if "title" not in ins or "so_what" not in ins:
-                    continue
-                icon = self._level_icon(ins.get("level"))
-                f.write(f"#### {icon} {ins['title']}\n")
-                f.write(f"{ins['so_what']}\n\n")
+            for i in insights:
+                if "title" in i and "so_what" in i:
+                    f.write(f"#### {self._level_icon(i.get('level'))} {i['title']}\n")
+                    f.write(f"{i['so_what']}\n\n")
         else:
-            f.write("✅ _Operations within normal parameters._\n\n")
+            f.write("✅ _No critical risks detected._\n\n")
 
-        # 2️⃣ KPIs (WHAT)
+        # KPIs
         if kpis:
             f.write("### 📉 Key Performance Indicators\n")
-            f.write("| Metric | Value |\n")
-            f.write("| :--- | :--- |\n")
-
-            clean_kpis = {
-                k: v for k, v in kpis.items()
-                if not k.startswith("_")
-            }
-
-            for k, v in list(clean_kpis.items())[:8]:
-                label = k.replace("_", " ").title().replace("Kpi", "KPI")
-                value = self._format_value(k, v)
-                f.write(f"| {label} | **{value}** |\n")
-
+            f.write("| Metric | Value |\n|---|---|\n")
+            for k, v in list(kpis.items())[:8]:
+                f.write(f"| {k.replace('_',' ').title()} | **{self._format_value(k, v)}** |\n")
             f.write("\n")
 
-        # 3️⃣ Visual Evidence (PROOF)
+        # VISUALS
         if visuals:
             f.write("### 👁️ Visual Evidence\n")
-            for vis in visuals[:2]:
-                img_name = Path(vis.get("path")).name
-                caption = vis.get("caption", "Data Visualization")
-                f.write(f"![{caption}]({img_name})\n")
-                f.write(f"> *{caption}*\n\n")
+            for v in visuals[:2]:
+                img = Path(v.get("path")).name
+                caption = v.get("caption", "Visualization")
+                f.write(f"![{caption}]({img})\n> *{caption}*\n\n")
 
-        # 4️⃣ Required Actions (HOW)
+        # ACTIONS
         if recs:
             f.write("### 🚀 Required Actions\n")
-
-            priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-            sorted_recs = sorted(
-                recs,
-                key=lambda r: priority_order.get(r.get("priority", "LOW"), 3)
-            )
-
-            primary = sorted_recs[0]
-            f.write(f"**PRIMARY MANDATE:** {primary['action']}\n")
-            f.write(f"- 🚨 **Priority:** {primary.get('priority', 'HIGH')}\n")
-            f.write(f"- ⏱️ **Timeline:** {primary.get('timeline', 'Immediate')}\n\n")
-
-            if len(sorted_recs) > 1:
-                f.write("**Supporting Actions:**\n")
-                for r in sorted_recs[1:3]:
-                    f.write(f"- {r['action']} ({r.get('timeline', 'Ongoing')})\n")
-                f.write("\n")
+            primary = recs[0]
+            f.write(f"**PRIMARY MANDATE:** {primary.get('action')}\n\n")
 
     def _write_footer(self, f):
         f.write("\n---\n")
-        f.write("_Powered by Sreejita Framework v3.2 | Enterprise Decision Engine_")
+        f.write("_Powered by Sreejita Framework v3.2_")
 
     # -------------------------------------------------
-    # INTELLIGENCE LOGIC
+    # HELPERS
     # -------------------------------------------------
 
-    def _prioritize_insights(self, insights: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not insights:
-            return []
-
-        def rank(i):
-            return {"RISK": 0, "WARNING": 1, "INFO": 2}.get(i.get("level"), 3)
-
-        return sorted(insights, key=rank)[:5]
+    def _prioritize_insights(self, insights: List[Dict[str, Any]]):
+        order = {"RISK": 0, "WARNING": 1, "INFO": 2}
+        return sorted(insights, key=lambda i: order.get(i.get("level"), 99))[:5]
 
     def _sort_domains(self, domains):
         priority = [
-            "finance",
-            "retail",
-            "ecommerce",
-            "supply_chain",
-            "marketing",
-            "hr",
-            "customer",
-            "healthcare"
+            "finance", "retail", "ecommerce", "supply_chain",
+            "marketing", "hr", "customer", "healthcare"
         ]
+        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
-        def sorter(d):
-            return priority.index(d) if d in priority else 99
+    def _level_icon(self, level: str):
+        return {"RISK": "🔴", "WARNING": "🟠", "INFO": "🔵"}.get(level, "ℹ️")
 
-        return sorted(domains, key=sorter)
-
-    def _level_icon(self, level: str) -> str:
-        return {
-            "RISK": "🔴",
-            "WARNING": "🟠",
-            "INFO": "🔵"
-        }.get(level, "ℹ️")
-
-    def _format_value(self, key: str, v: Any) -> str:
+    def _format_value(self, key: str, v: Any):
         if isinstance(v, float):
-            key_l = key.lower()
-            if any(x in key_l for x in [
-                "rate", "ratio", "margin", "percent",
-                "pct", "share", "bounce", "conversion"
-            ]) and abs(v) <= 2.0:
+            if any(x in key.lower() for x in ["rate", "ratio", "margin", "percent"]) and abs(v) <= 2:
                 return f"{v:.1%}"
             return f"{v:,.2f}"
-
         if isinstance(v, int):
             return f"{v:,}"
-
         return str(v)
 
 
 # =====================================================
-# BACKWARD-COMPATIBLE ENTRY POINT (CLI / UI / BATCH)
+# SINGLE ENTRY POINT (CLI / UI / BATCH)
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Path:
-    """
-    v3-compatible entry point.
-    This is the ONLY place Hybrid touches input_path.
-    """
-
     from sreejita.reporting.orchestrator import generate_report_payload
 
     domain_results = generate_report_payload(
@@ -233,8 +161,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Path:
     run_dir = output_root / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    engine = HybridReport()
-    return engine.build(
+    return HybridReport().build(
         domain_results=domain_results,
         output_dir=run_dir,
         metadata=config.get("metadata")
