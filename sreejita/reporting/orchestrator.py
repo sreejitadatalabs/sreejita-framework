@@ -1,20 +1,22 @@
-from pathlib import Path
-from datetime import datetime
+import logging
 import pandas as pd
+from pathlib import Path
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 
+# Initialize Logger
+log = logging.getLogger("sreejita.orchestrator")
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
-    v3.1 ORCHESTRATOR — INTEGRATED LIFECYCLE
+    v3.2 ORCHESTRATOR — INTEGRATED LIFECYCLE
     
     Responsibilities:
     - Load & validate data
     - Route to correct domain engine
     - Execute analysis lifecycle (KPIs -> Insights -> Visuals)
-    - Ensure visuals land in the correct run-specific folder
+    - Scopes visuals to the specific input file to prevent collisions
     """
 
     # -------------------------------------------------
@@ -32,6 +34,7 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         else:
             raise ValueError(f"Unsupported file type: {input_path.suffix}")
     except Exception as e:
+        log.error(f"Data ingestion failed: {e}")
         raise ValueError(f"Data ingestion failed: {str(e)}")
 
     # -------------------------------------------------
@@ -43,6 +46,7 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
 
     # Fallback for unknown data
     if engine is None:
+        log.warning(f"No matching domain found for {input_path.name}")
         return {
             "unknown": {
                 "kpis": {"rows": len(df), "cols": len(df.columns)},
@@ -76,15 +80,12 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     raw_recs = engine.generate_recommendations(df, kpis) if hasattr(engine, "generate_recommendations") else []
     recommendations = enrich_recommendations(raw_recs)
 
-    # D. Visuals (Path Management Fix)
-    # Visuals must be saved where the report will live to ensure relative links work.
-    # We use the config's output directory if provided, else a temp default.
+    # D. Visuals (Run-Scoped)
+    # Strategy: Use input filename stem to isolate visuals for this specific run.
     output_root = Path(config.get("output_dir", "reports"))
+    run_id = input_path.stem  # e.g., "sales_data_q3" from "sales_data_q3.csv"
     
-    # If orchestrator is called by CLI, this dir might be generic.
-    # The CLI creates the timestamped folder, but the Orchestrator doesn't know it yet.
-    # STRATEGY: Save visuals to `output_dir/visuals` and let the Report Engine link them.
-    visuals_dir = output_root / "visuals"
+    visuals_dir = output_root / run_id / "visuals"
     visuals_dir.mkdir(parents=True, exist_ok=True)
 
     visuals = []
@@ -92,7 +93,7 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         try:
             visuals = engine.generate_visuals(df, visuals_dir)
         except Exception as e:
-            print(f"⚠️ Visual generation warning: {e}")
+            log.warning(f"Visual generation failed for {domain}: {e}")
 
     # -------------------------------------------------
     # 4. RETURN STANDARDIZED PAYLOAD
