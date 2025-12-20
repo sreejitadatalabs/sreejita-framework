@@ -11,6 +11,9 @@ from sreejita.utils.logger import get_logger
 from sreejita.automation.retry import retry
 from sreejita.domains.router import decide_domain
 
+# 🔹 NEW: PDF Renderer
+from sreejita.reporting.pdf_renderer import PandocPDFRenderer
+
 log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
@@ -19,7 +22,7 @@ SUPPORTED_EXT = (".csv", ".xlsx")
 def _load_dataframe(file_path: Path) -> pd.DataFrame:
     if file_path.suffix.lower() == ".csv":
         return pd.read_csv(file_path)
-    if file_path.suffix.lower() == ".xlsx":
+    if file_path.suffix.lower() in (".xls", ".xlsx"):
         return pd.read_excel(file_path)
     raise ValueError(f"Unsupported file type: {file_path.suffix}")
 
@@ -43,28 +46,39 @@ def run_single_file(file_path: Path, config: dict, run_dir: Path):
     # 1️⃣ Load data
     df = _load_dataframe(dst)
 
-    # 2️⃣ Decide domain + run domain engine
-    domain_result = decide_domain(df)
+    # 2️⃣ Domain decision
+    decision = decide_domain(df)
 
     domain_results = {
-        domain_result.domain: {
-            "kpis": domain_result.kpis,
-            "insights": domain_result.insights,
-            "recommendations": domain_result.recommendations,
-            "visuals": domain_result.visuals,
+        decision.selected_domain: {
+            "kpis": decision.kpis,
+            "insights": decision.insights,
+            "recommendations": decision.recommendations,
+            "visuals": decision.visuals,
         }
     }
 
-    # 3️⃣ Run Hybrid Report (CORRECT)
-    run_hybrid(
+    # 3️⃣ Generate Markdown report
+    md_path = run_hybrid(
         domain_results=domain_results,
         output_dir=output_dir,
         metadata={
             "source_file": src.name,
-            "domain": domain_result.domain,
-            "confidence": f"{domain_result.confidence:.2f}",
+            "domain": decision.selected_domain,
+            "confidence": f"{decision.confidence:.2f}",
         },
     )
+
+    log.info("Markdown report generated: %s", md_path)
+
+    # 4️⃣ OPTIONAL: Generate PDF
+    if config.get("export_pdf", True):
+        try:
+            renderer = PandocPDFRenderer()
+            pdf_path = renderer.render(md_path)
+            log.info("PDF report generated: %s", pdf_path)
+        except Exception as e:
+            log.warning("PDF generation failed: %s", e)
 
     log.info("Completed file: %s", src.name)
 
