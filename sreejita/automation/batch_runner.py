@@ -3,32 +3,28 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-import pandas as pd
-
 from sreejita.reports.hybrid import run as run_hybrid
 from sreejita.config.loader import load_config
 from sreejita.utils.logger import get_logger
 from sreejita.automation.retry import retry
-from sreejita.domains.router import decide_domain
-
-# 🔹 NEW: PDF Renderer
-from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
 log = get_logger("batch-runner")
 
 SUPPORTED_EXT = (".csv", ".xlsx")
 
 
-def _load_dataframe(file_path: Path) -> pd.DataFrame:
-    if file_path.suffix.lower() == ".csv":
-        return pd.read_csv(file_path)
-    if file_path.suffix.lower() in (".xls", ".xlsx"):
-        return pd.read_excel(file_path)
-    raise ValueError(f"Unsupported file type: {file_path.suffix}")
-
-
 @retry(times=3, delay=5)
-def run_single_file(file_path: Path, config: dict, run_dir: Path):
+def run_single_file(
+    file_path: Path,
+    config: dict,
+    run_dir: Path,
+):
+    """
+    Process a single file in batch mode.
+    Generates Markdown report.
+    PDF generation is OPTIONAL and SAFE.
+    """
+
     input_dir = run_dir / "input"
     output_dir = run_dir / "output"
     failed_dir = run_dir / "failed"
@@ -43,47 +39,34 @@ def run_single_file(file_path: Path, config: dict, run_dir: Path):
 
     log.info("Processing file: %s", src.name)
 
-    # 1️⃣ Load data
-    df = _load_dataframe(dst)
-
-    # 2️⃣ Domain decision
-    decision = decide_domain(df)
-
-    domain_results = {
-        decision.selected_domain: {
-            "kpis": decision.kpis,
-            "insights": decision.insights,
-            "recommendations": decision.recommendations,
-            "visuals": decision.visuals,
-        }
-    }
-
-    # 3️⃣ Generate Markdown report
-    md_path = run_hybrid(
-        domain_results=domain_results,
-        output_dir=output_dir,
-        metadata={
-            "source_file": src.name,
-            "domain": decision.selected_domain,
-            "confidence": f"{decision.confidence:.2f}",
-        },
-    )
+    # 1️⃣ Generate Markdown via Hybrid (v3.3)
+    md_path = run_hybrid(str(dst), config)
 
     log.info("Markdown report generated: %s", md_path)
 
-    # 4️⃣ OPTIONAL: Generate PDF
-    if config.get("export_pdf", True):
+    # 2️⃣ OPTIONAL: Generate PDF (ONLY if Pandoc exists)
+    if config.get("export_pdf", False):
         try:
+            from sreejita.reporting.pdf_renderer import PandocPDFRenderer
+
             renderer = PandocPDFRenderer()
             pdf_path = renderer.render(md_path)
             log.info("PDF report generated: %s", pdf_path)
+
         except Exception as e:
-            log.warning("PDF generation failed: %s", e)
+            log.warning("PDF generation skipped: %s", e)
 
     log.info("Completed file: %s", src.name)
 
 
-def run_batch(input_folder: str, config_path: Optional[str], output_root="runs"):
+def run_batch(
+    input_folder: str,
+    config_path: Optional[str],
+    output_root: str = "runs",
+):
+    """
+    Batch processing entry point.
+    """
     config = load_config(config_path)
 
     timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
