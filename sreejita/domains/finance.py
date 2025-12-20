@@ -268,18 +268,46 @@ class FinanceDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS (v3.0 AUTHORITY) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
-        
+
+        # === STEP 1: Generate Composite Insights FIRST (v3 authority) ===
+        composite_insights: List[Dict[str, Any]] = []
+        if len(df) > 30:
+            composite_insights = self.generate_composite_insights(df, kpis)
+
+        dominant_titles = {
+            i["title"] for i in composite_insights
+            if i["level"] in {"RISK", "WARNING"}
+        }
+
+        # Suppression rules
+        suppress_volatility = any(
+            t in dominant_titles
+            for t in {
+                "Event-Driven Downside Risk",
+                "Potential Liquidity-Driven Sell-Off"
+            }
+        )
+
+        suppress_drawdown = any(
+            t in dominant_titles
+            for t in {
+                "Event-Driven Downside Risk",
+                "Stable Uptrend with Controlled Risk"
+            }
+        )
+
+        # === STEP 2: Atomic Insights (Guarded) ===
         ret = kpis.get("total_return")
         vol = kpis.get("volatility")
         drawdown = kpis.get("max_drawdown")
         margin = kpis.get("profit_margin")
         var_pct = kpis.get("budget_variance_pct")
-        
-        # 1. Market Insights
+
+        # Market Trend
         if ret is not None:
             sentiment = "Positive" if ret > 0 else "Negative"
             insights.append({
@@ -287,60 +315,61 @@ class FinanceDomain(BaseDomain):
                 "title": f"Market Trend: {sentiment}",
                 "so_what": f"Total return over the period is {ret:.2%}."
             })
-            
-        if vol is not None and 0.02 < vol < 0.20:
-            insights.append({
-                "level": "RISK",
-                "title": "High Volatility",
-                "so_what": f"Daily fluctuation is {vol:.2%}. Asset is risky."
-            })
-            
-        if drawdown is not None:
+
+        # Volatility (suppressed if composite explains risk)
+        if vol is not None and not suppress_volatility:
+            if vol > 0.20:
+                insights.append({
+                    "level": "RISK",
+                    "title": "High Volatility",
+                    "so_what": f"Daily volatility is {vol:.2%}, indicating unstable price behavior."
+                })
+
+        # Drawdown (suppressed if composite explains root cause)
+        if drawdown is not None and not suppress_drawdown:
             if drawdown < -0.30:
                 insights.append({
                     "level": "RISK",
                     "title": "Severe Drawdown Detected",
-                    "so_what": f"The asset experienced a maximum drawdown of {abs(drawdown):.1%}, indicating high downside risk."
+                    "so_what": f"Maximum drawdown reached {abs(drawdown):.1%}."
                 })
             elif drawdown < -0.15:
                 insights.append({
                     "level": "WARNING",
                     "title": "Moderate Drawdown Observed",
-                    "so_what": f"Maximum drawdown reached {abs(drawdown):.1%}. Risk management may be required."
+                    "so_what": f"Drawdown reached {abs(drawdown):.1%}."
                 })
 
-        # 2. Corporate Insights
+        # Corporate insights
         if margin is not None:
             if margin < 0:
                 insights.append({
                     "level": "RISK",
                     "title": "Negative Profit Margin",
-                    "so_what": f"Net margin is {margin:.1%}. Costs exceed revenue."
+                    "so_what": f"Margin is {margin:.1%}. Costs exceed revenue."
                 })
             elif margin > 0.15:
                 insights.append({
                     "level": "INFO",
                     "title": "Healthy Profitability",
-                    "so_what": f"Net margin is strong at {margin:.1%}."
+                    "so_what": f"Profit margin is strong at {margin:.1%}."
                 })
 
-        # 3. Budget Insights
-        if var_pct is not None:
-            if var_pct < -0.05:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Missed Budget Target",
-                    "so_what": f"Revenue is {abs(var_pct):.1%} below plan."
-                })
+        if var_pct is not None and var_pct < -0.05:
+            insights.append({
+                "level": "WARNING",
+                "title": "Missed Budget Target",
+                "so_what": f"Revenue is {abs(var_pct):.1%} below plan."
+            })
 
-        # Call Composite Logic
-        insights += self.generate_composite_insights(df, kpis)
+        # === STEP 3: Append Composite Insights LAST (Authority Wins) ===
+        insights += composite_insights
 
         if not insights:
             insights.append({
                 "level": "INFO",
-                "title": "Finance Metrics Detected",
-                "so_what": "Financial data is available for analysis."
+                "title": "Finance Metrics Stable",
+                "so_what": "Financial indicators are within expected ranges."
             })
 
         return insights
@@ -421,34 +450,62 @@ class FinanceDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (AUTHORITY RULE) ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        recs = []
-        
-        # Market Recs
-        if kpis.get("volatility", 0) > 0.02 or kpis.get("max_drawdown", 0) < -0.20:
-            recs.append({
-                "action": "Review risk exposure and stop-loss levels",
+        recs: List[Dict[str, Any]] = []
+
+        composite = []
+        if len(df) > 30:
+            composite = self.generate_composite_insights(df, kpis)
+
+        composite_titles = [i["title"] for i in composite]
+
+        # === AUTHORITY RULES (Composite → Action) ===
+
+        if any("Event-Driven Downside Risk" in t for t in composite_titles):
+            return [{
+                "action": "Review exposure to event-driven risks (earnings, macro news, policy shocks)",
                 "priority": "HIGH",
                 "timeline": "Immediate"
-            })
-            
-        # Corporate Recs
+            }]
+
+        if any("Potential Liquidity-Driven Sell-Off" in t for t in composite_titles):
+            return [{
+                "action": "Reduce position size and avoid market orders during low-liquidity periods",
+                "priority": "HIGH",
+                "timeline": "Immediate"
+            }]
+
+        if any("Stable Uptrend with Controlled Risk" in t for t in composite_titles):
+            return [{
+                "action": "Maintain or gradually increase exposure while monitoring risk limits",
+                "priority": "LOW",
+                "timeline": "Ongoing"
+            }]
+
+        if any("Profitable but Missing Growth Targets" in t for t in composite_titles):
+            return [{
+                "action": "Re-evaluate growth investments and revenue expansion strategy",
+                "priority": "MEDIUM",
+                "timeline": "Next Quarter"
+            }]
+
+        # === FALLBACK (Only if no composite authority) ===
         if kpis.get("profit_margin", 1) < 0:
             recs.append({
-                "action": "Audit top expense categories to reduce burn rate",
+                "action": "Audit top expense categories to reduce operational losses",
                 "priority": "HIGH",
                 "timeline": "Immediate"
             })
-            
+
         if not recs:
             recs.append({
                 "action": "Continue monitoring financial performance",
                 "priority": "LOW",
                 "timeline": "Ongoing"
             })
-            
+
         return recs
 
 
@@ -503,4 +560,4 @@ def register(registry):
         domain_cls=FinanceDomain,
         detector_cls=FinanceDomainDetector,
     )
-
+``` [Image of financial analysis dashboard]
