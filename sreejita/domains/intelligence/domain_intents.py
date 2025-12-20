@@ -5,7 +5,7 @@ DOMAIN_INTENTS = {
     # =====================================================
     # SUPPLY CHAIN 🚚 (Logistics, Inventory, Procurement)
     # =====================================================
-    "supply_chain": {  # Renamed from "ops" to match supply_chain.py
+    "supply_chain": {
         "high": {
             # Logistics
             "warehouse", "carrier", "shipping_mode", "freight",
@@ -49,11 +49,21 @@ DOMAIN_INTENTS = {
     # =====================================================
     "hr": {
         "high": {
+            # Identity
             "employee", "employee_id", "staff", "personnel",
+
+            # Org structure
             "department", "designation", "role", "manager",
+
+            # Compensation
             "salary", "compensation", "ctc", "payroll", "bonus",
+
+            # Lifecycle
             "attrition", "termination", "resignation", "hire_date",
-            "performance_score", "rating", "leave_balance"
+            "joining_date", "exit_date",
+
+            # Performance & attendance
+            "performance_score", "rating", "leave_balance", "timesheet"
         },
         "ambiguous": {
             "id", "date", "status", "gender", "age", "location", 
@@ -125,26 +135,27 @@ DOMAIN_INTENTS = {
     },
 
     # =====================================================
-    # FINANCE 💰
+    # FINANCE 💰 (Corporate + Market)
     # =====================================================
-    ""finance": {
-    "high": {
-        # corporate finance
-        "portfolio", "asset", "liability", "equity",
-        "dividend", "interest_rate", "ticker",
-        "transaction_type", "balance", "net_income", 
-        "cash_flow", "ebitda", "volatility", "beta",
+    "finance": {
+        "high": {
+            # Corporate Finance
+            "portfolio", "asset", "liability", "equity",
+            "dividend", "interest_rate", "ticker",
+            "transaction_type", "balance", "net_income", 
+            "cash_flow", "ebitda", "volatility", "beta",
 
-        # 🔥 MARKET DATA (MISSING)
-        "open", "close", "high", "low",
-        "adj_close", "adjusted_close",
-        "volume", "market_cap",
-        "price", "returns"
+            # Market Data (OHLCV)
+            "open", "close", "high", "low",
+            "adj_close", "adjusted_close",
+            "volume", "market_cap",
+            "returns"
+        },
+        "ambiguous": {
+            "date", "value", "amount", "price", "currency"
+        }
     },
-    "ambiguous": {
-        "date", "value", "amount"
-    }
-}
+
     # =====================================================
     # SALES (B2B) 💼
     # =====================================================
