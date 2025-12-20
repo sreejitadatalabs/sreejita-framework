@@ -461,5 +461,4 @@ def register(registry):
         domain_cls=SupplyChainDomain,
         detector_cls=SupplyChainDomainDetector,
     )
-``` [attachment_0](attachment)
 
