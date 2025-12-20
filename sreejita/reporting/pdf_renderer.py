@@ -6,16 +6,33 @@ from typing import Optional
 class PandocPDFRenderer:
     """
     Converts Markdown reports into PDF using Pandoc.
-    This is a pure rendering layer (v3.x compatible).
+    Pure rendering layer (v3.x compliant).
     """
 
     def __init__(self, pandoc_path: str = "pandoc"):
         self.pandoc_path = pandoc_path
+        self._verify_pandoc()
+
+    def _verify_pandoc(self):
+        """Fail fast if Pandoc is not installed."""
+        try:
+            subprocess.run(
+                [self.pandoc_path, "--version"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except Exception:
+            raise EnvironmentError(
+                "Pandoc is not installed or not available in PATH. "
+                "Install pandoc to enable PDF generation."
+            )
 
     def render(
         self,
         md_path: Path,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        title: str = "Sreejita Executive Report",
     ) -> Path:
         """
         Convert a Markdown file to PDF.
@@ -26,6 +43,8 @@ class PandocPDFRenderer:
             Path to the generated Markdown report
         output_dir : Path | None
             Directory to place the PDF (defaults to MD parent)
+        title : str
+            PDF document title
 
         Returns
         -------
@@ -49,8 +68,10 @@ class PandocPDFRenderer:
             "-o",
             str(pdf_path),
             "--pdf-engine=xelatex",
+            "--toc",
+            "--number-sections",
             "--metadata",
-            "title=Sreejita Executive Report",
+            f"title={title}",
         ]
 
         try:
@@ -62,7 +83,8 @@ class PandocPDFRenderer:
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                f"Pandoc PDF generation failed:\n{e.stderr.decode()}"
+                "Pandoc PDF generation failed:\n"
+                f"{e.stderr.decode(errors='ignore')}"
             )
 
         return pdf_path
