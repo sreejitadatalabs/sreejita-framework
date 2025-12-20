@@ -1,7 +1,7 @@
 """
 Sreejita Framework CLI
 Unified CLI + Programmatic Entry Point
-v3.x compatible with PDF rendering
+v3.3 — SAFE PDF SUPPORT
 """
 
 import argparse
@@ -23,7 +23,6 @@ from sreejita.domains.bootstrap_v2 import *  # noqa: F401
 
 # reports
 from sreejita.reports.hybrid import run as run_hybrid
-from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -37,24 +36,17 @@ def run_single_file(
 ) -> str:
     """
     Programmatic execution for UI / API use.
-    Returns generated PDF path if enabled, else MD path.
+    ALWAYS returns Markdown path.
+    (PDF is handled externally via GitHub Actions)
     """
     config = load_config(config_path) if config_path else {}
 
-    # 1. Generate Markdown report
     md_path = run_hybrid(input_path, config)
-
-    # 2. Optional PDF rendering (default: ON)
-    if config.get("export_pdf", True):
-        renderer = PandocPDFRenderer()
-        pdf_path = renderer.render(md_path)
-        return str(pdf_path)
-
     return str(md_path)
 
 
 # -------------------------------------------------
-# CLI ENTRY
+# CLI ENTRY (PDF ALLOWED HERE)
 # -------------------------------------------------
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
@@ -121,14 +113,21 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Processing file %s", input_path)
 
-    # 1. Generate MD
+    # 1. Generate Markdown
     md_path = run_hybrid(str(input_path), config)
 
-    # 2. Optional PDF
     final_path = md_path
-    if config.get("export_pdf", True):
-        renderer = PandocPDFRenderer()
-        final_path = renderer.render(md_path)
+
+    # 2. OPTIONAL PDF (CLI ONLY)
+    if config.get("export_pdf", False):
+        try:
+            from sreejita.reporting.pdf_renderer import PandocPDFRenderer
+
+            renderer = PandocPDFRenderer()
+            final_path = renderer.render(md_path)
+        except Exception as e:
+            logger.error("PDF generation failed: %s", e)
+            logger.info("Continuing with Markdown output")
 
     print("\n✅ Report generated successfully")
     print(f"📄 Report location: {final_path}")
