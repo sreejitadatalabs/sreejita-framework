@@ -132,7 +132,7 @@ class FinanceDomain(BaseDomain):
                 start = prices.iloc[0]
                 end = prices.iloc[-1]
                 
-                # Total Return
+                # Total Return (Guard against div by zero)
                 if start != 0:
                     kpis["total_return"] = (end - start) / start
                 
@@ -142,7 +142,7 @@ class FinanceDomain(BaseDomain):
                 daily_returns = prices.pct_change().dropna()
                 kpis["volatility"] = daily_returns.std()
                 
-                # ---------------- MAX DRAWDOWN (PRO GRADE) ----------------
+                # Max Drawdown (Pro Grade)
                 running_max = prices.cummax()
                 drawdowns = (prices - running_max) / running_max
                 kpis["max_drawdown"] = drawdowns.min()
@@ -268,7 +268,7 @@ class FinanceDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -288,7 +288,6 @@ class FinanceDomain(BaseDomain):
                 "so_what": f"Total return over the period is {ret:.2%}."
             })
             
-        # Volatility Cap (Risk: High)
         if vol is not None and 0.02 < vol < 0.20:
             insights.append({
                 "level": "RISK",
@@ -296,7 +295,6 @@ class FinanceDomain(BaseDomain):
                 "so_what": f"Daily fluctuation is {vol:.2%}. Asset is risky."
             })
             
-        # Drawdown Risk (Professional Insight)
         if drawdown is not None:
             if drawdown < -0.30:
                 insights.append({
@@ -335,12 +333,91 @@ class FinanceDomain(BaseDomain):
                     "so_what": f"Revenue is {abs(var_pct):.1%} below plan."
                 })
 
+        # Call Composite Logic
+        insights += self.generate_composite_insights(df, kpis)
+
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Finance Metrics Detected",
                 "so_what": "Financial data is available for analysis."
             })
+
+        return insights
+
+    # ---------------- COMPOSITE INSIGHTS (v3.0 INTELLIGENCE) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Multi-KPI reasoning layer.
+        Combines signals to produce analyst-grade insights.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        # Market KPIs
+        ret = kpis.get("total_return")
+        vol = kpis.get("volatility")
+        dd = kpis.get("max_drawdown")
+        avg_vol = kpis.get("avg_volume")
+
+        # Corporate KPIs
+        margin = kpis.get("profit_margin")
+        budget_var = kpis.get("budget_variance_pct")
+
+        # 1. Strong Returns + Deep Drawdown + Low Volatility
+        if ret is not None and vol is not None and dd is not None:
+            if ret > 0.25 and dd < -0.30 and vol < 0.02:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Event-Driven Downside Risk",
+                    "so_what": (
+                        f"Despite strong returns ({ret:.1%}), the asset experienced "
+                        f"a severe drawdown ({abs(dd):.1%}) while volatility remained low "
+                        f"({vol:.1%}). This suggests sharp, event-driven corrections rather "
+                        f"than a failing trend."
+                    )
+                })
+
+        # 2. Healthy Trend Confirmation
+        if ret is not None and dd is not None:
+            if ret > 0.15 and dd > -0.15:
+                insights.append({
+                    "level": "INFO",
+                    "title": "Stable Uptrend with Controlled Risk",
+                    "so_what": (
+                        f"The asset shows solid growth ({ret:.1%}) with limited downside "
+                        f"risk (max drawdown {abs(dd):.1%}), indicating a healthy trend."
+                    )
+                })
+
+        # 3. Liquidity Risk During Drawdowns
+        if dd is not None and avg_vol is not None:
+            # Simple heuristic: if volume is very low compared to history length
+            if dd < -0.30 and avg_vol < df.shape[0] * 10:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Potential Liquidity-Driven Sell-Off",
+                    "so_what": (
+                        f"A deep drawdown ({abs(dd):.1%}) combined with relatively low "
+                        f"trading volume suggests liquidity constraints may amplify losses "
+                        f"during market stress."
+                    )
+                })
+
+        # 4. Corporate: Profitable but Strategically Risky
+        if margin is not None and budget_var is not None:
+            if margin > 0.15 and budget_var < -0.05:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Profitable but Missing Growth Targets",
+                    "so_what": (
+                        f"Profit margins are healthy ({margin:.1%}), but revenue is "
+                        f"below budget ({abs(budget_var):.1%}). This may indicate "
+                        f"underinvestment or slowing growth."
+                    )
+                })
 
         return insights
 
