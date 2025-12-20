@@ -17,6 +17,7 @@ class HybridReport(BaseReport):
     - Composite Authority Logic
     - Context-Aware Formatting
     - Robustness Guards (No crashes on malformed data)
+    - Python 3.9+ Compatible (No 3.10+ syntax)
     """
 
     name = "hybrid"
@@ -29,7 +30,7 @@ class HybridReport(BaseReport):
         self,
         domain_results: Dict[str, Dict[str, Any]],
         output_dir: Path,
-        metadata: Dict[str, Any] | None = None
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Path:
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -42,7 +43,7 @@ class HybridReport(BaseReport):
             self._write_header(f, metadata)
 
             # Sort critical domains (Finance/Retail) to the top
-            ordered_domains = self._sort_domains(domain_results.keys())
+            ordered_domains = self._sort_domains(list(domain_results.keys()))
 
             for domain in ordered_domains:
                 self._write_domain_section(
@@ -59,7 +60,7 @@ class HybridReport(BaseReport):
     # SECTIONS
     # -------------------------------------------------
 
-    def _write_header(self, f, metadata: Dict[str, Any] | None):
+    def _write_header(self, f, metadata: Optional[Dict[str, Any]]):
         f.write("# 📊 Executive Decision Report\n")
         f.write(f"**Generated:** {datetime.now():%Y-%m-%d %H:%M}\n\n")
 
@@ -100,7 +101,7 @@ class HybridReport(BaseReport):
                     continue
                 # ------------------------
 
-                icon = self._level_icon(ins.get("level"))
+                icon = self._level_icon(ins.get("level", "INFO"))
                 f.write(f"#### {icon} {ins['title']}\n")
                 f.write(f"{ins['so_what']}\n\n")
         else:
@@ -175,7 +176,7 @@ class HybridReport(BaseReport):
 
         return sorted(insights, key=rank)[:5]
 
-    def _sort_domains(self, domains):
+    def _sort_domains(self, domains: List[str]) -> List[str]:
         """Puts critical financial/commercial domains first."""
         priority = ["finance", "retail", "ecommerce", "supply_chain", "marketing", "hr"]
 
