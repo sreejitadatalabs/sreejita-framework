@@ -45,7 +45,7 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
 
 # =====================================================
-# HR / WORKFORCE DOMAIN
+# HR / WORKFORCE DOMAIN (v3.1 - POLISHED INTELLIGENCE)
 # =====================================================
 
 class HRDomain(BaseDomain):
@@ -123,6 +123,10 @@ class HRDomain(BaseDomain):
         if salary and pd.api.types.is_numeric_dtype(df[salary]):
             kpis["avg_salary"] = df[salary].mean()
             kpis["salary_std_dev"] = df[salary].std()
+            
+            # Compensation Ratio (High Earners vs Avg)
+            if kpis["avg_salary"] > 0:
+                kpis["top_10_percent_salary_ratio"] = df[salary].quantile(0.90) / kpis["avg_salary"]
 
         # 4. Performance (Safe Normalization)
         if performance and pd.api.types.is_numeric_dtype(df[performance]):
@@ -135,6 +139,8 @@ class HRDomain(BaseDomain):
             kpis["avg_performance_score"] = perf_series.mean()
             # Low performer < 3.0 on 5.0 scale
             kpis["low_performance_rate"] = (perf_series < 3).mean()
+            # High Performer Rate (> 4.5)
+            kpis["high_performance_rate"] = (perf_series > 4.5).mean()
 
         # 5. Absenteeism
         if absence and pd.api.types.is_numeric_dtype(df[absence]):
@@ -289,7 +295,7 @@ class HRDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -299,8 +305,17 @@ class HRDomain(BaseDomain):
         low_perf = kpis.get("low_performance_rate")
         absence = kpis.get("avg_absence_days")
 
-        # 1. Attrition
-        if attrition is not None:
+        # 1. Generate Composite Insights FIRST
+        composite_insights = self.generate_composite_insights(df, kpis)
+        
+        # Check if we have specific attrition insights
+        has_composite_attrition = any(
+            "Talent Drain" in i["title"] or "Retention Risk" in i["title"] 
+            for i in composite_insights
+        )
+
+        # 2. Attrition (Atomic) - Suppress if better insight exists
+        if attrition is not None and not has_composite_attrition:
             if attrition > 0.20:
                 insights.append({
                     "level": "RISK",
@@ -314,7 +329,7 @@ class HRDomain(BaseDomain):
                     "so_what": f"Turnover is {attrition:.1%}, slightly above healthy limits."
                 })
 
-        # 2. Performance
+        # 3. Performance
         if perf is not None and perf < 3.5:
             insights.append({
                 "level": "WARNING",
@@ -329,7 +344,7 @@ class HRDomain(BaseDomain):
                 "so_what": f"{low_perf:.1%} of employees are underperforming."
             })
 
-        # 3. Absenteeism
+        # 4. Absenteeism
         if absence is not None and absence > 10:
             insights.append({
                 "level": "INFO",
@@ -337,12 +352,85 @@ class HRDomain(BaseDomain):
                 "so_what": f"Average absence is {absence:.1f} days per employee."
             })
 
+        # 5. Add Composite Insights (Append at end)
+        insights += composite_insights
+
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Workforce Stable",
                 "so_what": "Headcount, performance, and attrition metrics are within healthy ranges."
             })
+
+        return insights
+
+    # ---------------- COMPOSITE INSIGHTS (HR v3.1) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        HR v3 Composite Intelligence Layer.
+        Connects multiple signals to detect burnout, flight risk, and alignment.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        attrition = kpis.get("attrition_rate")
+        high_perf = kpis.get("high_performance_rate")
+        avg_sal = kpis.get("avg_salary")
+        absence = kpis.get("avg_absence_days")
+        top_sal_ratio = kpis.get("top_10_percent_salary_ratio")
+        headcount = kpis.get("headcount", 0)
+
+        # 1. Burnout Risk: High Performance + High Absence
+        if high_perf is not None and absence is not None:
+            if high_perf > 0.20 and absence > 12:
+                insights.append({
+                    "level": "RISK",
+                    "title": "High Performer Burnout Risk",
+                    "so_what": (
+                        f"20%+ of staff are high performers, but absenteeism is high "
+                        f"({absence:.1f} days). This pattern often precedes burnout-driven exit."
+                    )
+                })
+
+        # 2. "Regrettable Attrition" Risk: High Performance + High Attrition
+        if high_perf is not None and attrition is not None:
+            if high_perf > 0.30 and attrition > 0.15:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Talent Drain (Regrettable Attrition)",
+                    "so_what": (
+                        f"You have a strong talent pool ({high_perf:.1%} high performers), "
+                        f"but attrition is high ({attrition:.1%}). You may be losing your best people."
+                    )
+                })
+
+        # 3. Compensation Misalignment: Low Pay + High Attrition
+        if attrition is not None and avg_sal is not None:
+            # Heuristic: If attrition is extremely high (>25%), pay is often a factor
+            if attrition > 0.25:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Retention Risk Likely Linked to Compensation",
+                    "so_what": (
+                        f"Attrition is critical ({attrition:.1%}). Review compensation "
+                        f"benchmarks immediately."
+                    )
+                })
+
+        # 4. Pay Equity / Structure Skew (Smart Guarded)
+        if top_sal_ratio is not None:
+            # GUARD: Only trigger if team is large enough (>30) to avoid small team noise
+            if top_sal_ratio > 4.0 and headcount > 30:
+                 insights.append({
+                    "level": "INFO",
+                    "title": "Steep Compensation Hierarchy",
+                    "so_what": (
+                        f"Top 10% earners make {top_sal_ratio:.1f}x the average. "
+                        f"Ensure this aligns with your organizational philosophy."
+                    )
+                })
 
         return insights
 
@@ -444,3 +532,4 @@ def register(registry):
         domain_cls=HRDomain,
         detector_cls=HRDomainDetector,
     )
+
