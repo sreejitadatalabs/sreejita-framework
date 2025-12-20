@@ -145,14 +145,15 @@ DOMAIN_INTENTS = {
             "transaction_type", "balance", "net_income", 
             "cash_flow", "ebitda", "volatility", "beta",
 
-            # Market Data (OHLCV)
+            # Market Data (OHLCV - Essential for Yahoo/Stock Data)
             "open", "close", "high", "low",
             "adj_close", "adjusted_close",
             "volume", "market_cap",
-            "returns"
+            "returns", "ask", "bid"
         },
         "ambiguous": {
-            "date", "value", "amount", "price", "currency"
+            "date", "value", "amount", "price", "currency", 
+            "revenue", "profit"
         }
     },
 
