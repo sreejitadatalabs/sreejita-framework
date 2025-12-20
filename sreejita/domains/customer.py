@@ -14,6 +14,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
+    """Safely divides n by d."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
@@ -42,8 +43,20 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    """Ensures time column is datetime type and sorted."""
+    df_out = df.copy()
+    try:
+        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
+        df_out = df_out.dropna(subset=[time_col])
+        df_out = df_out.sort_values(time_col)
+    except Exception:
+        pass
+    return df_out
+
+
 # =====================================================
-# CUSTOMER / CX DOMAIN
+# CUSTOMER / CX DOMAIN (v3.2 - POLISHED INTELLIGENCE)
 # =====================================================
 
 class CustomerDomain(BaseDomain):
@@ -73,10 +86,7 @@ class CustomerDomain(BaseDomain):
         self.has_time_series = False
 
         if self.time_col:
-            df = df.copy()
-            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
-            df = df.dropna(subset=[self.time_col])
-            df = df.sort_values(self.time_col)
+            df = _prepare_time_series(df, self.time_col)
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -100,16 +110,23 @@ class CustomerDomain(BaseDomain):
         if customer:
             kpis["customer_count"] = df[customer].nunique()
 
-        # 2. Satisfaction Metrics
+        # 2. Satisfaction Metrics (IMPROVED: Pre-Normalization)
+        kpis["target_satisfaction_score"] = 4.0 # Benchmark (1-5 scale)
+
         if satisfaction and pd.api.types.is_numeric_dtype(df[satisfaction]):
-            avg_score = df[satisfaction].mean()
+            sat_series = df[satisfaction].copy()
+            avg_raw = sat_series.mean()
 
-            # Normalize if stored as 1–10 instead of 1–5
-            if avg_score > 5:
-                avg_score = avg_score / 2
+            # Normalize 1-10 scale to 1-5 scale for consistency
+            if avg_raw > 5:
+                sat_series = sat_series / 2
 
-            kpis["avg_satisfaction_score"] = avg_score
-            kpis["low_satisfaction_rate"] = (df[satisfaction] < 3).mean()
+            kpis["avg_satisfaction_score"] = sat_series.mean()
+            
+            # Now thresholds apply correctly regardless of original scale
+            kpis["low_satisfaction_rate"] = (sat_series < 3).mean()
+            # High Satisfaction Rate (> 4.5)
+            kpis["high_satisfaction_rate"] = (sat_series > 4.5).mean()
 
         # 3. Churn / Retention
         kpis["target_churn_rate"] = 0.05
@@ -125,8 +142,12 @@ class CustomerDomain(BaseDomain):
 
         # 4. Support Load
         if ticket:
-            ticket_counts = df.groupby(customer)[ticket].count() if customer else df[ticket].count()
-            kpis["avg_tickets_per_customer"] = ticket_counts.mean()
+            if customer:
+                ticket_counts = df.groupby(customer)[ticket].count()
+                kpis["avg_tickets_per_customer"] = ticket_counts.mean()
+                kpis["high_ticket_customer_rate"] = (ticket_counts > 3).mean()
+            else:
+                kpis["total_tickets"] = len(df)
 
         return kpis
 
@@ -150,14 +171,21 @@ class CustomerDomain(BaseDomain):
         customer = resolve_column(df, "customer") or resolve_column(df, "customer_id")
         ticket = resolve_column(df, "ticket") or resolve_column(df, "complaint")
 
-        # -------- Visual 1: Satisfaction Distribution --------
+        # -------- Visual 1: Satisfaction Distribution (Normalized) --------
         if satisfaction and pd.api.types.is_numeric_dtype(df[satisfaction]):
             p = output_dir / "satisfaction_distribution.png"
 
             plt.figure(figsize=(7, 4))
-            df[satisfaction].dropna().plot(kind="hist", bins=10, color="#1f77b4")
-            plt.title("Customer Satisfaction Distribution")
+            
+            # FIX: Normalize data for plotting to match KPI scale (1-5)
+            plot_series = df[satisfaction].dropna()
+            if plot_series.mean() > 5:
+                plot_series = plot_series / 2
+                
+            plot_series.plot(kind="hist", bins=10, color="#1f77b4", edgecolor='white')
+            plt.title("Customer Satisfaction Distribution (Normalized 1-5)")
             plt.xlabel("Satisfaction Score")
+            plt.xlim(0, 5) # Lock axis to standard scale
             plt.tight_layout()
             plt.savefig(p)
             plt.close()
@@ -236,7 +264,7 @@ class CustomerDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -245,6 +273,7 @@ class CustomerDomain(BaseDomain):
         sat = kpis.get("avg_satisfaction_score")
         low_sat = kpis.get("low_satisfaction_rate")
 
+        # 1. Churn Insight
         if churn is not None:
             if churn > 0.10:
                 insights.append({
@@ -259,6 +288,7 @@ class CustomerDomain(BaseDomain):
                     "so_what": f"Churn rate is {churn:.1%}, exceeding the acceptable threshold."
                 })
 
+        # 2. Satisfaction Insight
         if sat is not None and sat < 3.5:
             insights.append({
                 "level": "WARNING",
@@ -273,12 +303,71 @@ class CustomerDomain(BaseDomain):
                 "so_what": f"{low_sat:.1%} of customers report low satisfaction."
             })
 
+        # === CALL COMPOSITE LAYER (v3.0) ===
+        # Guard: Only run deep analysis if we have enough customers (or rows)
+        base_size = kpis.get("customer_count", len(df))
+        if base_size > 30:
+            insights += self.generate_composite_insights(df, kpis)
+
         if not insights:
             insights.append({
                 "level": "INFO",
                 "title": "Customer Experience Stable",
                 "so_what": "Satisfaction and retention metrics are within healthy ranges."
             })
+
+        return insights
+
+    # ---------------- COMPOSITE INSIGHTS (CX v3.0) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Customer v3 Composite Intelligence Layer.
+        Detects Service-Driven Churn, Price Sensitivity, etc.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        churn = kpis.get("churn_rate")
+        high_ticket_rate = kpis.get("high_ticket_customer_rate")
+        high_sat_rate = kpis.get("high_satisfaction_rate")
+
+        # 1. Service-Driven Churn: High Support Volume + High Churn
+        if high_ticket_rate is not None and churn is not None:
+            if high_ticket_rate > 0.15 and churn > 0.08:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Service-Driven Churn Risk",
+                    "so_what": (
+                        f"15%+ of customers have high support ticket volume, and churn "
+                        f"is elevated ({churn:.1%}). Support issues may be driving attrition."
+                    )
+                })
+
+        # 2. Price/Value Mismatch: High Satisfaction but High Churn
+        if high_sat_rate is not None and churn is not None:
+            if high_sat_rate > 0.40 and churn > 0.10:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Potential Price/Value Mismatch",
+                    "so_what": (
+                        f"Customer satisfaction is high ({high_sat_rate:.1%} happy customers), "
+                        f"yet churn is also high ({churn:.1%}). Competitors may be undercutting on price."
+                    )
+                })
+
+        # 3. Silent Attrition: Low Support Volume + High Churn
+        if high_ticket_rate is not None and churn is not None:
+            if high_ticket_rate < 0.05 and churn > 0.10:
+                insights.append({
+                    "level": "RISK",
+                    "title": "Silent Attrition Detected",
+                    "so_what": (
+                        f"Churn is high ({churn:.1%}) but support volume is low. "
+                        f"Customers are leaving without complaining (Silent Churn)."
+                    )
+                })
 
         return insights
 
