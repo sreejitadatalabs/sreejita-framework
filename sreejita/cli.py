@@ -1,6 +1,7 @@
 """
-Sreejita Framework CLI v1.9
+Sreejita Framework CLI
 Unified CLI + Programmatic Entry Point
+v3.x compatible with PDF rendering
 """
 
 import argparse
@@ -17,17 +18,18 @@ from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
-# reports
 # 🔥 DOMAIN BOOTSTRAP — MUST BE FIRST
 from sreejita.domains.bootstrap_v2 import *  # noqa: F401
 
+# reports
 from sreejita.reports.hybrid import run as run_hybrid
+from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
 logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------
-# PROGRAMMATIC ENTRY (USED BY STREAMLIT, API, ETC.)
+# PROGRAMMATIC ENTRY (USED BY STREAMLIT / API)
 # -------------------------------------------------
 def run_single_file(
     input_path: str,
@@ -35,11 +37,20 @@ def run_single_file(
 ) -> str:
     """
     Programmatic execution for UI / API use.
-    Returns generated report path.
+    Returns generated PDF path if enabled, else MD path.
     """
     config = load_config(config_path) if config_path else {}
-    report_path = run_hybrid(input_path, config)
-    return report_path
+
+    # 1. Generate Markdown report
+    md_path = run_hybrid(input_path, config)
+
+    # 2. Optional PDF rendering (default: ON)
+    if config.get("export_pdf", True):
+        renderer = PandocPDFRenderer()
+        pdf_path = renderer.render(md_path)
+        return str(pdf_path)
+
+    return str(md_path)
 
 
 # -------------------------------------------------
@@ -109,10 +120,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise FileNotFoundError(input_path)
 
     logger.info("Processing file %s", input_path)
-    report_path = run_hybrid(str(input_path), config)
+
+    # 1. Generate MD
+    md_path = run_hybrid(str(input_path), config)
+
+    # 2. Optional PDF
+    final_path = md_path
+    if config.get("export_pdf", True):
+        renderer = PandocPDFRenderer()
+        final_path = renderer.render(md_path)
 
     print("\n✅ Report generated successfully")
-    print(f"📄 Report location: {report_path}")
+    print(f"📄 Report location: {final_path}")
     return 0
 
 
