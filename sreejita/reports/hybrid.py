@@ -46,7 +46,7 @@ def header_footer(canvas, doc):
 
 
 # =====================================================
-# VALUE FORMATTER (DOMAIN-AGNOSTIC)
+# VALUE FORMATTER
 # =====================================================
 
 def format_value(value):
@@ -55,45 +55,77 @@ def format_value(value):
 
     if isinstance(value, (int, float)):
         abs_val = abs(value)
-
         if abs_val >= 1_000_000:
             return f"{value / 1_000_000:.2f}M"
         if abs_val >= 1_000:
             return f"{value / 1_000:.1f}K"
         if 0 < abs_val < 1:
             return f"{value:.1%}"
-
         return f"{value:,.2f}"
 
     return str(value)
 
 
 # =====================================================
-# HYBRID REPORT
+# ROBUST FILE LOADER (CSV + EXCEL)
 # =====================================================
 
-def robust_read_csv(path: Path) -> pd.DataFrame:
+def robust_read_dataframe(path: Path) -> pd.DataFrame:
     """
-    Robust CSV reader for real-world messy files
-    (Yahoo Finance, exports, logs, scraped data).
+    Robust loader for CSV, XLSX, XLS with real-world mess handling.
     """
-    # 1️⃣ Fast path (clean CSVs)
-    try:
-        return pd.read_csv(path, encoding="utf-8")
-    except Exception:
-        pass
 
-    # 2️⃣ Relaxed parsing for malformed rows
-    try:
-        return pd.read_csv(
-            path,
-            encoding="latin1",
-            engine="python",
-            on_bad_lines="skip"
+    suffix = path.suffix.lower()
+
+    # ---------------- CSV ----------------
+    if suffix == ".csv":
+        try:
+            return pd.read_csv(path, encoding="utf-8")
+        except Exception:
+            try:
+                return pd.read_csv(
+                    path,
+                    encoding="latin1",
+                    engine="python",
+                    sep=None,
+                    on_bad_lines="skip"
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to parse CSV file: {e}")
+
+    # ---------------- EXCEL ----------------
+    if suffix in {".xlsx", ".xls"}:
+        try:
+            xl = pd.ExcelFile(path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to open Excel file: {e}")
+
+        # Try sheets in order until a valid dataframe is found
+        for sheet in xl.sheet_names:
+            try:
+                df = xl.parse(sheet_name=sheet)
+                # Drop fully empty rows/cols
+                df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+
+                # Require minimal structure
+                if df.shape[1] >= 2 and df.shape[0] >= 2:
+                    return df
+            except Exception:
+                continue
+
+        raise RuntimeError(
+            "Excel file contains no readable sheets with usable tabular data."
         )
-    except Exception as e:
-        raise RuntimeError(f"Failed to parse CSV file: {e}")
 
+    # ---------------- UNSUPPORTED ----------------
+    raise RuntimeError(
+        f"Unsupported file type: {suffix}. Only CSV, XLSX, XLS supported."
+    )
+
+
+# =====================================================
+# HYBRID REPORT
+# =====================================================
 
 def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str:
     input_path = Path(input_path)
@@ -103,11 +135,13 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
         out_dir.mkdir(exist_ok=True)
         output_path = out_dir / f"Hybrid_Report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    # Safe encoding fallback
-    df_raw = robust_read_csv(input_path)
+    # 🔐 Robust ingestion
+    df_raw = robust_read_dataframe(input_path)
 
+    # 🔐 Defensive cleaning
     df = clean_dataframe(df_raw)["df"]
 
+    # 🧠 Domain intelligence
     decision = dispatch_domain(df)
     policy = PolicyEngine(min_confidence=0.7).evaluate(decision)
     payload = generate_report_payload(df, decision, policy)
@@ -141,7 +175,6 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
 
     story.append(Paragraph("Sreejita Data Labs", brand))
     story.append(Paragraph("Insights · Intelligence · Impact", tagline))
-
     story.append(Paragraph("EXECUTIVE BRIEF (1-MINUTE READ)", h2))
     story.append(Paragraph(f"Detected Domain: <b>{decision.selected_domain}</b>", body))
     story.append(Paragraph(f"Policy Status: <b>{policy.status}</b>", body))
@@ -166,14 +199,14 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # KPI SNAPSHOT
     # =====================================================
 
-    snapshot_rows = [["Metric", "Value"]]
+    rows = [["Metric", "Value"]]
     for k, v in kpis.items():
-        snapshot_rows.append([k.replace("_", " ").title(), format_value(v)])
+        rows.append([k.replace("_", " ").title(), format_value(v)])
 
-    if len(snapshot_rows) == 1:
-        snapshot_rows.append(["KPIs", "Not Available"])
+    if len(rows) == 1:
+        rows.append(["KPIs", "Not Available"])
 
-    table = Table(snapshot_rows, colWidths=[9 * cm, 5 * cm])
+    table = Table(rows, colWidths=[9 * cm, 5 * cm])
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, "#999999"),
         ("BACKGROUND", (0, 0), (-1, 0), "#EEEEEE"),
@@ -183,52 +216,23 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     story.append(PageBreak())
 
     # =====================================================
-    # VISUAL EVIDENCE (DEFENSIBLE, DOMAIN-AGNOSTIC)
+    # VISUAL EVIDENCE
     # =====================================================
 
     story.append(Paragraph("Visual Evidence", h1))
 
     if not visuals:
         story.append(Paragraph(
-            "No defensible visual evidence could be generated from the available data. "
-            "This typically indicates insufficient numeric variation, missing time context, "
-            "or lack of categorical structure.",
+            "No defensible visual evidence could be generated from the available data.",
             body
         ))
         story.append(PageBreak())
-
     else:
-        if len(visuals) == 1:
-            story.append(Paragraph(
-                "The dataset supports a focused visual analysis. "
-                "The chart below highlights the primary measurable trend.",
-                body
-            ))
-        elif len(visuals) == 2:
-            story.append(Paragraph(
-                "The following visuals summarize performance across complementary dimensions.",
-                body
-            ))
-        else:
-            story.append(Paragraph(
-                "The following visuals provide multi-angle evidence across key dimensions.",
-                body
-            ))
-
         story.append(Spacer(1, 12))
-
-        VISUALS_PER_PAGE = 2
-
-        for idx, v in enumerate(visuals[:4]):  # hard max = 4
+        for v in visuals[:4]:
             story.append(Image(str(v["path"]), width=14 * cm, height=8 * cm))
             story.append(Paragraph(v.get("caption", ""), body))
-
-            if idx < len(visuals) - 1:
-                story.append(Spacer(1, 14))
-
-            if (idx + 1) % VISUALS_PER_PAGE == 0 and idx + 1 < len(visuals):
-                story.append(PageBreak())
-
+            story.append(Spacer(1, 14))
         story.append(PageBreak())
 
     # =====================================================
@@ -236,55 +240,17 @@ def run(input_path: str, config: dict, output_path: Optional[str] = None) -> str
     # =====================================================
 
     story.append(Paragraph("Key Insights", h1))
+    for i in insights:
+        story.append(Paragraph(f"[{i['level']}] {i['title']}", body))
+        story.append(Paragraph(i["so_what"], body))
+        story.append(Spacer(1, 8))
 
-    if insights:
-        for i in insights:
-            story.append(Paragraph(
-                f"[{i.get('level','INFO')}] {i.get('title','Insight')}",
-                body
-            ))
-            story.append(Paragraph(i.get("so_what",""), body))
-            story.append(Spacer(1, 8))
-    else:
-        story.append(Paragraph(
-            "No critical risks were identified. Performance indicators appear stable.",
-            body
-        ))
-
-    story.append(Spacer(1, 12))
     story.append(Paragraph("Recommendations", h1))
-
-    if recommendations:
-        for r in recommendations:
-            story.append(Paragraph(f"<b>Action:</b> {r.get('action','')}", body))
-            story.append(Paragraph(f"Priority: {r.get('priority','Medium')}", body))
-            story.append(Paragraph(f"Timeline: {r.get('timeline','')}", body))
-            story.append(Spacer(1, 10))
-    else:
-        story.append(Paragraph(
-            "No immediate corrective actions are recommended.",
-            body
-        ))
-
-    story.append(PageBreak())
-
-    # =====================================================
-    # RISKS
-    # =====================================================
-
-    story.append(Paragraph("Risks", h1))
-    risks = [i for i in insights if i.get("level") in {"WARNING", "RISK"}]
-
-    if risks:
-        for r in risks:
-            story.append(Paragraph(r.get("title","Risk"), body))
-            story.append(Paragraph(r.get("so_what",""), body))
-            story.append(Spacer(1, 8))
-    else:
-        story.append(Paragraph(
-            "No material risks detected.",
-            body
-        ))
+    for r in recommendations:
+        story.append(Paragraph(f"<b>Action:</b> {r['action']}", body))
+        story.append(Paragraph(f"Priority: {r['priority']}", body))
+        story.append(Paragraph(f"Timeline: {r['timeline']}", body))
+        story.append(Spacer(1, 10))
 
     doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return str(output_path)
