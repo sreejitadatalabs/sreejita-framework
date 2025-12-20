@@ -560,4 +560,3 @@ def register(registry):
         domain_cls=FinanceDomain,
         detector_cls=FinanceDomainDetector,
     )
-``` [Image of financial analysis dashboard]
