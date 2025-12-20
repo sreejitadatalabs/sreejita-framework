@@ -1,0 +1,39 @@
+name: Generate Sreejita PDFs
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "runs/**.md"
+
+jobs:
+  build-pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install Pandoc & LaTeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-xetex
+
+      - name: Generate PDFs
+        run: |
+          python - << 'EOF'
+          from pathlib import Path
+          from sreejita.reporting.pdf_renderer import PandocPDFRenderer
+
+          renderer = PandocPDFRenderer()
+
+          for md in Path("runs").rglob("*.md"):
+              print(f"Rendering {md}")
+              renderer.render(md)
+          EOF
+
+      - name: Upload PDFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sreejita-pdfs
+          path: runs/**/*.pdf 
