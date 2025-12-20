@@ -45,8 +45,20 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    """Ensures time column is datetime type and sorted."""
+    df_out = df.copy()
+    try:
+        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
+        df_out = df_out.dropna(subset=[time_col])
+        df_out = df_out.sort_values(time_col)
+    except Exception:
+        pass
+    return df_out
+
+
 # =====================================================
-# SUPPLY CHAIN / OPERATIONS DOMAIN
+# SUPPLY CHAIN / OPERATIONS DOMAIN (v3.1 - ENTERPRISE)
 # =====================================================
 
 class SupplyChainDomain(BaseDomain):
@@ -69,10 +81,7 @@ class SupplyChainDomain(BaseDomain):
         self.has_time_series = False
 
         if self.time_col:
-            df = df.copy()
-            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
-            df = df.dropna(subset=[self.time_col])
-            df = df.sort_values(self.time_col)
+            df = _prepare_time_series(df, self.time_col)
             self.has_time_series = df[self.time_col].nunique() >= 2
 
         return df
@@ -95,7 +104,7 @@ class SupplyChainDomain(BaseDomain):
         if order_id:
             kpis["order_volume"] = df[order_id].nunique()
         else:
-            kpis["order_volume"] = len(df) # Fallback: Count rows
+            kpis["order_volume"] = len(df) 
 
         # 2. Lead Time (Actual Calculation)
         if order_date and delivery_date:
@@ -103,7 +112,12 @@ class SupplyChainDomain(BaseDomain):
                 start = pd.to_datetime(df[order_date], errors='coerce')
                 end = pd.to_datetime(df[delivery_date], errors='coerce')
                 lead_time = (end - start).dt.days
-                kpis["avg_lead_time_days"] = lead_time.mean()
+                
+                # Filter out negative or crazy outliers (> 365 days)
+                valid_leads = lead_time[(lead_time >= 0) & (lead_time < 365)]
+                
+                if not valid_leads.empty:
+                    kpis["avg_lead_time_days"] = valid_leads.mean()
             except Exception:
                 pass
 
@@ -157,7 +171,6 @@ class SupplyChainDomain(BaseDomain):
             if abs(x) >= 1_000: return f"{x/1_000:.1f}K"
             return str(int(x))
 
-        order_id = resolve_column(df, "order_id")
         inventory = resolve_column(df, "inventory") or resolve_column(df, "stock")
         supplier = resolve_column(df, "supplier") or resolve_column(df, "vendor")
         category = resolve_column(df, "category") or resolve_column(df, "product")
@@ -172,6 +185,7 @@ class SupplyChainDomain(BaseDomain):
             plt.figure(figsize=(7, 4))
 
             plot_df = df.copy()
+            # Smart Aggregation
             if len(df) > 100:
                 plot_df = (
                     df.set_index(self.time_col)
@@ -181,8 +195,9 @@ class SupplyChainDomain(BaseDomain):
                 )
                 plt.plot(plot_df[self.time_col], plot_df["count"], linewidth=2, color="#9467bd")
             else:
-                # Simple count plot if dataset is small
-                df.groupby(self.time_col).size().plot(linewidth=2, color="#9467bd")
+                # Group by exact date for small datasets
+                dates = pd.to_datetime(df[self.time_col]).dt.date
+                dates.value_counts().sort_index().plot(linewidth=2, color="#9467bd")
 
             plt.title("Order Fulfillment Trend")
             plt.tight_layout()
@@ -252,7 +267,7 @@ class SupplyChainDomain(BaseDomain):
 
         return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
@@ -289,6 +304,11 @@ class SupplyChainDomain(BaseDomain):
                     "title": "Inventory Gaps Detected",
                     "so_what": f"Stockout rate is {stockout:.1%}."
                 })
+        
+        # === CALL COMPOSITE LAYER (v3.1) ===
+        # Guard: Only call composite insights if dataset is significant enough
+        if len(df) > 30:
+            insights += self.generate_composite_insights(df, kpis)
 
         if not insights:
             insights.append({
@@ -296,6 +316,49 @@ class SupplyChainDomain(BaseDomain):
                 "title": "Operations Stable",
                 "so_what": "Supply chain metrics are performing within normal parameters."
             })
+
+        return insights
+
+    # ---------------- COMPOSITE INSIGHTS (SC v3.1) ----------------
+
+    def generate_composite_insights(
+        self, df: pd.DataFrame, kpis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Supply Chain v3.1 Composite Intelligence Layer.
+        Detects Inventory Imbalance, Fulfillment Bottlenecks.
+        """
+        insights: List[Dict[str, Any]] = []
+
+        otd = kpis.get("on_time_delivery_rate")
+        stockout = kpis.get("stockout_rate")
+        lead_time = kpis.get("avg_lead_time_days")
+        inventory_lvl = kpis.get("avg_inventory_level")
+
+        # 1. Inventory Imbalance (High Stock + High Stockouts)
+        # Means we are holding a lot of "Dead Stock" while popular items are missing.
+        if inventory_lvl is not None and stockout is not None:
+            if inventory_lvl > 0 and stockout > 0.10:
+                 insights.append({
+                    "level": "WARNING",
+                    "title": "Inventory Imbalance Detected",
+                    "so_what": (
+                        f"Stockout rate is high ({stockout:.1%}) despite holding significant inventory. "
+                        f"You are likely overstocked on slow-movers and understocked on key items."
+                    )
+                })
+
+        # 2. Fulfillment Bottleneck (Low OTD + Slow Lead Time)
+        if otd is not None and lead_time is not None:
+            if otd < 0.85 and lead_time > 10: # >10 days avg lead time
+                 insights.append({
+                    "level": "RISK",
+                    "title": "Severe Fulfillment Bottleneck",
+                    "so_what": (
+                        f"Delivery reliability is low ({otd:.1%}) with extended lead times "
+                        f"({lead_time:.1f} days). Logistics or carrier performance requires audit."
+                    )
+                })
 
         return insights
 
@@ -398,3 +461,5 @@ def register(registry):
         domain_cls=SupplyChainDomain,
         detector_cls=SupplyChainDomainDetector,
     )
+``` [attachment_0](attachment)
+
