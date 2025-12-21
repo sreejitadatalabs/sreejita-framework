@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from sreejita.reports.hybrid import run as run_hybrid
 from sreejita.config.loader import load_config
@@ -18,7 +18,7 @@ def run_single_file(
     file_path: Path,
     config: dict,
     run_dir: Path,
-):
+) -> Dict[str, Any]:
     """
     Process a single file in batch mode.
 
@@ -26,35 +26,43 @@ def run_single_file(
     - Generates Markdown report (authoritative)
     - PDF generation is OPTIONAL and SAFE
     - Never breaks batch execution
+    - One folder per input file
     """
 
-    input_dir = run_dir / "input"
-    failed_dir = run_dir / "failed"
+    src = Path(file_path)
+
+    # -------------------------------------------------
+    # 1️⃣ Create per-file run folder
+    # -------------------------------------------------
+    file_run_dir = run_dir / src.stem
+    input_dir = file_run_dir / "input"
+    failed_dir = file_run_dir / "failed"
 
     input_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
 
-    src = Path(file_path)
     dst = input_dir / src.name
     dst.write_bytes(src.read_bytes())
 
     log.info("Processing file: %s", src.name)
 
     # -------------------------------------------------
-    # 1️⃣ FORCE reports into THIS batch run directory
+    # 2️⃣ Force Hybrid output into this folder
     # -------------------------------------------------
     local_config = dict(config)
-    local_config["output_dir"] = str(run_dir)
+    local_config["output_dir"] = str(file_run_dir)
 
     # -------------------------------------------------
-    # 2️⃣ Generate Markdown via Hybrid (v3.3)
+    # 3️⃣ Generate Markdown (authoritative)
     # -------------------------------------------------
     md_path = Path(run_hybrid(str(dst), local_config))
 
     log.info("Markdown report generated: %s", md_path)
 
+    pdf_path = None
+
     # -------------------------------------------------
-    # 3️⃣ OPTIONAL: Generate PDF (safe, isolated)
+    # 4️⃣ OPTIONAL: Generate PDF (safe & isolated)
     # -------------------------------------------------
     if local_config.get("export_pdf", False):
         try:
@@ -68,6 +76,13 @@ def run_single_file(
             log.warning("PDF generation skipped: %s", e)
 
     log.info("Completed file: %s", src.name)
+
+    return {
+        "file": src.name,
+        "md_path": str(md_path),
+        "pdf_path": str(pdf_path) if pdf_path else None,
+        "run_dir": str(file_run_dir),
+    }
 
 
 def run_batch(
@@ -97,7 +112,6 @@ def run_batch(
             run_single_file(src, config, run_dir)
 
         except Exception as e:
-            # Preserve failed file with timestamp suffix
             failed_path = (
                 run_dir
                 / "failed"
