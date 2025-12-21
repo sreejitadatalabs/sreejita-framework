@@ -2,56 +2,80 @@ name: Generate Sreejita PDFs
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "runs/**/*.md"
 
 jobs:
   build-pdf:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------------------------------
+      # 1. CHECKOUT CODE
+      # -------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -------------------------------------------------
+      # 2. PYTHON
+      # -------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.9"
 
-      - name: Install system dependencies (Pandoc + LaTeX)
+      # -------------------------------------------------
+      # 3. SYSTEM DEPS (MANDATORY)
+      # -------------------------------------------------
+      - name: Install Pandoc & LaTeX
         run: |
           sudo apt-get update
           sudo apt-get install -y pandoc texlive-xetex
 
+      # -------------------------------------------------
+      # 4. PYTHON DEPS
+      # -------------------------------------------------
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
           pip install -e .
 
-      - name: Verify Markdown files exist
-        run: |
-          echo "Searching for Markdown files..."
-          find runs -name "*.md" || true
-
-      - name: Generate PDFs
+      # -------------------------------------------------
+      # 5. GENERATE REPORTS (MD + PDF)
+      # -------------------------------------------------
+      - name: Generate Sreejita Reports
         run: |
           python - << 'EOF'
           from pathlib import Path
+          from sreejita.reports.hybrid import run as run_hybrid
           from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
-          md_files = list(Path("runs").rglob("*.md"))
+          # CONFIG (adjust if needed)
+          config = {
+              "output_dir": "runs",
+              "export_pdf": True
+          }
 
-          if not md_files:
-              raise SystemExit("❌ No Markdown files found under runs/")
+          # Example dataset folder (must exist in repo)
+          data_dir = Path("data")
+
+          if not data_dir.exists():
+              raise SystemExit("❌ data/ folder not found in repository")
 
           renderer = PandocPDFRenderer()
 
-          for md in md_files:
-              print(f"Rendering {md}")
-              renderer.render(md)
+          for file in data_dir.iterdir():
+              if file.suffix.lower() not in (".csv", ".xlsx"):
+                  continue
+
+              print(f"Processing {file}")
+              md_path = run_hybrid(str(file), config)
+              pdf_path = renderer.render(md_path)
+
+              print(f"Generated: {pdf_path}")
           EOF
 
+      # -------------------------------------------------
+      # 6. UPLOAD PDFS
+      # -------------------------------------------------
       - name: Upload PDFs
         uses: actions/upload-artifact@v4
         with:
