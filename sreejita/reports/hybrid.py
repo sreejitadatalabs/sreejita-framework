@@ -28,16 +28,21 @@ class HybridReport(BaseReport):
         self,
         domain_results: Dict[str, Dict[str, Any]],
         output_dir: Path,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
+        """
+        Build a Markdown report.
+
+        CONTRACT:
+        - output_dir is provided by caller (CLI / Batch / UI)
+        - Hybrid does NOT create timestamps
+        - Hybrid does NOT generate PDFs
+        """
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        report_name = f"Sreejita_Executive_Report_{datetime.now():%Y-%m-%d}.md"
-        report_path = output_dir / report_name
-
-        print(f"📝 Writing Markdown report to: {report_path}")
+        report_path = output_dir / "Sreejita_Executive_Report.md"
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, metadata)
@@ -46,12 +51,11 @@ class HybridReport(BaseReport):
                 self._write_domain_section(
                     f,
                     domain,
-                    domain_results.get(domain, {})
+                    domain_results.get(domain, {}),
                 )
 
             self._write_footer(f)
 
-        print("✅ Markdown report generated successfully")
         return report_path
 
     # -------------------------------------------------
@@ -60,7 +64,7 @@ class HybridReport(BaseReport):
 
     def _write_header(self, f, metadata: Optional[Dict[str, Any]]):
         f.write("# 📊 Executive Decision Report\n")
-        f.write(f"**Generated:** {datetime.now():%Y-%m-%d %H:%M}\n\n")
+        f.write(f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n")
 
         if metadata:
             for k, v in metadata.items():
@@ -77,7 +81,7 @@ class HybridReport(BaseReport):
         f.write(f"## 🔹 {domain.replace('_', ' ').title()}\n\n")
 
         if not isinstance(result, dict):
-            f.write("⚠️ _Invalid domain output._\n\n")
+            f.write("_Invalid domain output._\n\n")
             return
 
         kpis = result.get("kpis", {})
@@ -96,7 +100,7 @@ class HybridReport(BaseReport):
                 )
                 f.write(f"{ins['so_what']}\n\n")
         else:
-            f.write("✅ _Operations within normal parameters._\n\n")
+            f.write("_Operations within normal parameters._\n\n")
 
         # KPIs
         if isinstance(kpis, dict) and kpis:
@@ -153,7 +157,10 @@ class HybridReport(BaseReport):
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, float):
-            if any(x in key.lower() for x in ["rate", "ratio", "margin", "conversion"]) and abs(v) <= 2:
+            if any(
+                x in key.lower()
+                for x in ["rate", "ratio", "margin", "conversion"]
+            ) and abs(v) <= 2:
                 return f"{v:.1%}"
             return f"{v:,.2f}"
         if isinstance(v, int):
@@ -162,30 +169,27 @@ class HybridReport(BaseReport):
 
 
 # =====================================================
-# BACKWARD-COMPATIBLE ENTRY POINT (NO PDF HERE)
+# BACKWARD-COMPATIBLE ENTRY POINT
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Path:
     """
-    Single entry point used by CLI, BatchRunner, Streamlit UI.
-    Generates Markdown ONLY.
-    """
+    Entry point used by CLI / Batch / UI.
 
-    print("🔥 Hybrid run() called")
+    CONTRACT:
+    - Generates Markdown ONLY
+    - Respects config["output_dir"]
+    """
 
     from sreejita.reporting.orchestrator import generate_report_payload
 
     domain_results = generate_report_payload(
         input_path=input_path,
-        config=config
+        config=config,
     )
 
-    output_root = Path(config.get("output_dir", "runs"))
-    run_dir = output_root / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(config.get("output_dir", "runs"))
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     engine = HybridReport()
-    md_path = engine.build(domain_results, run_dir, config.get("metadata"))
-
-    print("📄 MD PATH:", md_path)
-    return md_path
+    return engine.build(domain_results, output_dir, config.get("metadata"))
