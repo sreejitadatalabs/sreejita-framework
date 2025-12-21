@@ -21,16 +21,17 @@ def run_single_file(
 ):
     """
     Process a single file in batch mode.
-    Generates Markdown report.
-    PDF generation is OPTIONAL and SAFE.
+
+    v3.3 CONTRACT:
+    - Generates Markdown report (authoritative)
+    - PDF generation is OPTIONAL and SAFE
+    - Never breaks batch execution
     """
 
     input_dir = run_dir / "input"
-    output_dir = run_dir / "output"
     failed_dir = run_dir / "failed"
 
     input_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
 
     src = Path(file_path)
@@ -39,13 +40,23 @@ def run_single_file(
 
     log.info("Processing file: %s", src.name)
 
-    # 1️⃣ Generate Markdown via Hybrid (v3.3)
-    md_path = run_hybrid(str(dst), config)
+    # -------------------------------------------------
+    # 1️⃣ FORCE reports into THIS batch run directory
+    # -------------------------------------------------
+    local_config = dict(config)
+    local_config["output_dir"] = str(run_dir)
+
+    # -------------------------------------------------
+    # 2️⃣ Generate Markdown via Hybrid (v3.3)
+    # -------------------------------------------------
+    md_path = Path(run_hybrid(str(dst), local_config))
 
     log.info("Markdown report generated: %s", md_path)
 
-    # 2️⃣ OPTIONAL: Generate PDF (ONLY if Pandoc exists)
-    if config.get("export_pdf", False):
+    # -------------------------------------------------
+    # 3️⃣ OPTIONAL: Generate PDF (safe, isolated)
+    # -------------------------------------------------
+    if local_config.get("export_pdf", False):
         try:
             from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
@@ -65,7 +76,7 @@ def run_batch(
     output_root: str = "runs",
 ):
     """
-    Batch processing entry point.
+    Batch processing entry point (v3.3 SAFE).
     """
     config = load_config(config_path)
 
@@ -84,9 +95,16 @@ def run_batch(
         src = Path(input_folder) / file
         try:
             run_single_file(src, config, run_dir)
+
         except Exception as e:
-            failed_path = run_dir / "failed" / src.name
+            # Preserve failed file with timestamp suffix
+            failed_path = (
+                run_dir
+                / "failed"
+                / f"{src.stem}_{int(datetime.utcnow().timestamp())}{src.suffix}"
+            )
             failed_path.write_bytes(src.read_bytes())
+
             log.error(
                 "File failed after retries: %s | Reason: %s",
                 src.name,
