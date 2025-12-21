@@ -1,10 +1,10 @@
 # -------------------------------------------------
 # Streamlit App — Sreejita Framework (Hybrid Demo)
+# v3.3 SAFE (GitHub Web Compatible)
 # -------------------------------------------------
 
 import sys
 from pathlib import Path
-import os
 import uuid
 import streamlit as st
 
@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # -------------------------------------------------
-# Import backend adapter ONLY
+# Import backend adapter ONLY (NO PDF LOGIC)
 # -------------------------------------------------
 from ui.backend import run_analysis_from_ui
 
@@ -34,8 +34,8 @@ st.set_page_config(
 # -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
-st.markdown("**Version:** UI v2.0 / Engine v3.0")
-st.info("Hybrid Intelligence + Client-ready PDF reports")
+st.markdown("**Version:** UI v2.0 / Engine v3.3")
+st.info("Hybrid Intelligence • Markdown Source • PDF via GitHub Actions")
 st.divider()
 
 # -------------------------------------------------
@@ -65,7 +65,7 @@ domain = st.selectbox(
 
 report_type = st.selectbox(
     "Report type",
-    options=["Hybrid (PDF)"],
+    options=["Hybrid (Markdown → PDF)"],
     index=0
 )
 
@@ -82,9 +82,9 @@ if run_clicked:
     if not uploaded_file:
         st.error("Please upload a dataset first.")
     else:
-        with st.spinner("Running analysis..."):
+        with st.spinner("Running analysis (Markdown generation)..."):
             try:
-                # Temp directory
+                # Temp directory for uploads
                 temp_dir = Path("ui/temp")
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,7 +95,7 @@ if run_clicked:
                 with open(input_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                # Run backend
+                # Run backend (MD ONLY)
                 result = run_analysis_from_ui(
                     input_path=str(input_path),
                     domain=domain
@@ -106,7 +106,7 @@ if run_clicked:
                 st.exception(e)
 
 # -------------------------------------------------
-# 4️⃣ Output (PDF Delivery)
+# 4️⃣ Output (SAFE DELIVERY)
 # -------------------------------------------------
 if result:
     st.divider()
@@ -114,31 +114,39 @@ if result:
 
     st.success("✅ Analysis completed")
 
-    # -----------------------------
-    # Direct PDF from backend (preferred)
-    # -----------------------------
-    report_path = result.get("report_path")
+    # -------------------------------------------------
+    # Markdown Report (IMMEDIATE & GUARANTEED)
+    # -------------------------------------------------
+    md_path = result.get("md_report_path")
 
-    if report_path and Path(report_path).exists():
-        with open(report_path, "rb") as f:
+    if md_path and Path(md_path).exists():
+        with open(md_path, "rb") as f:
             st.download_button(
-                label="📄 Download PDF Report",
+                label="📄 Download Report (Markdown)",
                 data=f,
-                file_name=Path(report_path).name,
-                mime="application/pdf"
+                file_name=Path(md_path).name,
+                mime="text/markdown"
             )
+    else:
+        st.warning("Markdown report not found.")
 
-    # -----------------------------
-    # Fallback: Show ALL PDFs (batch / GitHub Actions)
-    # -----------------------------
-    st.markdown("### 📂 Available Reports")
+    # -------------------------------------------------
+    # PDF Reports (ASYNC via GitHub Actions)
+    # -------------------------------------------------
+    st.markdown("### 📂 Available PDF Reports")
 
-    pdfs = list(Path("runs").rglob("*.pdf"))
+    pdfs = sorted(
+        Path("runs").rglob("*.pdf"),
+        reverse=True
+    )
 
     if not pdfs:
-        st.info("No historical PDF reports found yet.")
+        st.info(
+            "PDFs are generated asynchronously via GitHub Actions.\n\n"
+            "➡️ Commit the Markdown file and wait for the workflow to finish."
+        )
     else:
-        for pdf in sorted(pdfs, reverse=True)[:10]:
+        for pdf in pdfs[:10]:
             with open(pdf, "rb") as f:
                 st.download_button(
                     label=f"📄 Download {pdf.name}",
@@ -148,9 +156,9 @@ if result:
                     key=str(pdf)
                 )
 
-    # -----------------------------
-    # Intelligence metadata
-    # -----------------------------
+    # -------------------------------------------------
+    # Intelligence Metadata (Read-only)
+    # -------------------------------------------------
     with st.expander("🧠 Decision Intelligence"):
         st.json({
             "selected_domain": result.get("domain"),
