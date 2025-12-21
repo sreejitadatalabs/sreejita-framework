@@ -2,13 +2,16 @@ name: Generate Sreejita PDFs
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "runs/**/*.md"
 
 jobs:
   build-pdf:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -26,15 +29,25 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      - name: Verify Markdown files exist
+        run: |
+          echo "Searching for Markdown files..."
+          find runs -name "*.md" || true
+
       - name: Generate PDFs
         run: |
           python - << 'EOF'
           from pathlib import Path
           from sreejita.reporting.pdf_renderer import PandocPDFRenderer
 
+          md_files = list(Path("runs").rglob("*.md"))
+
+          if not md_files:
+              raise SystemExit("❌ No Markdown files found under runs/")
+
           renderer = PandocPDFRenderer()
 
-          for md in Path("runs").rglob("*.md"):
+          for md in md_files:
               print(f"Rendering {md}")
               renderer.render(md)
           EOF
