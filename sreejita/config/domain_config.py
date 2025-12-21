@@ -32,7 +32,7 @@ class DomainEngineConfig:
     domains: Dict[str, DomainConfig] = field(default_factory=dict)
 
     # -----------------------------
-    # SAFE ACCESSORS (OPTIONAL)
+    # SAFE ACCESSORS
     # -----------------------------
     def get_domain_config(self, domain: str) -> DomainConfig:
         """
