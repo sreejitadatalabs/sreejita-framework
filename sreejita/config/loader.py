@@ -7,11 +7,24 @@ from .defaults import DEFAULT_CONFIG
 from sreejita.config.domain_config import DomainEngineConfig, DomainConfig
 
 
+# -------------------------------------------------
+# DOMAIN ENGINE CONFIG LOADER (OPTIONAL / ADVANCED)
+# -------------------------------------------------
 def load_domain_engine_config(cfg: dict) -> DomainEngineConfig:
+    """
+    Load domain engine configuration safely.
+
+    v3.3 rules:
+    - Missing domains are allowed
+    - Partial domain configs are allowed
+    - Never mutates input
+    """
+
     domains_cfg = {}
 
-    for domain, values in cfg.get("domains", {}).items():
-        domains_cfg[domain] = DomainConfig(**values)
+    for domain, values in (cfg.get("domains") or {}).items():
+        if isinstance(values, dict):
+            domains_cfg[domain] = DomainConfig(**values)
 
     return DomainEngineConfig(
         default_min_confidence=cfg.get("default_min_confidence", 0.3),
@@ -20,6 +33,9 @@ def load_domain_engine_config(cfg: dict) -> DomainEngineConfig:
     )
 
 
+# -------------------------------------------------
+# MAIN CONFIG LOADER (AUTHORITATIVE)
+# -------------------------------------------------
 def load_config(path: Optional[str]) -> dict:
     """
     Load and merge user config with framework defaults.
@@ -27,10 +43,14 @@ def load_config(path: Optional[str]) -> dict:
     v3.3 SAFE:
     - Python 3.9 compatible
     - No PEP 604 union types
+    - No shared mutable defaults
+    - Backward compatible with v1.x / v2.x
     """
 
+    # ---------------------------------------------
+    # No config provided → return clean defaults
+    # ---------------------------------------------
     if path is None:
-        # No config provided → return defaults safely
         return copy.deepcopy(DEFAULT_CONFIG)
 
     path = Path(path)
@@ -43,17 +63,26 @@ def load_config(path: Optional[str]) -> dict:
     if not isinstance(user_config, dict):
         raise ValueError("Config file must contain a YAML dictionary")
 
-    # Deep copy defaults to avoid cross-run mutation
+    # ---------------------------------------------
+    # Start from a clean copy of defaults
+    # ---------------------------------------------
     config = copy.deepcopy(DEFAULT_CONFIG)
 
-    # Merge user overrides
+    # ---------------------------------------------
+    # Merge user overrides (safe shallow merge)
+    # ---------------------------------------------
     for key, value in user_config.items():
-        if isinstance(value, dict) and isinstance(config.get(key), dict):
+        if (
+            isinstance(value, dict)
+            and isinstance(config.get(key), dict)
+        ):
             config[key].update(value)
         else:
             config[key] = value
 
+    # ---------------------------------------------
     # Minimal validation (v1.x compatibility)
+    # ---------------------------------------------
     if "dataset" not in config:
         raise ValueError("Missing required 'dataset' section in config")
 
