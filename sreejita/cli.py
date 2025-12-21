@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------
 def run_single_file(
     input_path: str,
-    config_path: Optional[str] = None
+    config_path: Optional[str] = None,
 ) -> str:
     """
     Programmatic execution for UI / API use.
@@ -61,10 +61,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser.add_argument("--batch", help="Run batch processing on a folder")
     parser.add_argument("--watch", help="Watch a folder for new files")
-    parser.add_argument("--schedule", action="store_true", help="Run batch on a schedule")
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Run batch on a schedule",
+    )
 
     parser.add_argument("--version", action="store_true", help="Show version and exit")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Verbose logging"
+    )
 
     args = parser.parse_args(argv)
 
@@ -76,7 +82,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ---- LOGGING ----
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s"
+        format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
     # ---- CONFIG VALIDATION ----
@@ -97,7 +103,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         start_scheduler(
             config.get("automation", {}).get("schedule"),
             args.batch,
-            args.config
+            args.config,
         )
         return 0
 
@@ -127,6 +133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             renderer = PandocPDFRenderer()
             final_path = renderer.render(md_path)
+
         except Exception as e:
             logger.error("PDF generation failed: %s", e)
             logger.info("Continuing with Markdown output")
