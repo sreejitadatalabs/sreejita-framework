@@ -23,10 +23,10 @@ def run_single_file(
     Process a single file in batch mode.
 
     v3.3 CONTRACT:
-    - Generates Markdown report (authoritative)
+    - Generates Markdown report (AUTHORITATIVE)
     - PDF generation is OPTIONAL and SAFE
     - Never breaks batch execution
-    - One folder per input file
+    - One isolated folder per input file
     """
 
     src = Path(file_path)
@@ -47,22 +47,25 @@ def run_single_file(
     log.info("Processing file: %s", src.name)
 
     # -------------------------------------------------
-    # 2️⃣ Force Hybrid output into this folder
+    # 2️⃣ Force Hybrid output into THIS folder
     # -------------------------------------------------
     local_config = dict(config)
     local_config["output_dir"] = str(file_run_dir)
 
     # -------------------------------------------------
-    # 3️⃣ Generate Markdown (authoritative)
+    # 3️⃣ Generate Markdown (AUTHORITATIVE)
     # -------------------------------------------------
     md_path = Path(run_hybrid(str(dst), local_config))
+
+    if not md_path.exists():
+        raise RuntimeError(f"Markdown report not created: {md_path}")
 
     log.info("Markdown report generated: %s", md_path)
 
     pdf_path = None
 
     # -------------------------------------------------
-    # 4️⃣ OPTIONAL: Generate PDF (safe & isolated)
+    # 4️⃣ OPTIONAL: Generate PDF (SAFE & ISOLATED)
     # -------------------------------------------------
     if local_config.get("export_pdf", False):
         try:
@@ -70,9 +73,11 @@ def run_single_file(
 
             renderer = PandocPDFRenderer()
             pdf_path = renderer.render(md_path)
+
             log.info("PDF report generated: %s", pdf_path)
 
         except Exception as e:
+            # ABSOLUTE RULE: batch must never fail due to PDF
             log.warning("PDF generation skipped: %s", e)
 
     log.info("Completed file: %s", src.name)
@@ -108,6 +113,7 @@ def run_batch(
 
     for file in files:
         src = Path(input_folder) / file
+
         try:
             run_single_file(src, config, run_dir)
 
