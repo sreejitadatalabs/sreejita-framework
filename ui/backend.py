@@ -46,7 +46,6 @@ def run_analysis_from_ui(
     policy_decision = None
 
     try:
-        # Robust file loading
         if input_path.suffix.lower() == ".csv":
             try:
                 df = pd.read_csv(input_path, encoding="utf-8")
@@ -68,7 +67,7 @@ def run_analysis_from_ui(
     # -------------------------------------------------
     # v1 REPORT GENERATION (AUTHORITATIVE)
     # -------------------------------------------------
-    # This MUST remain untouched
+    # IMPORTANT: run_single_file returns a PATH STRING
     report_path = Path(
         run_single_file(
             input_path=str(input_path),
@@ -76,22 +75,32 @@ def run_analysis_from_ui(
         )
     )
 
-    # Determine MD path safely
-    if report_path.suffix.lower() == ".pdf":
-        md_report_path = report_path.with_suffix(".md")
-        pdf_report_path = report_path if report_path.exists() else None
+    # -------------------------------------------------
+    # SAFE PATH RESOLUTION (MD / PDF)
+    # -------------------------------------------------
+    md_report_path = None
+    pdf_report_path = None
+
+    if report_path.exists():
+        if report_path.suffix.lower() == ".pdf":
+            pdf_report_path = report_path
+            candidate_md = report_path.with_suffix(".md")
+            if candidate_md.exists():
+                md_report_path = candidate_md
+        elif report_path.suffix.lower() == ".md":
+            md_report_path = report_path
+            candidate_pdf = report_path.with_suffix(".pdf")
+            if candidate_pdf.exists():
+                pdf_report_path = candidate_pdf
     else:
-        md_report_path = report_path
-        pdf_report_path = report_path.with_suffix(".pdf")
-        if not pdf_report_path.exists():
-            pdf_report_path = None
+        print("⚠️ Report path returned but file does not exist:", report_path)
 
     # -------------------------------------------------
     # RETURN UI-SAFE PAYLOAD
     # -------------------------------------------------
     return {
         # v1 output
-        "md_report_path": str(md_report_path),
+        "md_report_path": str(md_report_path) if md_report_path else None,
         "pdf_report_path": str(pdf_report_path) if pdf_report_path else None,
 
         # v2 decision intelligence
