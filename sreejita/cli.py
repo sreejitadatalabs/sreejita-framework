@@ -36,8 +36,11 @@ def run_single_file(
 ) -> str:
     """
     Programmatic execution for UI / API use.
-    ALWAYS returns Markdown path.
-    (PDF is handled externally via GitHub Actions)
+
+    v3.3 CONTRACT:
+    - ALWAYS returns Markdown path
+    - NEVER generates PDF
+    - SAFE for Streamlit / API
     """
     config = load_config(config_path) if config_path else {}
 
@@ -46,7 +49,7 @@ def run_single_file(
 
 
 # -------------------------------------------------
-# CLI ENTRY (PDF ALLOWED HERE)
+# CLI ENTRY (PDF OPTIONAL HERE)
 # -------------------------------------------------
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
@@ -113,12 +116,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Processing file %s", input_path)
 
-    # 1. Generate Markdown
-    md_path = run_hybrid(str(input_path), config)
+    # 1️⃣ Generate Markdown (AUTHORITATIVE)
+    md_path = Path(run_hybrid(str(input_path), config))
+    final_path: Path = md_path
 
-    final_path = md_path
-
-    # 2. OPTIONAL PDF (CLI ONLY)
+    # 2️⃣ OPTIONAL PDF (CLI ONLY)
     if config.get("export_pdf", False):
         try:
             from sreejita.reporting.pdf_renderer import PandocPDFRenderer
