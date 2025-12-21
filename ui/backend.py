@@ -22,12 +22,6 @@ def run_analysis_from_ui(
     """
     Streamlit → Framework adapter (v3.3 SAFE)
 
-    Layers:
-    - v1.x : Report generation (AUTHORITATIVE)
-    - v2.x : Domain intelligence (SHADOW)
-    - v2.5 : Policy engine (SHADOW)
-    - v3.x : PDF delivery (PASSIVE ONLY)
-
     HARD RULES:
     - v1 pipeline must NEVER break
     - UI must NEVER require Pandoc
@@ -43,7 +37,6 @@ def run_analysis_from_ui(
     policy_decision = None
 
     try:
-        # Robust file loading
         if input_path.suffix.lower() == ".csv":
             try:
                 df = pd.read_csv(input_path, encoding="utf-8")
@@ -73,27 +66,35 @@ def run_analysis_from_ui(
         )
     )
 
-    # -------------------------------------------------
-    # SAFE PATH RESOLUTION (MD / PDF)
-    # -------------------------------------------------
-    md_report_path = None
-    pdf_report_path = None
     report_exists = report_path.exists()
 
+    # -------------------------------------------------
+    # SAFE ARTIFACT RESOLUTION
+    # -------------------------------------------------
+    md_report_path: Optional[Path] = None
+    pdf_report_path: Optional[Path] = None
+
     if report_exists:
-        if report_path.suffix.lower() == ".pdf":
+        if report_path.suffix.lower() == ".md":
+            md_report_path = report_path
+
+        elif report_path.suffix.lower() == ".pdf":
             pdf_report_path = report_path
             candidate_md = report_path.with_suffix(".md")
             if candidate_md.exists():
                 md_report_path = candidate_md
 
-        elif report_path.suffix.lower() == ".md":
-            md_report_path = report_path
-            candidate_pdf = report_path.with_suffix(".pdf")
-            if candidate_pdf.exists():
-                pdf_report_path = candidate_pdf
     else:
         print("⚠️ Report path returned but file does not exist:", report_path)
+
+    # -------------------------------------------------
+    # NON-BLOCKING DISCOVERY OF EXTERNAL PDFs
+    # (GitHub Actions / Batch / CLI generated)
+    # -------------------------------------------------
+    if md_report_path and not pdf_report_path:
+        possible_pdfs = list(md_report_path.parent.glob("*.pdf"))
+        if possible_pdfs:
+            pdf_report_path = possible_pdfs[0]
 
     # -------------------------------------------------
     # RETURN UI-SAFE PAYLOAD
