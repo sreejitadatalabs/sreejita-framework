@@ -1,14 +1,12 @@
 import yaml
 import copy
 from pathlib import Path
+from typing import Optional
 
 from .defaults import DEFAULT_CONFIG
 from sreejita.config.domain_config import DomainEngineConfig, DomainConfig
 
 
-# -------------------------------------------------
-# DOMAIN ENGINE CONFIG LOADER
-# -------------------------------------------------
 def load_domain_engine_config(cfg: dict) -> DomainEngineConfig:
     domains_cfg = {}
 
@@ -22,66 +20,44 @@ def load_domain_engine_config(cfg: dict) -> DomainEngineConfig:
     )
 
 
-# -------------------------------------------------
-# MAIN CONFIG LOADER (v3.3 SAFE)
-# -------------------------------------------------
-def load_config(path: str | None) -> dict:
+def load_config(path: Optional[str]) -> dict:
     """
     Load and merge user config with framework defaults.
 
-    v3.3 rules:
-    - Defaults must ALWAYS win if user omits fields
-    - dataset / domain sections are OPTIONAL
-    - output_dir MUST always exist
+    v3.3 SAFE:
+    - Python 3.9 compatible
+    - No PEP 604 union types
     """
 
-    # -------------------------------------------------
-    # 1️⃣ Load user config (if provided)
-    # -------------------------------------------------
-    user_config = {}
+    if path is None:
+        # No config provided → return defaults safely
+        return copy.deepcopy(DEFAULT_CONFIG)
 
-    if path:
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
 
-        with open(path, "r", encoding="utf-8") as f:
-            user_config = yaml.safe_load(f) or {}
+    with open(path, "r", encoding="utf-8") as f:
+        user_config = yaml.safe_load(f) or {}
 
-        if not isinstance(user_config, dict):
-            raise ValueError("Config file must contain a YAML dictionary")
+    if not isinstance(user_config, dict):
+        raise ValueError("Config file must contain a YAML dictionary")
 
-    # -------------------------------------------------
-    # 2️⃣ Merge with defaults (SAFE)
-    # -------------------------------------------------
+    # Deep copy defaults to avoid cross-run mutation
     config = copy.deepcopy(DEFAULT_CONFIG)
 
+    # Merge user overrides
     for key, value in user_config.items():
         if isinstance(value, dict) and isinstance(config.get(key), dict):
             config[key].update(value)
         else:
             config[key] = value
 
-    # -------------------------------------------------
-    # 3️⃣ Enforce REQUIRED v3.3 invariants
-    # -------------------------------------------------
+    # Minimal validation (v1.x compatibility)
+    if "dataset" not in config:
+        raise ValueError("Missing required 'dataset' section in config")
 
-    # ALWAYS guarantee output_dir
-    config.setdefault("output_dir", "runs")
+    if "domain" not in config:
+        raise ValueError("Missing required 'domain' section in config")
 
-    # ALWAYS guarantee metadata dict
-    config.setdefault("metadata", {})
-
-    # ALWAYS guarantee export_pdf flag
-    config.setdefault("export_pdf", False)
-
-    # -------------------------------------------------
-    # 4️⃣ Attach domain engine config (if present)
-    # -------------------------------------------------
-    if "domains" in config or "default_min_confidence" in config:
-        config["domain_engine"] = load_domain_engine_config(config)
-
-    # -------------------------------------------------
-    # 5️⃣ FINAL RETURN
-    # -------------------------------------------------
     return config
