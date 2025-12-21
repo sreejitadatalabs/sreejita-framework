@@ -37,6 +37,8 @@ class HybridReport(BaseReport):
         report_name = f"Sreejita_Executive_Report_{datetime.now():%Y-%m-%d}.md"
         report_path = output_dir / report_name
 
+        print(f"📝 Writing Markdown report to: {report_path}")
+
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, metadata)
 
@@ -49,6 +51,7 @@ class HybridReport(BaseReport):
 
             self._write_footer(f)
 
+        print("✅ Markdown report generated successfully")
         return report_path
 
     # -------------------------------------------------
@@ -73,6 +76,10 @@ class HybridReport(BaseReport):
         f.write("\n---\n\n")
         f.write(f"## 🔹 {domain.replace('_', ' ').title()}\n\n")
 
+        if not isinstance(result, dict):
+            f.write("⚠️ _Invalid domain output._\n\n")
+            return
+
         kpis = result.get("kpis", {})
         insights = self._prioritize_insights(result.get("insights", []))
         recs = result.get("recommendations", [])
@@ -84,13 +91,15 @@ class HybridReport(BaseReport):
             for ins in insights:
                 if not ins.get("title") or not ins.get("so_what"):
                     continue
-                f.write(f"#### {self._level_icon(ins.get('level'))} {ins['title']}\n")
+                f.write(
+                    f"#### {self._level_icon(ins.get('level'))} {ins['title']}\n"
+                )
                 f.write(f"{ins['so_what']}\n\n")
         else:
             f.write("✅ _Operations within normal parameters._\n\n")
 
         # KPIs
-        if kpis:
+        if isinstance(kpis, dict) and kpis:
             f.write("### 📉 Key Performance Indicators\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
@@ -100,25 +109,28 @@ class HybridReport(BaseReport):
                     f"| {k.replace('_', ' ').title()} | "
                     f"**{self._format_value(k, v)}** |\n"
                 )
-
             f.write("\n")
 
         # Visuals
-        if visuals:
+        if isinstance(visuals, list) and visuals:
             f.write("### 👁️ Visual Evidence\n")
             for vis in visuals[:2]:
-                img = Path(vis["path"]).name
+                path = vis.get("path")
+                if not path:
+                    continue
+                img = Path(path).name
                 caption = vis.get("caption", "Visualization")
                 f.write(f"![{caption}]({img})\n")
                 f.write(f"> *{caption}*\n\n")
 
         # Actions
-        if recs:
-            f.write("### 🚀 Required Actions\n")
+        if isinstance(recs, list) and recs:
             primary = recs[0]
-            f.write(f"**PRIMARY MANDATE:** {primary['action']}\n")
-            f.write(f"- Priority: {primary.get('priority', 'HIGH')}\n")
-            f.write(f"- Timeline: {primary.get('timeline', 'Immediate')}\n\n")
+            if "action" in primary:
+                f.write("### 🚀 Required Actions\n")
+                f.write(f"**PRIMARY MANDATE:** {primary['action']}\n")
+                f.write(f"- Priority: {primary.get('priority', 'HIGH')}\n")
+                f.write(f"- Timeline: {primary.get('timeline', 'Immediate')}\n\n")
 
     def _write_footer(self, f):
         f.write("\n---\n")
@@ -159,6 +171,8 @@ def run(input_path: str, config: Dict[str, Any]) -> Path:
     Generates Markdown ONLY.
     """
 
+    print("🔥 Hybrid run() called")
+
     from sreejita.reporting.orchestrator import generate_report_payload
 
     domain_results = generate_report_payload(
@@ -171,4 +185,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     engine = HybridReport()
-    return engine.build(domain_results, run_dir, config.get("metadata"))
+    md_path = engine.build(domain_results, run_dir, config.get("metadata"))
+
+    print("📄 MD PATH:", md_path)
+    return md_path
