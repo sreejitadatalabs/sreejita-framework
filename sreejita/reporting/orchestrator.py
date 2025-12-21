@@ -1,26 +1,31 @@
 import logging
-import pandas as pd
 from pathlib import Path
+import pandas as pd
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
-from sreejita.domains.router import DOMAIN_IMPLEMENTATIONS
 
 log = logging.getLogger("sreejita.orchestrator")
 
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
-    v3.2 Orchestrator — SINGLE SOURCE OF TRUTH
+    v3.3 Orchestrator — SINGLE SOURCE OF TRUTH
+
+    Responsibilities:
+    - Load data
+    - Decide domain
+    - Execute domain lifecycle
+    - Return a STANDARDIZED payload
     """
 
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    # ----------------------
-    # Load data
-    # ----------------------
+    # -------------------------------------------------
+    # 1. LOAD DATA
+    # -------------------------------------------------
     if input_path.suffix.lower() == ".csv":
         df = pd.read_csv(input_path)
     elif input_path.suffix.lower() in (".xls", ".xlsx"):
@@ -28,14 +33,15 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     else:
         raise ValueError(f"Unsupported file type: {input_path.suffix}")
 
-    # ----------------------
-    # Domain decision
-    # ----------------------
+    # -------------------------------------------------
+    # 2. DOMAIN DECISION (AUTHORITATIVE)
+    # -------------------------------------------------
     decision = decide_domain(df)
     domain = decision.selected_domain
+    engine = decision.engine
 
-    engine = DOMAIN_IMPLEMENTATIONS.get(domain)
     if engine is None:
+        log.warning("No engine found for domain: %s", domain)
         return {
             "unknown": {
                 "kpis": {"rows": len(df), "cols": len(df.columns)},
@@ -49,29 +55,43 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             }
         }
 
-    # ----------------------
-    # Domain lifecycle
-    # ----------------------
+    # -------------------------------------------------
+    # 3. DOMAIN LIFECYCLE
+    # -------------------------------------------------
     if hasattr(engine, "preprocess"):
         df = engine.preprocess(df)
 
     kpis = engine.calculate_kpis(df)
     insights = engine.generate_insights(df, kpis)
-    recommendations = enrich_recommendations(
-        engine.generate_recommendations(df, kpis)
-    )
 
-    # ----------------------
-    # Visuals
-    # ----------------------
+    raw_recommendations = engine.generate_recommendations(df, kpis)
+    recommendations = enrich_recommendations(raw_recommendations)
+
+    # -------------------------------------------------
+    # 4. VISUALS (REPORT-RELATIVE STRATEGY)
+    # -------------------------------------------------
+    # IMPORTANT:
+    # The orchestrator does NOT decide run_dir.
+    # HybridReport controls final output location.
+    #
+    # Strategy:
+    # - Place visuals in a TEMP folder under output_dir/visuals
+    # - HybridReport will link them by filename
+    #
     output_root = Path(config.get("output_dir", "runs"))
-    visuals_dir = output_root / input_path.stem / "visuals"
+    visuals_dir = output_root / "visuals"
     visuals_dir.mkdir(parents=True, exist_ok=True)
 
     visuals = []
     if hasattr(engine, "generate_visuals"):
-        visuals = engine.generate_visuals(df, visuals_dir)
+        try:
+            visuals = engine.generate_visuals(df, visuals_dir)
+        except Exception as e:
+            log.warning("Visual generation failed: %s", e)
 
+    # -------------------------------------------------
+    # 5. STANDARDIZED PAYLOAD
+    # -------------------------------------------------
     return {
         domain: {
             "kpis": kpis,
