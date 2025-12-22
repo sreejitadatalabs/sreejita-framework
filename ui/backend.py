@@ -20,12 +20,13 @@ def run_analysis_from_ui(
     config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Streamlit → Framework adapter (v3.3 SAFE)
+    Streamlit → Framework adapter (v3.3 FINAL)
 
     HARD RULES:
     - v1 pipeline must NEVER break
-    - UI must NEVER require Pandoc
-    - PDFs are CONSUMED, not GENERATED, here
+    - UI must NEVER render Markdown directly
+    - HTML is the FINAL client artifact
+    - Rendering failures must NEVER block analysis
     """
 
     input_path = Path(input_path)
@@ -58,51 +59,35 @@ def run_analysis_from_ui(
     # -------------------------------------------------
     # v1 REPORT GENERATION (AUTHORITATIVE)
     # -------------------------------------------------
-    # run_single_file ALWAYS returns a PATH STRING
-    report_path = Path(
+    # IMPORTANT: run_single_file ALWAYS returns a PATH STRING
+    md_report_path = Path(
         run_single_file(
             input_path=str(input_path),
             config_path=config_path,
         )
     )
 
-    report_exists = report_path.exists()
+    report_exists = md_report_path.exists()
 
     # -------------------------------------------------
-    # SAFE ARTIFACT RESOLUTION
+    # HTML DISCOVERY (FINAL CLIENT OUTPUT)
     # -------------------------------------------------
-    md_report_path: Optional[Path] = None
-    pdf_report_path: Optional[Path] = None
+    html_report_path: Optional[Path] = None
 
     if report_exists:
-        if report_path.suffix.lower() == ".md":
-            md_report_path = report_path
-
-        elif report_path.suffix.lower() == ".pdf":
-            pdf_report_path = report_path
-            candidate_md = report_path.with_suffix(".md")
-            if candidate_md.exists():
-                md_report_path = candidate_md
-
+        candidate_html = md_report_path.with_suffix(".html")
+        if candidate_html.exists():
+            html_report_path = candidate_html
     else:
-        print("⚠️ Report path returned but file does not exist:", report_path)
-
-    # -------------------------------------------------
-    # NON-BLOCKING DISCOVERY OF EXTERNAL PDFs
-    # (GitHub Actions / Batch / CLI generated)
-    # -------------------------------------------------
-    if md_report_path and not pdf_report_path:
-        possible_pdfs = list(md_report_path.parent.glob("*.pdf"))
-        if possible_pdfs:
-            pdf_report_path = possible_pdfs[0]
+        print("⚠️ Markdown path returned but file does not exist:", md_report_path)
 
     # -------------------------------------------------
     # RETURN UI-SAFE PAYLOAD
     # -------------------------------------------------
     return {
         # v1 artifacts
-        "md_report_path": str(md_report_path) if md_report_path else None,
-        "pdf_report_path": str(pdf_report_path) if pdf_report_path else None,
+        "md_report_path": str(md_report_path) if md_report_path.exists() else None,
+        "html_report_path": str(html_report_path) if html_report_path else None,
         "report_exists": report_exists,
 
         # v2 decision intelligence (shadow)
@@ -117,5 +102,5 @@ def run_analysis_from_ui(
 
         # metadata
         "generated_at": datetime.utcnow().isoformat(),
-        "version": "UI v1.x / Engine v2.x / Policy v2.5 / PDF v3.x",
+        "version": "UI v3.3 / Engine v3.3 / HTML Renderer v1.0",
     }
