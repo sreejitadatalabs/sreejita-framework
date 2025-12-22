@@ -1,7 +1,7 @@
 """
 Sreejita Framework CLI
 Unified CLI + Programmatic Entry Point
-v3.3 — SAFE PDF SUPPORT
+v3.3 — HTML is the official output
 """
 
 import argparse
@@ -23,6 +23,7 @@ from sreejita.domains.bootstrap_v2 import *  # noqa: F401
 
 # reports
 from sreejita.reports.hybrid import run as run_hybrid
+from sreejita.reporting.html_renderer import HTMLReportRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +39,24 @@ def run_single_file(
     Programmatic execution for UI / API use.
 
     v3.3 CONTRACT:
-    - ALWAYS returns Markdown path
-    - NEVER generates PDF
+    - Generates Markdown internally
+    - Returns HTML path
     - SAFE for Streamlit / API
     """
     config = load_config(config_path) if config_path else {}
 
-    md_path = run_hybrid(input_path, config)
-    return str(md_path)
+    # 1️⃣ Generate Markdown (internal)
+    md_path = Path(run_hybrid(input_path, config))
+
+    # 2️⃣ Render HTML (official output)
+    renderer = HTMLReportRenderer()
+    html_path = renderer.render(md_path)
+
+    return str(html_path)
 
 
 # -------------------------------------------------
-# CLI ENTRY (PDF OPTIONAL HERE)
+# CLI ENTRY
 # -------------------------------------------------
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
@@ -122,24 +129,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Processing file %s", input_path)
 
-    # 1️⃣ Generate Markdown (AUTHORITATIVE)
+    # 1️⃣ Generate Markdown
     md_path = Path(run_hybrid(str(input_path), config))
-    final_path: Path = md_path
 
-    # 2️⃣ OPTIONAL PDF (CLI ONLY)
-    if config.get("export_pdf", False):
-        try:
-            from sreejita.reporting.pdf_renderer import PandocPDFRenderer
-
-            renderer = PandocPDFRenderer()
-            final_path = renderer.render(md_path)
-
-        except Exception as e:
-            logger.error("PDF generation failed: %s", e)
-            logger.info("Continuing with Markdown output")
+    # 2️⃣ Render HTML (FINAL OUTPUT)
+    renderer = HTMLReportRenderer()
+    html_path = renderer.render(md_path)
 
     print("\n✅ Report generated successfully")
-    print(f"📄 Report location: {final_path}")
+    print(f"🌐 HTML Report location: {html_path}")
     return 0
 
 
