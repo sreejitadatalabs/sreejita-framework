@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from sreejita.reports.hybrid import run as run_hybrid
+from sreejita.reporting.html_renderer import HTMLReportRenderer
 from sreejita.config.loader import load_config
 from sreejita.utils.logger import get_logger
 from sreejita.automation.retry import retry
@@ -23,10 +24,10 @@ def run_single_file(
     Process a single file in batch mode.
 
     v3.3 CONTRACT:
-    - Generates Markdown report (AUTHORITATIVE)
-    - PDF generation is OPTIONAL and SAFE
-    - Never breaks batch execution
+    - Markdown is INTERNAL only
+    - HTML is the FINAL output
     - One isolated folder per input file
+    - Batch execution must NEVER fail due to rendering
     """
 
     src = Path(file_path)
@@ -53,39 +54,34 @@ def run_single_file(
     local_config["output_dir"] = str(file_run_dir)
 
     # -------------------------------------------------
-    # 3️⃣ Generate Markdown (AUTHORITATIVE)
+    # 3️⃣ Generate Markdown (AUTHORITATIVE, INTERNAL)
     # -------------------------------------------------
     md_path = Path(run_hybrid(str(dst), local_config))
 
     if not md_path.exists():
         raise RuntimeError(f"Markdown report not created: {md_path}")
 
-    log.info("Markdown report generated: %s", md_path)
-
-    pdf_path = None
+    log.info("Markdown generated (internal): %s", md_path)
 
     # -------------------------------------------------
-    # 4️⃣ OPTIONAL: Generate PDF (SAFE & ISOLATED)
+    # 4️⃣ Render HTML (FINAL OUTPUT)
     # -------------------------------------------------
-    if local_config.get("export_pdf", False):
-        try:
-            from sreejita.reporting.pdf_renderer import PandocPDFRenderer
+    html_path = None
+    try:
+        renderer = HTMLReportRenderer()
+        html_path = renderer.render(md_path)
+        log.info("HTML report generated: %s", html_path)
 
-            renderer = PandocPDFRenderer()
-            pdf_path = renderer.render(md_path)
-
-            log.info("PDF report generated: %s", pdf_path)
-
-        except Exception as e:
-            # ABSOLUTE RULE: batch must never fail due to PDF
-            log.warning("PDF generation skipped: %s", e)
+    except Exception as e:
+        # ABSOLUTE RULE: batch must never fail due to rendering
+        log.warning("HTML rendering failed: %s", e)
 
     log.info("Completed file: %s", src.name)
 
     return {
         "file": src.name,
         "md_path": str(md_path),
-        "pdf_path": str(pdf_path) if pdf_path else None,
+        "html_path": str(html_path) if html_path else None,
         "run_dir": str(file_run_dir),
     }
 
