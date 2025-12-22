@@ -1,18 +1,26 @@
-# sreejita/reporting/html_renderer.py
-
 from pathlib import Path
+from typing import Optional
+
 import markdown
 
 
 class HTMLReportRenderer:
     """
-    Converts Markdown reports into self-contained HTML.
-    No external dependencies.
+    Converts Markdown reports into standalone HTML.
+
+    v3.3 SAFE:
+    - Python 3.9 compatible
+    - No side effects
+    - Rendering-only layer
     """
 
-    def render(self, md_path: Path, output_dir: Path | None = None) -> Path:
+    def render(
+        self,
+        md_path: Path,
+        output_dir: Optional[Path] = None,
+    ) -> Path:
         if not md_path.exists():
-            raise FileNotFoundError(md_path)
+            raise FileNotFoundError(f"Markdown file not found: {md_path}")
 
         if output_dir is None:
             output_dir = md_path.parent
@@ -21,44 +29,35 @@ class HTMLReportRenderer:
 
         html_path = output_dir / md_path.with_suffix(".html").name
 
-        md_text = md_path.read_text(encoding="utf-8")
+        # Read Markdown
+        with open(md_path, "r", encoding="utf-8") as f:
+            md_text = f.read()
+
+        # Convert to HTML
         html_body = markdown.markdown(
             md_text,
-            extensions=["tables", "fenced_code"]
+            extensions=["tables", "fenced_code"],
         )
 
-        html = f"""
-<!DOCTYPE html>
+        # Simple standalone HTML wrapper
+        html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8"/>
-    <title>Sreejita Executive Report</title>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            line-height: 1.6;
-        }}
-        h1, h2, h3 {{
-            color: #1f2937;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-        }}
-        table, th, td {{
-            border: 1px solid #ddd;
-        }}
-        th, td {{
-            padding: 8px;
-            text-align: left;
-        }}
-        blockquote {{
-            background: #f9fafb;
-            padding: 10px 20px;
-            border-left: 4px solid #3b82f6;
-        }}
-    </style>
+<meta charset="utf-8">
+<title>Sreejita Report</title>
+<style>
+body {{
+    font-family: Arial, sans-serif;
+    margin: 40px;
+}}
+table {{
+    border-collapse: collapse;
+}}
+table, th, td {{
+    border: 1px solid #999;
+    padding: 6px;
+}}
+</style>
 </head>
 <body>
 {html_body}
@@ -66,5 +65,7 @@ class HTMLReportRenderer:
 </html>
 """
 
-        html_path.write_text(html, encoding="utf-8")
-        return html_path 
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        return html_path
