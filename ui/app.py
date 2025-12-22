@@ -1,5 +1,5 @@
 # -------------------------------------------------
-# Streamlit App — Sreejita Framework (Hybrid Demo)
+# Streamlit App — Sreejita Framework
 # v3.3 SAFE (GitHub Web Compatible)
 # -------------------------------------------------
 
@@ -9,14 +9,14 @@ import uuid
 import streamlit as st
 
 # -------------------------------------------------
-# FIX: Ensure project root is in PYTHONPATH
+# Ensure project root is in PYTHONPATH
 # -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # -------------------------------------------------
-# Import backend adapter ONLY (NO PDF LOGIC)
+# Backend adapter ONLY (no rendering logic here)
 # -------------------------------------------------
 from ui.backend import run_analysis_from_ui
 
@@ -26,7 +26,7 @@ from ui.backend import run_analysis_from_ui
 st.set_page_config(
     page_title="Sreejita Framework",
     page_icon="📊",
-    layout="centered"
+    layout="centered",
 )
 
 # -------------------------------------------------
@@ -34,8 +34,8 @@ st.set_page_config(
 # -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
-st.markdown("**Version:** UI v2.0 / Engine v3.3")
-st.info("Hybrid Intelligence • Markdown Source • PDF via GitHub Actions")
+st.markdown("**Version:** UI v3.3 / Engine v3.3")
+st.info("Hybrid Intelligence • Markdown Source • HTML Delivery")
 st.divider()
 
 # -------------------------------------------------
@@ -45,7 +45,7 @@ st.subheader("1️⃣ Upload Dataset")
 
 uploaded_file = st.file_uploader(
     "Upload a CSV or Excel file",
-    type=["csv", "xlsx"]
+    type=["csv", "xlsx"],
 )
 
 if uploaded_file:
@@ -60,14 +60,10 @@ st.subheader("2️⃣ Configuration")
 domain = st.selectbox(
     "Select domain",
     options=["Auto", "Retail", "Finance", "HR", "Healthcare", "Supply Chain"],
-    help="Auto domain detection powered by v3 engine"
+    help="Auto domain detection powered by v3 engine",
 )
 
-report_type = st.selectbox(
-    "Report type",
-    options=["Hybrid (Markdown → PDF)"],
-    index=0
-)
+st.divider()
 
 # -------------------------------------------------
 # 3️⃣ Run Analysis
@@ -82,23 +78,21 @@ if run_clicked:
     if not uploaded_file:
         st.error("Please upload a dataset first.")
     else:
-        with st.spinner("Running analysis (Markdown generation)..."):
+        with st.spinner("Running analysis..."):
             try:
                 # Temp directory for uploads
                 temp_dir = Path("ui/temp")
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
-                # Save uploaded file
                 file_id = uuid.uuid4().hex[:8]
                 input_path = temp_dir / f"{file_id}_{uploaded_file.name}"
 
                 with open(input_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                # Run backend (MD ONLY)
                 result = run_analysis_from_ui(
                     input_path=str(input_path),
-                    domain=domain
+                    domain=domain,
                 )
 
             except Exception as e:
@@ -106,7 +100,7 @@ if run_clicked:
                 st.exception(e)
 
 # -------------------------------------------------
-# 4️⃣ Output (SAFE DELIVERY)
+# 4️⃣ Output (CLIENT-SAFE DELIVERY)
 # -------------------------------------------------
 if result:
     st.divider()
@@ -114,9 +108,25 @@ if result:
 
     st.success("✅ Analysis completed")
 
-    # -------------------------------------------------
-    # Markdown Report (IMMEDIATE & GUARANTEED)
-    # -------------------------------------------------
+    # -----------------------------
+    # HTML REPORT (PRIMARY)
+    # -----------------------------
+    html_path = result.get("html_report_path")
+
+    if html_path and Path(html_path).exists():
+        with open(html_path, "rb") as f:
+            st.download_button(
+                label="🌐 Download Report (HTML)",
+                data=f,
+                file_name=Path(html_path).name,
+                mime="text/html",
+            )
+    else:
+        st.info("HTML report not available for this run.")
+
+    # -----------------------------
+    # MARKDOWN REPORT (FALLBACK)
+    # -----------------------------
     md_path = result.get("md_report_path")
 
     if md_path and Path(md_path).exists():
@@ -125,40 +135,12 @@ if result:
                 label="📄 Download Report (Markdown)",
                 data=f,
                 file_name=Path(md_path).name,
-                mime="text/markdown"
+                mime="text/markdown",
             )
-    else:
-        st.warning("Markdown report not found.")
 
-    # -------------------------------------------------
-    # PDF Reports (ASYNC via GitHub Actions)
-    # -------------------------------------------------
-    st.markdown("### 📂 Available PDF Reports")
-
-    pdfs = sorted(
-        Path("runs").rglob("*.pdf"),
-        reverse=True
-    )
-
-    if not pdfs:
-        st.info(
-            "PDFs are generated asynchronously via GitHub Actions.\n\n"
-            "➡️ Commit the Markdown file and wait for the workflow to finish."
-        )
-    else:
-        for pdf in pdfs[:10]:
-            with open(pdf, "rb") as f:
-                st.download_button(
-                    label=f"📄 Download {pdf.name}",
-                    data=f,
-                    file_name=pdf.name,
-                    mime="application/pdf",
-                    key=str(pdf)
-                )
-
-    # -------------------------------------------------
-    # Intelligence Metadata (Read-only)
-    # -------------------------------------------------
+    # -----------------------------
+    # Decision Intelligence
+    # -----------------------------
     with st.expander("🧠 Decision Intelligence"):
         st.json({
             "selected_domain": result.get("domain"),
