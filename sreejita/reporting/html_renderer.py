@@ -8,24 +8,26 @@ import markdown
 
 class HTMLReportRenderer:
     """
-    Converts Markdown reports into standalone HTML
-    with visual evidence support.
+    Markdown → HTML renderer with visual evidence support.
 
-    v3.3 SAFE:
-    - Python 3.9 compatible
-    - Copies images automatically
-    - No side effects
+    v3.3 FINAL FIX:
+    - Resolves visuals/ subfolder automatically
+    - Copies images beside HTML
+    - Python 3.9 safe
     """
 
-    IMAGE_PATTERN = re.compile(r'<img[^>]+src="([^"]+)"')
+    IMG_REGEX = re.compile(r'<img[^>]+src="([^"]+)"')
 
     def render(
         self,
         md_path: Path,
         output_dir: Optional[Path] = None,
     ) -> Path:
+
         if not md_path.exists():
             raise FileNotFoundError(f"Markdown file not found: {md_path}")
+
+        md_path = Path(md_path)
 
         if output_dir is None:
             output_dir = md_path.parent
@@ -34,35 +36,43 @@ class HTMLReportRenderer:
 
         html_path = output_dir / md_path.with_suffix(".html").name
 
-        # ----------------------------
+        # -------------------------------------------------
         # Read Markdown
-        # ----------------------------
+        # -------------------------------------------------
         md_text = md_path.read_text(encoding="utf-8")
 
-        # ----------------------------
-        # Convert Markdown → HTML
-        # ----------------------------
+        # -------------------------------------------------
+        # Convert to HTML
+        # -------------------------------------------------
         html_body = markdown.markdown(
             md_text,
             extensions=["tables", "fenced_code"],
         )
 
-        # ----------------------------
-        # Resolve and copy images
-        # ----------------------------
-        md_dir = md_path.parent
+        # -------------------------------------------------
+        # Resolve images (KEY FIX)
+        # -------------------------------------------------
+        visuals_dir = md_path.parent / "visuals"
 
-        for img_src in self.IMAGE_PATTERN.findall(html_body):
-            img_path = md_dir / img_src
+        for img_src in self.IMG_REGEX.findall(html_body):
+            img_name = Path(img_src).name
 
-            if img_path.exists():
-                target_path = output_dir / img_path.name
-                if not target_path.exists():
-                    shutil.copy(img_path, target_path)
+            # Prefer visuals/ folder
+            candidate_paths = [
+                md_path.parent / img_name,
+                visuals_dir / img_name,
+            ]
 
-        # ----------------------------
-        # Wrap in clean HTML template
-        # ----------------------------
+            for src_path in candidate_paths:
+                if src_path.exists():
+                    target_path = output_dir / img_name
+                    if not target_path.exists():
+                        shutil.copy(src_path, target_path)
+                    break
+
+        # -------------------------------------------------
+        # Wrap HTML
+        # -------------------------------------------------
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -86,7 +96,7 @@ table, th, td {{
 }}
 img {{
     max-width: 100%;
-    margin: 10px 0;
+    margin: 12px 0;
     border: 1px solid #ddd;
 }}
 blockquote {{
