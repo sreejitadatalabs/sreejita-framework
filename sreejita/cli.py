@@ -35,13 +35,12 @@ def run_single_file(
     - Accepts config_path (CLI)
     - Returns HTML report path
 
-    IMPORTANT:
-    Heavy imports are intentionally lazy to keep
-    `--help` and `--version` working.
+    Heavy imports are intentionally lazy so that
+    `--help` and `--version` work without errors.
     """
 
-    # 🔥 Lazy imports (CRITICAL)
-    from sreejita.domains.bootstrap_v2 import *  # noqa: F401
+    # 🔥 Lazy imports (Python-legal)
+    import sreejita.domains.bootstrap_v2  # noqa: F401
     from sreejita.reporting.hybrid import run as run_hybrid
     from sreejita.reporting.html_renderer import HTMLReportRenderer
 
