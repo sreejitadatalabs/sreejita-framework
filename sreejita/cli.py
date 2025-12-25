@@ -1,14 +1,14 @@
 """
 Sreejita Framework CLI
 Unified CLI + Programmatic Entry Point
-v3.3 — HTML is the official output
+v3.5 — HTML is the official output
 """
 
 import argparse
 import logging
 from pathlib import Path
 import sys
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from sreejita.__version__ import __version__
 from sreejita.config.loader import load_config
@@ -22,7 +22,7 @@ from sreejita.automation.scheduler import start_scheduler
 from sreejita.domains.bootstrap_v2 import *  # noqa: F401
 
 # reports
-from sreejita.reports.hybrid import run as run_hybrid
+from sreejita.reporting.hybrid import run as run_hybrid
 from sreejita.reporting.html_renderer import HTMLReportRenderer
 
 logger = logging.getLogger(__name__)
@@ -34,21 +34,34 @@ logger = logging.getLogger(__name__)
 def run_single_file(
     input_path: str,
     config_path: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Programmatic execution for UI / API use.
 
-    v3.3 CONTRACT:
+    v3.5 CONTRACT:
+    - Accepts either config_path (CLI) OR config dict (UI)
     - Generates Markdown internally
     - Returns HTML path
     - SAFE for Streamlit / API
     """
-    config = load_config(config_path) if config_path else {}
 
-    # 1️⃣ Generate Markdown (internal)
-    md_path = Path(run_hybrid(input_path, config))
+    # -----------------------------
+    # Load config safely
+    # -----------------------------
+    if config is not None:
+        final_config = config
+    else:
+        final_config = load_config(config_path) if config_path else {}
 
-    # 2️⃣ Render HTML (official output)
+    # -----------------------------
+    # Generate Markdown
+    # -----------------------------
+    md_path = Path(run_hybrid(input_path, final_config))
+
+    # -----------------------------
+    # Render HTML (OFFICIAL OUTPUT)
+    # -----------------------------
     renderer = HTMLReportRenderer()
     html_path = renderer.render(md_path)
 
@@ -129,12 +142,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Processing file %s", input_path)
 
-    # 1️⃣ Generate Markdown
-    md_path = Path(run_hybrid(str(input_path), config))
-
-    # 2️⃣ Render HTML (FINAL OUTPUT)
-    renderer = HTMLReportRenderer()
-    html_path = renderer.render(md_path)
+    # Generate report via shared entry
+    html_path = run_single_file(
+        input_path=str(input_path),
+        config_path=args.config,
+    )
 
     print("\n✅ Report generated successfully")
     print(f"🌐 HTML Report location: {html_path}")
