@@ -32,13 +32,16 @@ def run_single_file(
     Programmatic execution for UI / API use.
 
     Streamlit-safe, pytest-safe, v3.5-safe.
+    Heavy imports are intentionally lazy.
     """
 
     # 🔥 Robust lazy imports (Streamlit-safe)
     import importlib
 
+    # domain bootstrap (side effects only)
     importlib.import_module("sreejita.domains.bootstrap_v2")
 
+    # reporting adapters
     hybrid_module = importlib.import_module("sreejita.reporting.hybrid")
     html_renderer_module = importlib.import_module(
         "sreejita.reporting.html_renderer"
@@ -67,6 +70,7 @@ def run_single_file(
     html_path = renderer.render(md_path)
 
     return str(html_path)
+
 
 # -------------------------------------------------
 # CLI ENTRY
