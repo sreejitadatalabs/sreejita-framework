@@ -41,10 +41,9 @@ class HybridReport(BaseReport):
         run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
 
         with open(report_path, "w", encoding="utf-8") as f:
-            # Header + Executive Summary
             self._write_header(f, run_id, metadata)
 
-            # v3.5 OPTIONAL AI NARRATIVE
+            # v3.5 OPTIONAL AI NARRATIVE (FAIL-SAFE)
             self._write_optional_narrative(
                 f,
                 run_id,
@@ -52,7 +51,6 @@ class HybridReport(BaseReport):
                 config,
             )
 
-            # Domain sections
             for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
                     f,
@@ -88,7 +86,6 @@ class HybridReport(BaseReport):
         from sreejita.narrative.llm import LLMClient
         from sreejita.narrative.composer import generate_narrative
 
-        # Use highest-priority domain only
         domain = self._sort_domains(domain_results.keys())[0]
         result = domain_results.get(domain, {})
 
@@ -123,14 +120,15 @@ class HybridReport(BaseReport):
         )
 
         llm_client = LLMClient(narrative_cfg)
+
         try:
             narrative_text = generate_narrative(narrative_input, llm_client)
-        except Exception as e:
+        except Exception:
             # v3.5 rule: AI failure must NEVER block report generation
-        f.write(
-            "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
-        )
-        return
+            f.write(
+                "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
+            )
+            return
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
         f.write(
@@ -163,7 +161,7 @@ class HybridReport(BaseReport):
         )
 
     # -------------------------------------------------
-    # DOMAIN SECTIONS (UNCHANGED)
+    # DOMAIN SECTIONS
     # -------------------------------------------------
 
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
@@ -179,7 +177,6 @@ class HybridReport(BaseReport):
         recs = result.get("recommendations", [])
         visuals = result.get("visuals", [])
 
-        # Strategic Intelligence
         f.write("### 🧠 Strategic Intelligence\n")
         if insights:
             for ins in insights:
@@ -192,12 +189,10 @@ class HybridReport(BaseReport):
         else:
             f.write("_Operations within normal parameters._\n\n")
 
-        # KPIs
         if isinstance(kpis, dict) and kpis:
             f.write("### 📉 Key Performance Indicators\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
-
             for k, v in list(kpis.items())[:8]:
                 f.write(
                     f"| {k.replace('_', ' ').title()} | "
@@ -205,7 +200,6 @@ class HybridReport(BaseReport):
                 )
             f.write("\n")
 
-        # Visual Evidence
         if isinstance(visuals, list) and visuals:
             f.write("### 👁️ Visual Evidence\n")
             for idx, vis in enumerate(visuals[:2], start=1):
@@ -217,7 +211,6 @@ class HybridReport(BaseReport):
                 f.write(f"![{caption}]({img})\n")
                 f.write(f"> *Fig {idx}.1 — {caption}*\n\n")
 
-        # Action Plan
         if isinstance(recs, list) and recs:
             primary = recs[0]
             if "action" in primary:
