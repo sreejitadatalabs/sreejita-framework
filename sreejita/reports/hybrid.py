@@ -5,18 +5,27 @@ import uuid
 
 from sreejita.reporting.base import BaseReport
 
+# v3.5 Narrative imports (OPTIONAL)
+from sreejita.narrative.schema import (
+    NarrativeInput,
+    NarrativeInsight,
+    NarrativeAction,
+)
+from sreejita.narrative.llm import LLMClient
+from sreejita.narrative.composer import generate_narrative
+
 
 # =====================================================
-# HYBRID REPORT (v3.4 – MARKDOWN SOURCE OF TRUTH)
+# HYBRID REPORT (v3.5 – MD SOURCE OF TRUTH)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
-    Hybrid v3.4 Report Engine
+    Hybrid v3.5 Report Engine
 
-    - Decision-first narrative
-    - Client-ready executive structure
-    - Markdown is the single source of truth
+    - Deterministic intelligence (v3.4)
+    - Optional AI-assisted narrative layer (v3.5)
+    - Markdown remains the single source of truth
     """
 
     name = "hybrid"
@@ -30,6 +39,7 @@ class HybridReport(BaseReport):
         domain_results: Dict[str, Dict[str, Any]],
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
         output_dir = Path(output_dir)
@@ -41,6 +51,16 @@ class HybridReport(BaseReport):
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
+
+            # -----------------------------------------
+            # OPTIONAL v3.5 AI-ASSISTED NARRATIVE
+            # -----------------------------------------
+            self._write_optional_narrative(
+                f,
+                run_id,
+                domain_results,
+                config or {},
+            )
 
             for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
@@ -54,7 +74,67 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # SECTIONS
+    # OPTIONAL NARRATIVE SECTION (v3.5)
+    # -------------------------------------------------
+
+    def _write_optional_narrative(
+        self,
+        f,
+        run_id: str,
+        domain_results: Dict[str, Dict[str, Any]],
+        config: Dict[str, Any],
+    ):
+        narrative_cfg = config.get("narrative", {})
+        if not narrative_cfg.get("enabled", False):
+            return  # v3.4 behavior (NO CHANGE)
+
+        # Use highest-priority domain only
+        domain = self._sort_domains(domain_results.keys())[0]
+        result = domain_results.get(domain, {})
+
+        insights = self._prioritize_insights(result.get("insights", []))
+        recs = result.get("recommendations", [])
+
+        narrative_input = NarrativeInput(
+            run_id=run_id,
+            domain=domain.replace("_", " ").title(),
+            insights=[
+                NarrativeInsight(
+                    level=i.get("level"),
+                    title=i.get("title"),
+                    description=i.get("so_what"),
+                )
+                for i in insights
+                if i.get("title") and i.get("so_what")
+            ],
+            actions=[
+                NarrativeAction(
+                    action=r.get("action"),
+                    priority=r.get("priority", "HIGH"),
+                    timeline=r.get("timeline", "Immediate"),
+                )
+                for r in recs[:1]
+                if r.get("action")
+            ],
+            confidence_band=narrative_cfg.get("confidence_band", "MEDIUM"),
+        )
+
+        llm_client = LLMClient(narrative_cfg)
+        narrative_text = generate_narrative(narrative_input, llm_client)
+
+        if not narrative_text:
+            return
+
+        f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
+        f.write(
+            "> ⚠️ This section is generated using an AI language model. "
+            "It explains existing decisions in simpler language. "
+            "It does not introduce new insights or recommendations.\n\n"
+        )
+        f.write(narrative_text.strip() + "\n\n")
+
+    # -------------------------------------------------
+    # STANDARD SECTIONS (UNCHANGED FROM v3.4)
     # -------------------------------------------------
 
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
@@ -63,7 +143,7 @@ class HybridReport(BaseReport):
         f.write("## Executive Summary\n\n")
         f.write(f"- **Run ID:** {run_id}\n")
         f.write(f"- **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n")
-        f.write(f"- **Framework Version:** Sreejita v3.4\n")
+        f.write("- **Framework Version:** Sreejita v3.5\n")
 
         if metadata:
             for k, v in metadata.items():
@@ -71,8 +151,8 @@ class HybridReport(BaseReport):
 
         f.write(
             "\n> This report presents decision-grade insights generated using "
-            "**Sreejita Composite Intelligence**, focusing on risks, opportunities, "
-            "and recommended actions.\n\n"
+            "**Sreejita Composite Intelligence**, focusing on risks, "
+            "opportunities, and recommended actions.\n\n"
         )
 
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
@@ -123,9 +203,8 @@ class HybridReport(BaseReport):
                     continue
                 img = Path(path).name
                 caption = vis.get("caption", "Visualization")
-                fig_id = f"Fig {idx}.1"
                 f.write(f"![{caption}]({img})\n")
-                f.write(f"> *{fig_id} — {caption}*\n\n")
+                f.write(f"> *Fig {idx}.1 — {caption}*\n\n")
 
         # Action Plan
         if isinstance(recs, list) and recs:
@@ -144,11 +223,11 @@ class HybridReport(BaseReport):
         f.write("\n---\n")
         f.write(
             "_Prepared by **Sreejita Data Labs** · "
-            "Framework v3.4 · Confidential_\n"
+            "Framework v3.5 · Confidential_\n"
         )
 
     # -------------------------------------------------
-    # HELPERS
+    # HELPERS (UNCHANGED)
     # -------------------------------------------------
 
     def _prioritize_insights(self, insights: List[Dict[str, Any]]):
