@@ -1,7 +1,6 @@
 """
 Sreejita Framework CLI
-Unified CLI + Programmatic Entry Point
-v3.5 — HTML is the official output
+v3.5 — Safe CLI + Programmatic Entry
 """
 
 import argparse
@@ -13,17 +12,14 @@ from typing import List, Optional, Dict, Any
 from sreejita.__version__ import __version__
 from sreejita.config.loader import load_config
 
-# automation
+# automation (safe to import)
 from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
-# 🔥 DOMAIN BOOTSTRAP — MUST BE FIRST
-from sreejita.domains.bootstrap_v2 import *  # noqa: F401
-
-# reports
-from sreejita.reporting.hybrid import run as run_hybrid
-from sreejita.reporting.html_renderer import HTMLReportRenderer
+# IMPORTANT:
+# Do NOT import reporting or domains at top-level
+# This keeps --help / --version safe
 
 logger = logging.getLogger(__name__)
 
@@ -39,29 +35,26 @@ def run_single_file(
     """
     Programmatic execution for UI / API use.
 
-    v3.5 CONTRACT:
-    - Accepts either config_path (CLI) OR config dict (UI)
-    - Generates Markdown internally
-    - Returns HTML path
-    - SAFE for Streamlit / API
+    - Accepts config dict (Streamlit)
+    - Accepts config_path (CLI)
+    - Returns HTML report path
     """
 
-    # -----------------------------
-    # Load config safely
-    # -----------------------------
+    # 🔥 Lazy imports (CRITICAL)
+    from sreejita.domains.bootstrap_v2 import *  # noqa: F401
+    from sreejita.reporting.hybrid import run as run_hybrid
+    from sreejita.reporting.html_renderer import HTMLReportRenderer
+
+    # Load config
     if config is not None:
         final_config = config
     else:
         final_config = load_config(config_path) if config_path else {}
 
-    # -----------------------------
     # Generate Markdown
-    # -----------------------------
     md_path = Path(run_hybrid(input_path, final_config))
 
-    # -----------------------------
-    # Render HTML (OFFICIAL OUTPUT)
-    # -----------------------------
+    # Render HTML
     renderer = HTMLReportRenderer()
     html_path = renderer.render(md_path)
 
@@ -94,7 +87,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
-    # ---- VERSION ----
+    # ---- VERSION (MUST EXIT EARLY) ----
     if args.version:
         print(f"Sreejita Framework v{__version__}")
         return 0
@@ -142,7 +135,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Processing file %s", input_path)
 
-    # Generate report via shared entry
     html_path = run_single_file(
         input_path=str(input_path),
         config_path=args.config,
