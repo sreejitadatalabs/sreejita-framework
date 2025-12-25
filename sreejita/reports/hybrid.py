@@ -1,20 +1,21 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import uuid
 
 from sreejita.reporting.base import BaseReport
 
 
 # =====================================================
-# HYBRID REPORT (v3.3 – MARKDOWN SOURCE OF TRUTH)
+# HYBRID REPORT (v3.4 – MARKDOWN SOURCE OF TRUTH)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
-    Hybrid v3.3 Report Engine
+    Hybrid v3.4 Report Engine
 
     - Decision-first narrative
-    - Composite intelligence
+    - Client-ready executive structure
     - Markdown is the single source of truth
     """
 
@@ -30,22 +31,16 @@ class HybridReport(BaseReport):
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
-        """
-        Build a Markdown report.
-
-        CONTRACT:
-        - output_dir is provided by caller (CLI / Batch / UI)
-        - Hybrid does NOT create timestamps
-        - Hybrid does NOT generate PDFs
-        """
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         report_path = output_dir / "Sreejita_Executive_Report.md"
 
+        run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
+
         with open(report_path, "w", encoding="utf-8") as f:
-            self._write_header(f, metadata)
+            self._write_header(f, run_id, metadata)
 
             for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
@@ -62,18 +57,22 @@ class HybridReport(BaseReport):
     # SECTIONS
     # -------------------------------------------------
 
-    def _write_header(self, f, metadata: Optional[Dict[str, Any]]):
-        f.write("# 📊 Executive Decision Report\n")
-        f.write(f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n")
+    def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
+        f.write("# 📊 Executive Decision Report\n\n")
+
+        f.write("## Executive Summary\n\n")
+        f.write(f"- **Run ID:** {run_id}\n")
+        f.write(f"- **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n")
+        f.write(f"- **Framework Version:** Sreejita v3.4\n")
 
         if metadata:
             for k, v in metadata.items():
-                f.write(f"- **{k}**: {v}\n")
-            f.write("\n")
+                f.write(f"- **{k.replace('_', ' ').title()}**: {v}\n")
 
         f.write(
-            "> ⚠️ **Executive Summary**: This report uses **v3 Composite Intelligence** "
-            "to prioritize root-cause risks over raw metrics.\n\n"
+            "\n> This report presents decision-grade insights generated using "
+            "**Sreejita Composite Intelligence**, focusing on risks, opportunities, "
+            "and recommended actions.\n\n"
         )
 
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
@@ -90,8 +89,8 @@ class HybridReport(BaseReport):
         visuals = result.get("visuals", [])
 
         # Strategic Intelligence
+        f.write("### 🧠 Strategic Intelligence\n")
         if insights:
-            f.write("### 🧠 Strategic Intelligence\n")
             for ins in insights:
                 if not ins.get("title") or not ins.get("so_what"):
                     continue
@@ -115,30 +114,38 @@ class HybridReport(BaseReport):
                 )
             f.write("\n")
 
-        # Visuals
+        # Visual Evidence
         if isinstance(visuals, list) and visuals:
             f.write("### 👁️ Visual Evidence\n")
-            for vis in visuals[:2]:
+            for idx, vis in enumerate(visuals[:2], start=1):
                 path = vis.get("path")
                 if not path:
                     continue
                 img = Path(path).name
                 caption = vis.get("caption", "Visualization")
+                fig_id = f"Fig {idx}.1"
                 f.write(f"![{caption}]({img})\n")
-                f.write(f"> *{caption}*\n\n")
+                f.write(f"> *{fig_id} — {caption}*\n\n")
 
-        # Actions
+        # Action Plan
         if isinstance(recs, list) and recs:
             primary = recs[0]
             if "action" in primary:
-                f.write("### 🚀 Required Actions\n")
-                f.write(f"**PRIMARY MANDATE:** {primary['action']}\n")
-                f.write(f"- Priority: {primary.get('priority', 'HIGH')}\n")
-                f.write(f"- Timeline: {primary.get('timeline', 'Immediate')}\n\n")
+                f.write("### 🚀 Action Plan\n")
+                f.write("| Action | Priority | Timeline |\n")
+                f.write("| :--- | :--- | :--- |\n")
+                f.write(
+                    f"| {primary['action']} | "
+                    f"{primary.get('priority', 'HIGH')} | "
+                    f"{primary.get('timeline', 'Immediate')} |\n\n"
+                )
 
     def _write_footer(self, f):
         f.write("\n---\n")
-        f.write("_Powered by Sreejita Framework v3.3_")
+        f.write(
+            "_Prepared by **Sreejita Data Labs** · "
+            "Framework v3.4 · Confidential_\n"
+        )
 
     # -------------------------------------------------
     # HELPERS
@@ -149,7 +156,7 @@ class HybridReport(BaseReport):
         return sorted(insights, key=lambda i: order.get(i.get("level"), 3))[:5]
 
     def _sort_domains(self, domains):
-        priority = ["finance", "retail", "ecommerce", "supply_chain"]
+        priority = ["finance", "retail", "ecommerce", "supply_chain", "healthcare"]
         return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
     def _level_icon(self, level: str):
@@ -173,14 +180,6 @@ class HybridReport(BaseReport):
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Path:
-    """
-    Entry point used by CLI / Batch / UI.
-
-    CONTRACT:
-    - Generates Markdown ONLY
-    - Respects config["output_dir"]
-    """
-
     from sreejita.reporting.orchestrator import generate_report_payload
 
     domain_results = generate_report_payload(
