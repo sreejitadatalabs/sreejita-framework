@@ -132,9 +132,8 @@ class HybridReport(BaseReport):
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
         f.write(
-            "> ⚠️ *This section is AI-assisted. It explains existing insights "
-            "and recommendations in natural language. "
-            "No new metrics or decisions are introduced.*\n\n"
+            "> ⚠️ *This section is AI-assisted and optional. It summarizes existing decisions "
+            "using a language model. No new metrics or recommendations are introduced. *\n\n"
         )
         f.write(narrative_text.strip() + "\n\n")
 
