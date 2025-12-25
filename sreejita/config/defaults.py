@@ -1,63 +1,39 @@
 DEFAULT_CONFIG = {
     # -----------------------------
-    # DATASET METADATA (OPTIONAL)
-    # -----------------------------
-    "dataset": {
-        "date": None,
-        "target": None,
-    },
-
-    # -----------------------------
-    # ANALYSIS HINTS (OPTIONAL)
-    # -----------------------------
-    "analysis": {
-        "numeric": [],
-        "categorical": [],
-    },
-
-    # -----------------------------
-    # DOMAIN OVERRIDES (OPTIONAL)
+    # DOMAIN (AUTO BY DEFAULT)
     # -----------------------------
     "domain": {
-        "name": "auto",  # auto-detect by default
+        "name": "auto",
     },
-    
+
     # -----------------------------
-    # LLM NARRATIVE
+    # LLM NARRATIVE (v3.5)
     # -----------------------------
     "narrative": {
-    "enabled": False,      # OFF by default
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "confidence_band": "MEDIUM",
+        "enabled": False,          # OFF by default
+        "provider": "openai",      # openai | gemini
+        "model": "gpt-4o-mini",    # production default
+        "confidence_band": "MEDIUM",
     },
 
     # -----------------------------
-    # REPORTING (v3.3)
+    # REPORTING
     # -----------------------------
     "report": {
-        "mode": "hybrid",      # hybrid | executive | dynamic
-        "format": "md",        # md is SOURCE OF TRUTH
+        "mode": "hybrid",          # hybrid | executive | dynamic
+        "format": "md",            # Markdown = source of truth
     },
 
     # -----------------------------
-    # OUTPUT CONTROL (CRITICAL)
+    # OUTPUT
     # -----------------------------
     "output_dir": "runs",
 
     # -----------------------------
-    # DELIVERY (OPTIONAL)
-    # -----------------------------
-    # NOTE:
-    # - HybridReport does NOT generate PDF
-    # - CLI / Batch / GitHub Actions MAY
-    "export_pdf": False,      # SAFE DEFAULT (no pandoc dependency)
-
-    # -----------------------------
-    # METADATA (OPTIONAL)
+    # METADATA
     # -----------------------------
     "metadata": {
         "framework": "Sreejita",
-        "version": "v3.3",
+        "version": "v3.5",
     },
 }
