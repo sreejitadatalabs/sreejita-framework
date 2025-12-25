@@ -28,13 +28,13 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     # -------------------------------------------------
     if input_path.suffix.lower() == ".csv":
         def _read_csv_safe(path: str):
-        try:
-            return pd.read_csv(path)
-        except UnicodeDecodeError:
             try:
-                return pd.read_csv(path, encoding="latin-1")
+                return pd.read_csv(path)
             except UnicodeDecodeError:
-                return pd.read_csv(path, encoding="cp1252")
+                try:
+                    return pd.read_csv(path, encoding="latin-1")
+                except UnicodeDecodeError:
+                    return pd.read_csv(path, encoding="cp1252")
 
     elif input_path.suffix.lower() in (".xls", ".xlsx"):
         df = pd.read_excel(input_path)
