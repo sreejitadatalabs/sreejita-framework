@@ -2,35 +2,21 @@ from typing import Optional
 import os
 
 
-# =====================================================
-# v3.5 LLM CLIENT WRAPPER
-# =====================================================
-# This module is intentionally thin.
-# It must NOT contain business logic.
-# =====================================================
-
-
 class LLMDisabledError(RuntimeError):
-    """Raised when LLM usage is disabled by config."""
+    pass
 
 
 class LLMConfigurationError(RuntimeError):
-    """Raised when LLM is enabled but not configured properly."""
+    pass
 
 
 class LLMClient:
     """
-    Provider-agnostic LLM client.
+    Provider-agnostic LLM client (v3.5)
 
-    Responsibilities:
-    - Respect config flags
-    - Call external LLM
-    - Return raw text only
-
-    Non-responsibilities:
-    - Prompt design
-    - Insight logic
-    - Validation
+    Supported providers:
+    - openai
+    - gemini
     """
 
     def __init__(self, config: dict):
@@ -43,25 +29,13 @@ class LLMClient:
         if self.enabled:
             self._validate_config()
 
-    # -------------------------------------------------
-    # PUBLIC API
-    # -------------------------------------------------
+    # -----------------------------
+    # PUBLIC
+    # -----------------------------
 
     def generate(self, prompt: str) -> str:
-        """
-        Generate text from the LLM.
-
-        Input:
-        - prompt: fully constructed prompt string
-
-        Output:
-        - plain text response
-        """
-
         if not self.enabled:
-            raise LLMDisabledError(
-                "LLM narrative is disabled. Enable it via config."
-            )
+            raise LLMDisabledError("LLM narrative is disabled")
 
         if not prompt or not isinstance(prompt, str):
             raise ValueError("Prompt must be a non-empty string")
@@ -69,65 +43,76 @@ class LLMClient:
         if self.provider == "openai":
             return self._call_openai(prompt)
 
-        raise LLMConfigurationError(
-            f"Unsupported LLM provider: {self.provider}"
-        )
+        if self.provider == "gemini":
+            return self._call_gemini(prompt)
 
-    # -------------------------------------------------
-    # INTERNALS
-    # -------------------------------------------------
+        raise LLMConfigurationError(f"Unsupported provider: {self.provider}")
+
+    # -----------------------------
+    # VALIDATION
+    # -----------------------------
 
     def _validate_config(self):
         if not self.model:
-            raise LLMConfigurationError(
-                "LLM model must be specified when narrative is enabled"
-            )
+            raise LLMConfigurationError("LLM model must be specified")
 
         if self.provider == "openai":
             if not os.getenv("OPENAI_API_KEY"):
-                raise LLMConfigurationError(
-                    "OPENAI_API_KEY environment variable is missing"
-                )
+                raise LLMConfigurationError("OPENAI_API_KEY is missing")
+
+        if self.provider == "gemini":
+            if not os.getenv("GEMINI_API_KEY"):
+                raise LLMConfigurationError("GEMINI_API_KEY is missing")
+
+    # -----------------------------
+    # PROVIDERS
+    # -----------------------------
 
     def _call_openai(self, prompt: str) -> str:
-        """
-        OpenAI implementation (isolated).
-        """
-
         try:
             from openai import OpenAI
         except ImportError as e:
-            raise LLMConfigurationError(
-                "openai package is not installed"
-            ) from e
+            raise LLMConfigurationError("openai package not installed") from e
 
         client = OpenAI()
 
         response = client.chat.completions.create(
             model=self.model,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional business analyst assistant. "
-                        "You must strictly follow instructions in the user prompt."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
+                {"role": "system", "content": "You are a professional business narrator."},
+                {"role": "user", "content": prompt},
             ],
             temperature=self.temperature,
             max_tokens=self.max_tokens,
         )
 
-        if not response or not response.choices:
-            raise RuntimeError("Empty response from LLM")
-
         content: Optional[str] = response.choices[0].message.content
         if not content:
-            raise RuntimeError("LLM returned empty content")
+            raise RuntimeError("Empty response from OpenAI")
 
         return content.strip()
 
+    def _call_gemini(self, prompt: str) -> str:
+        try:
+            import google.generativeai as genai
+        except ImportError as e:
+            raise LLMConfigurationError(
+                "google-generativeai package not installed"
+            ) from e
+
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+        model = genai.GenerativeModel(self.model)
+
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": self.temperature,
+                "max_output_tokens": self.max_tokens,
+            },
+        )
+
+        if not response or not response.text:
+            raise RuntimeError("Empty response from Gemini")
+
+        return response.text.strip()
