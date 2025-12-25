@@ -21,6 +21,16 @@ DEFAULT_CONFIG = {
     "domain": {
         "name": "auto",  # auto-detect by default
     },
+    
+    # -----------------------------
+    # LLM NARRATIVE
+    # -----------------------------
+    "narrative": {
+    "enabled": False,      # OFF by default
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "confidence_band": "MEDIUM",
+    },
 
     # -----------------------------
     # REPORTING (v3.3)
