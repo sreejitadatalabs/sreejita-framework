@@ -77,7 +77,7 @@ class HybridReport(BaseReport):
         if not narrative_cfg.get("enabled", False):
             return  # v3.4 behavior
 
-        # Lazy imports (CRITICAL)
+        # Lazy imports (CRITICAL for optional AI)
         from sreejita.narrative.schema import (
             NarrativeInput,
             NarrativeInsight,
@@ -124,7 +124,7 @@ class HybridReport(BaseReport):
         try:
             narrative_text = generate_narrative(narrative_input, llm_client)
         except Exception:
-            # v3.5 rule: AI must NEVER block report generation
+            # v3.5 rule: AI failure must NEVER block report generation
             f.write(
                 "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
             )
