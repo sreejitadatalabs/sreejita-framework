@@ -37,7 +37,15 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
                     return pd.read_csv(path, encoding="cp1252")
 
     elif input_path.suffix.lower() in (".xls", ".xlsx"):
-        df = pd.read_excel(input_path)
+        try:
+            return pd.read_excel(path)
+        except ValueError:
+            # Fallback for old or weird Excel files
+            try:
+                return pd.read_excel(path, engine="openpyxl")
+            except Exception:
+                return pd.read_excel(path, engine="xlrd")
+    
     else:
         raise ValueError(f"Unsupported file type: {input_path.suffix}")
 
