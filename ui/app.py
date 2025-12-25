@@ -1,6 +1,6 @@
 # -------------------------------------------------
 # Streamlit App — Sreejita Framework
-# v3.3 SAFE (GitHub Web Compatible)
+# v3.5 SAFE
 # -------------------------------------------------
 
 import sys
@@ -15,9 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# -------------------------------------------------
-# Backend adapter ONLY (no rendering logic here)
-# -------------------------------------------------
 from ui.backend import run_analysis_from_ui
 
 # -------------------------------------------------
@@ -34,8 +31,8 @@ st.set_page_config(
 # -------------------------------------------------
 st.title("Sreejita Framework")
 st.caption("Automated Data Analysis & Reporting")
-st.markdown("**Version:** UI v3.3 / Engine v3.3")
-st.info("Hybrid Intelligence • Markdown Source • HTML Delivery")
+st.markdown("**Version:** UI v3.5 / Engine v3.5")
+st.info("Hybrid Intelligence • Deterministic Core • Optional AI Narrative")
 st.divider()
 
 # -------------------------------------------------
@@ -60,7 +57,22 @@ st.subheader("2️⃣ Configuration")
 domain = st.selectbox(
     "Select domain",
     options=["Auto", "Retail", "Finance", "HR", "Healthcare", "Supply Chain"],
-    help="Auto domain detection powered by v3 engine",
+)
+
+st.divider()
+
+# -------------------------------------------------
+# v3.5 Narrative Toggle
+# -------------------------------------------------
+st.subheader("Optional Enhancements")
+
+enable_narrative = st.checkbox(
+    "🤖 Enable AI-Assisted Narrative (v3.5)",
+    value=False,
+    help=(
+        "Adds an AI-generated explanation of existing decisions. "
+        "Does NOT change insights or recommendations."
+    ),
 )
 
 st.divider()
@@ -71,7 +83,6 @@ st.divider()
 st.subheader("3️⃣ Run Analysis")
 
 run_clicked = st.button("🚀 Run Analysis", type="primary")
-
 result = None
 
 if run_clicked:
@@ -80,7 +91,6 @@ if run_clicked:
     else:
         with st.spinner("Running analysis..."):
             try:
-                # Temp directory for uploads
                 temp_dir = Path("ui/temp")
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +103,7 @@ if run_clicked:
                 result = run_analysis_from_ui(
                     input_path=str(input_path),
                     domain=domain,
+                    narrative_enabled=enable_narrative,
                 )
 
             except Exception as e:
@@ -100,7 +111,7 @@ if run_clicked:
                 st.exception(e)
 
 # -------------------------------------------------
-# 4️⃣ Output (CLIENT-SAFE DELIVERY)
+# 4️⃣ Output
 # -------------------------------------------------
 if result:
     st.divider()
@@ -108,39 +119,28 @@ if result:
 
     st.success("✅ Analysis completed")
 
-    # -----------------------------
-    # HTML REPORT (PRIMARY)
-    # -----------------------------
     html_path = result.get("html_report_path")
-
     if html_path and Path(html_path).exists():
         with open(html_path, "rb") as f:
             st.download_button(
-                label="🌐 Download Report (HTML)",
-                data=f,
+                "🌐 Download Report (HTML)",
+                f,
                 file_name=Path(html_path).name,
                 mime="text/html",
             )
     else:
-        st.info("HTML report not available for this run.")
+        st.info("HTML report not available.")
 
-    # -----------------------------
-    # MARKDOWN REPORT (FALLBACK)
-    # -----------------------------
     md_path = result.get("md_report_path")
-
     if md_path and Path(md_path).exists():
         with open(md_path, "rb") as f:
             st.download_button(
-                label="📄 Download Report (Markdown)",
-                data=f,
+                "📄 Download Report (Markdown)",
+                f,
                 file_name=Path(md_path).name,
                 mime="text/markdown",
             )
 
-    # -----------------------------
-    # Decision Intelligence
-    # -----------------------------
     with st.expander("🧠 Decision Intelligence"):
         st.json({
             "selected_domain": result.get("domain"),
