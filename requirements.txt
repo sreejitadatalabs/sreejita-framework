@@ -10,3 +10,4 @@ scikit-learn
 streamlit
 openpyxl
 markdown
+google-generativeai
