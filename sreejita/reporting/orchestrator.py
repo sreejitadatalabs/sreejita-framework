@@ -8,12 +8,49 @@ from sreejita.reporting.recommendation_enricher import enrich_recommendations
 log = logging.getLogger("sreejita.orchestrator")
 
 
+# -------------------------------------------------
+# SAFE TABULAR LOADER (CSV + EXCEL)
+# -------------------------------------------------
+
+def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
+    """
+    Safely read CSV or Excel files with real-world fallbacks.
+    """
+    suffix = path.suffix.lower()
+
+    # CSV handling (encoding-safe)
+    if suffix == ".csv":
+        try:
+            return pd.read_csv(path)
+        except UnicodeDecodeError:
+            try:
+                return pd.read_csv(path, encoding="latin-1")
+            except UnicodeDecodeError:
+                return pd.read_csv(path, encoding="cp1252")
+
+    # Excel handling (engine-safe)
+    if suffix in (".xls", ".xlsx"):
+        try:
+            return pd.read_excel(path)
+        except ValueError:
+            try:
+                return pd.read_excel(path, engine="openpyxl")
+            except Exception:
+                return pd.read_excel(path, engine="xlrd")
+
+    raise ValueError(f"Unsupported file type: {suffix}")
+
+
+# -------------------------------------------------
+# ORCHESTRATOR (v3.5 SAFE)
+# -------------------------------------------------
+
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
-    v3.3 Orchestrator — SINGLE SOURCE OF TRUTH
+    v3.5 Orchestrator — SINGLE SOURCE OF TRUTH
 
     Responsibilities:
-    - Load data
+    - Load data safely
     - Decide domain
     - Execute domain lifecycle
     - Return a STANDARDIZED payload
@@ -24,14 +61,9 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     # -------------------------------------------------
-    # 1. LOAD DATA
+    # 1. LOAD DATA (SAFE)
     # -------------------------------------------------
-    if input_path.suffix.lower() == ".csv":
-        df = pd.read_csv(input_path)
-    elif input_path.suffix.lower() in (".xls", ".xlsx"):
-        df = pd.read_excel(input_path)
-    else:
-        raise ValueError(f"Unsupported file type: {input_path.suffix}")
+    df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
     # 2. DOMAIN DECISION (AUTHORITATIVE)
@@ -45,13 +77,15 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         return {
             "unknown": {
                 "kpis": {"rows": len(df), "cols": len(df.columns)},
-                "insights": [{
-                    "level": "RISK",
-                    "title": "Unknown Domain",
-                    "so_what": "No matching domain engine found."
-                }],
+                "insights": [
+                    {
+                        "level": "RISK",
+                        "title": "Unknown Domain",
+                        "so_what": "No matching domain engine found.",
+                    }
+                ],
                 "recommendations": [],
-                "visuals": []
+                "visuals": [],
             }
         }
 
@@ -68,24 +102,13 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     recommendations = enrich_recommendations(raw_recommendations)
 
     # -------------------------------------------------
-    # 4. VISUALS (REPORT-RELATIVE STRATEGY)
+    # 4. VISUALS (ENGINE-GENERATED)
     # -------------------------------------------------
-    # IMPORTANT:
-    # The orchestrator does NOT decide run_dir.
-    # HybridReport controls final output location.
-    #
-    # Strategy:
-    # - Place visuals in a TEMP folder under output_dir/visuals
-    # - HybridReport will link them by filename
-    #
-    output_root = Path(config.get("output_dir", "runs"))
-    visuals_dir = output_root / "visuals"
-    visuals_dir.mkdir(parents=True, exist_ok=True)
-
     visuals = []
     if hasattr(engine, "generate_visuals"):
         try:
-            visuals = engine.generate_visuals(df, visuals_dir)
+            # HybridReport controls final output_dir
+            visuals = engine.generate_visuals(df, None)
         except Exception as e:
             log.warning("Visual generation failed: %s", e)
 
