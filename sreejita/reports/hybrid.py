@@ -5,15 +5,6 @@ import uuid
 
 from sreejita.reporting.base import BaseReport
 
-# v3.5 Narrative imports (OPTIONAL)
-from sreejita.narrative.schema import (
-    NarrativeInput,
-    NarrativeInsight,
-    NarrativeAction,
-)
-from sreejita.narrative.llm import LLMClient
-from sreejita.narrative.composer import generate_narrative
-
 
 # =====================================================
 # HYBRID REPORT (v3.5 – MD SOURCE OF TRUTH)
@@ -42,6 +33,7 @@ class HybridReport(BaseReport):
         config: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
+        config = config or {}
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,18 +42,18 @@ class HybridReport(BaseReport):
         run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
 
         with open(report_path, "w", encoding="utf-8") as f:
+            # Header + Executive Summary
             self._write_header(f, run_id, metadata)
 
-            # -----------------------------------------
-            # OPTIONAL v3.5 AI-ASSISTED NARRATIVE
-            # -----------------------------------------
+            # v3.5 AI Narrative (clearly separated)
             self._write_optional_narrative(
                 f,
                 run_id,
                 domain_results,
-                config or {},
+                config,
             )
 
+            # Domain sections
             for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
                     f,
@@ -86,14 +78,26 @@ class HybridReport(BaseReport):
     ):
         narrative_cfg = config.get("narrative", {})
         if not narrative_cfg.get("enabled", False):
-            return  # v3.4 behavior (NO CHANGE)
+            return  # v3.4 behavior
 
-        # Use highest-priority domain only
+        # Lazy imports (CRITICAL)
+        from sreejita.narrative.schema import (
+            NarrativeInput,
+            NarrativeInsight,
+            NarrativeAction,
+        )
+        from sreejita.narrative.llm import LLMClient
+        from sreejita.narrative.composer import generate_narrative
+
+        # Highest-priority domain only
         domain = self._sort_domains(domain_results.keys())[0]
         result = domain_results.get(domain, {})
 
         insights = self._prioritize_insights(result.get("insights", []))
         recs = result.get("recommendations", [])
+
+        if not insights:
+            return
 
         narrative_input = NarrativeInput(
             run_id=run_id,
@@ -127,14 +131,14 @@ class HybridReport(BaseReport):
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
         f.write(
-            "> ⚠️ This section is generated using an AI language model. "
-            "It explains existing decisions in simpler language. "
-            "It does not introduce new insights or recommendations.\n\n"
+            "> ⚠️ *This section is AI-assisted. It explains existing insights "
+            "and recommendations in natural language. "
+            "No new metrics or decisions are introduced.*\n\n"
         )
         f.write(narrative_text.strip() + "\n\n")
 
     # -------------------------------------------------
-    # STANDARD SECTIONS (UNCHANGED FROM v3.4)
+    # HEADER & EXEC SUMMARY
     # -------------------------------------------------
 
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
@@ -154,6 +158,10 @@ class HybridReport(BaseReport):
             "**Sreejita Composite Intelligence**, focusing on risks, "
             "opportunities, and recommended actions.\n\n"
         )
+
+    # -------------------------------------------------
+    # DOMAIN SECTIONS (UNCHANGED)
+    # -------------------------------------------------
 
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
         f.write("\n---\n\n")
@@ -219,16 +227,16 @@ class HybridReport(BaseReport):
                     f"{primary.get('timeline', 'Immediate')} |\n\n"
                 )
 
+    # -------------------------------------------------
+    # FOOTER & HELPERS
+    # -------------------------------------------------
+
     def _write_footer(self, f):
         f.write("\n---\n")
         f.write(
             "_Prepared by **Sreejita Data Labs** · "
             "Framework v3.5 · Confidential_\n"
         )
-
-    # -------------------------------------------------
-    # HELPERS (UNCHANGED)
-    # -------------------------------------------------
 
     def _prioritize_insights(self, insights: List[Dict[str, Any]]):
         order = {"RISK": 0, "WARNING": 1, "INFO": 2}
@@ -258,7 +266,7 @@ class HybridReport(BaseReport):
 # BACKWARD-COMPATIBLE ENTRY POINT
 # =====================================================
 
-def run(input_path: str, config: Dict[str, Any]) -> Path:
+def run(input_path: str, config: Dict[str, Any]) -> str:
     from sreejita.reporting.orchestrator import generate_report_payload
 
     domain_results = generate_report_payload(
@@ -270,4 +278,4 @@ def run(input_path: str, config: Dict[str, Any]) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     engine = HybridReport()
-    return engine.build(domain_results, output_dir, config.get("metadata"))
+    return str(engine.build(domain_results, output_dir, config.get("metadata"), config))
