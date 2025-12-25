@@ -1,5 +1,5 @@
-from typing import Optional
 import os
+from typing import Optional
 
 
 class LLMDisabledError(RuntimeError):
@@ -29,9 +29,9 @@ class LLMClient:
         if self.enabled:
             self._validate_config()
 
-    # -----------------------------
+    # -------------------------------------------------
     # PUBLIC
-    # -----------------------------
+    # -------------------------------------------------
 
     def generate(self, prompt: str) -> str:
         if not self.enabled:
@@ -48,9 +48,9 @@ class LLMClient:
 
         raise LLMConfigurationError(f"Unsupported provider: {self.provider}")
 
-    # -----------------------------
+    # -------------------------------------------------
     # VALIDATION
-    # -----------------------------
+    # -------------------------------------------------
 
     def _validate_config(self):
         if not self.model:
@@ -64,9 +64,9 @@ class LLMClient:
             if not os.getenv("GEMINI_API_KEY"):
                 raise LLMConfigurationError("GEMINI_API_KEY is missing")
 
-    # -----------------------------
+    # -------------------------------------------------
     # PROVIDERS
-    # -----------------------------
+    # -------------------------------------------------
 
     def _call_openai(self, prompt: str) -> str:
         try:
