@@ -205,7 +205,7 @@ class HybridReport(BaseReport):
                 path = vis.get("path")
                 if not path:
                     continue
-                img = Path(path).name
+                img = f"visuals/{Path(path).name}"
                 caption = vis.get("caption", "Visualization")
                 f.write(f"![{caption}]({img})\n")
                 f.write(f"> *Fig {idx}.1 — {caption}*\n\n")
@@ -245,16 +245,32 @@ class HybridReport(BaseReport):
         return {"RISK": "🔴", "WARNING": "🟠", "INFO": "🔵"}.get(level, "ℹ️")
 
     def _format_value(self, key: str, v: Any):
-        if isinstance(v, float):
+        if isinstance(v, (int, float)):
+            abs_v = abs(v)
+
+            # Percentages
             if any(
                 x in key.lower()
                 for x in ["rate", "ratio", "margin", "conversion"]
-            ) and abs(v) <= 2:
+            ) and abs_v <= 2:
                 return f"{v:.1%}"
-            return f"{v:,.2f}"
-        if isinstance(v, int):
+
+            # Millions
+            if abs_v >= 1_000_000:
+                return f"{v / 1_000_000:.1f}M"
+
+            # Thousands
+            if abs_v >= 1_000:
+                return f"{v / 1_000:.1f}K"
+
+            # Small numbers
+            if isinstance(v, float):
+                return f"{v:.2f}"
+
             return f"{v:,}"
+
         return str(v)
+
 
 
 # =====================================================
