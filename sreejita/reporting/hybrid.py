@@ -38,14 +38,13 @@ class HybridReport(BaseReport):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         report_path = output_dir / "Sreejita_Executive_Report.md"
-
         run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
 
         with open(report_path, "w", encoding="utf-8") as f:
             # Header + Executive Summary
             self._write_header(f, run_id, metadata)
 
-            # v3.5 AI Narrative (clearly separated)
+            # v3.5 OPTIONAL AI NARRATIVE
             self._write_optional_narrative(
                 f,
                 run_id,
@@ -80,7 +79,7 @@ class HybridReport(BaseReport):
         if not narrative_cfg.get("enabled", False):
             return  # v3.4 behavior
 
-        # Lazy imports (CRITICAL)
+        # Lazy imports (CRITICAL for optional AI)
         from sreejita.narrative.schema import (
             NarrativeInput,
             NarrativeInsight,
@@ -89,7 +88,7 @@ class HybridReport(BaseReport):
         from sreejita.narrative.llm import LLMClient
         from sreejita.narrative.composer import generate_narrative
 
-        # Highest-priority domain only
+        # Use highest-priority domain only
         domain = self._sort_domains(domain_results.keys())[0]
         result = domain_results.get(domain, {})
 
