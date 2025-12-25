@@ -42,7 +42,7 @@ def run_analysis_from_ui(
         "enabled": narrative_enabled,
         "provider": narrative_provider,
         "model": (
-            "gemini-1.5-flash"
+            "gemini-1.5-flash-latest"
             if narrative_provider == "gemini"
             else "gpt-4o-mini"
         ),
