@@ -17,10 +17,6 @@ from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
-# IMPORTANT:
-# Do NOT import reporting or domains at top-level
-# This keeps --help / --version safe
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +34,10 @@ def run_single_file(
     - Accepts config dict (Streamlit)
     - Accepts config_path (CLI)
     - Returns HTML report path
+
+    IMPORTANT:
+    Heavy imports are intentionally lazy to keep
+    `--help` and `--version` working.
     """
 
     # 🔥 Lazy imports (CRITICAL)
@@ -45,16 +45,22 @@ def run_single_file(
     from sreejita.reporting.hybrid import run as run_hybrid
     from sreejita.reporting.html_renderer import HTMLReportRenderer
 
-    # Load config
+    # -----------------------------
+    # Load config safely
+    # -----------------------------
     if config is not None:
         final_config = config
     else:
         final_config = load_config(config_path) if config_path else {}
 
+    # -----------------------------
     # Generate Markdown
+    # -----------------------------
     md_path = Path(run_hybrid(input_path, final_config))
 
-    # Render HTML
+    # -----------------------------
+    # Render HTML (official output)
+    # -----------------------------
     renderer = HTMLReportRenderer()
     html_path = renderer.render(md_path)
 
