@@ -31,18 +31,21 @@ def run_single_file(
     """
     Programmatic execution for UI / API use.
 
-    - Accepts config dict (Streamlit)
-    - Accepts config_path (CLI)
-    - Returns HTML report path
-
-    Heavy imports are intentionally lazy so that
-    `--help` and `--version` work without errors.
+    Streamlit-safe, pytest-safe, v3.5-safe.
     """
 
-    # 🔥 Lazy imports (Python-legal)
-    import sreejita.domains.bootstrap_v2  # noqa: F401
-    from sreejita.reporting.hybrid import run as run_hybrid
-    from sreejita.reporting.html_renderer import HTMLReportRenderer
+    # 🔥 Robust lazy imports (Streamlit-safe)
+    import importlib
+
+    importlib.import_module("sreejita.domains.bootstrap_v2")
+
+    hybrid_module = importlib.import_module("sreejita.reporting.hybrid")
+    html_renderer_module = importlib.import_module(
+        "sreejita.reporting.html_renderer"
+    )
+
+    run_hybrid = hybrid_module.run
+    HTMLReportRenderer = html_renderer_module.HTMLReportRenderer
 
     # -----------------------------
     # Load config safely
@@ -58,13 +61,12 @@ def run_single_file(
     md_path = Path(run_hybrid(input_path, final_config))
 
     # -----------------------------
-    # Render HTML (official output)
+    # Render HTML
     # -----------------------------
     renderer = HTMLReportRenderer()
     html_path = renderer.render(md_path)
 
     return str(html_path)
-
 
 # -------------------------------------------------
 # CLI ENTRY
