@@ -123,10 +123,14 @@ class HybridReport(BaseReport):
         )
 
         llm_client = LLMClient(narrative_cfg)
-        narrative_text = generate_narrative(narrative_input, llm_client)
-
-        if not narrative_text:
-            return
+        try:
+            narrative_text = generate_narrative(narrative_input, llm_client)
+        except Exception as e:
+            # v3.5 rule: AI failure must NEVER block report generation
+        f.write(
+            "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
+        )
+        return
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
         f.write(
