@@ -160,11 +160,13 @@ class HealthcareDomain(BaseDomain):
     # ---------------- VISUALS ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        import matplotlib
+        matplotlib.use("Agg")  # REQUIRED for headless environments
+
         visuals: List[Dict[str, Any]] = []
-    
         output_dir = Path(output_dir).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-    
+        
         def human_fmt(x, _):
             if x >= 1_000_000:
                 return f"{x/1_000_000:.1f}M"
@@ -181,17 +183,16 @@ class HealthcareDomain(BaseDomain):
             df[los].dropna().hist(ax=ax, bins=15, color="#1f77b4", edgecolor="white")
             ax.set_title("Length of Stay Distribution")
             ax.set_xlabel("Days")
-    
+
             p = output_dir / "length_of_stay.png"
-            fig.savefig(str(p), bbox_inches="tight")
+            fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
-    
-            if p.exists():
-                visuals.append({
-                    "path": str(p),
-                    "caption": "Patient stay duration distribution",
-                })
-    
+
+            visuals.append({
+                "path": str(p),
+                "caption": "Patient stay duration distribution",
+            })
+
         # =================================================
         # 2️⃣ Patient Volume Over Time (Universal)
         # =================================================
@@ -200,31 +201,30 @@ class HealthcareDomain(BaseDomain):
             or resolve_column(df, "visit_date")
             or resolve_column(df, "date")
         )
-    
+
         if date_col:
             try:
                 dfx = df.copy()
                 dfx[date_col] = pd.to_datetime(dfx[date_col], errors="coerce")
                 dfx = dfx.dropna(subset=[date_col])
-    
+
                 if not dfx.empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
                     dfx.set_index(date_col).resample("M").size().plot(ax=ax)
                     ax.set_title("Patient Volume Trend")
                     ax.set_ylabel("Visits")
-    
+
                     p = output_dir / "patient_volume_trend.png"
-                    fig.savefig(str(p), bbox_inches="tight")
+                    fig.savefig(p, bbox_inches="tight")
                     plt.close(fig)
-    
-                    if p.exists():
-                        visuals.append({
-                            "path": str(p),
-                            "caption": "Monthly patient volume trend",
-                        })
+
+                    visuals.append({
+                        "path": str(p),
+                        "caption": "Monthly patient volume trend",
+                    })
             except Exception:
                 pass
-    
+
         # =================================================
         # 3️⃣ Billing / Cost Distribution (Financial)
         # =================================================
@@ -234,17 +234,16 @@ class HealthcareDomain(BaseDomain):
             df[bill].dropna().hist(ax=ax, bins=20, color="#2ca02c", edgecolor="white")
             ax.set_title("Treatment Cost Distribution")
             ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
-    
+
             p = output_dir / "cost_distribution.png"
-            fig.savefig(str(p), bbox_inches="tight")
+            fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
-    
-            if p.exists():
-                visuals.append({
-                    "path": str(p),
-                    "caption": "Distribution of treatment costs",
-                })
-    
+
+            visuals.append({
+                "path": str(p),
+                "caption": "Distribution of treatment costs",
+            })
+
         # =================================================
         # 4️⃣ Avg Cost by Condition (Clinical + Financial)
         # =================================================
@@ -260,17 +259,16 @@ class HealthcareDomain(BaseDomain):
             )
             ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
             ax.set_title("Avg Cost by Condition (Top 7)")
-    
+
             p = output_dir / "cost_by_condition.png"
-            fig.savefig(str(p), bbox_inches="tight")
+            fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
-    
-            if p.exists():
-                visuals.append({
-                    "path": str(p),
-                    "caption": "Average treatment cost by condition",
-                })
-    
+
+            visuals.append({
+                "path": str(p),
+                "caption": "Average treatment cost by condition",
+            })
+
         # =================================================
         # 5️⃣ Readmission Rate by Condition (Quality)
         # =================================================
@@ -287,19 +285,17 @@ class HealthcareDomain(BaseDomain):
             ax.set_title("Readmission Rate by Condition")
             ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
             plt.xticks(rotation=45, ha="right")
-    
-            p = output_dir / "readmission_by_condition.png"
-            fig.savefig(str(p), bbox_inches="tight")
-            plt.close(fig)
-    
-            if p.exists():
-                visuals.append({
-                    "path": str(p),
-                    "caption": "Readmission rate by condition",
-                })
-    
-        return visuals[:6]  # executive-safe cap
 
+            p = output_dir / "readmission_by_condition.png"
+            fig.savefig(p, bbox_inches="tight")
+            plt.close(fig)
+
+            visuals.append({
+                "path": str(p),
+                "caption": "Readmission rate by condition",
+            })
+
+        return visuals[:6]  # executive-safe cap
 
     # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
