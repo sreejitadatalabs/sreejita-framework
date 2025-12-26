@@ -13,12 +13,25 @@ def run_analysis_from_ui(
     generate_pdf: bool = False,
 ) -> Dict[str, Any]:
     """
-    UI-safe wrapper around v3.6 CLI core.
+    v3.6 UI-safe wrapper around CLI core.
+
+    Returns:
+        {
+            "html": <path>,
+            "pdf": <path or None>,
+            "run_dir": <path>
+        }
     """
 
+    # -------------------------------------------------
+    # Run directory (UI-safe, timestamped)
+    # -------------------------------------------------
     run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # -------------------------------------------------
+    # Config (isolated copy)
+    # -------------------------------------------------
     config = DEFAULT_CONFIG.copy()
     config["run_dir"] = str(run_dir)
     config["narrative"] = {
@@ -27,12 +40,18 @@ def run_analysis_from_ui(
         "confidence_band": "MEDIUM",
     }
 
+    # -------------------------------------------------
+    # Delegate to CLI core (v3.6)
+    # -------------------------------------------------
     result = run_single_file(
         input_path=input_path,
         config=config,
         generate_pdf=generate_pdf,
     )
 
+    # -------------------------------------------------
+    # Stable contract for Streamlit / API
+    # -------------------------------------------------
     return {
         "html": result.get("html"),
         "pdf": result.get("pdf"),

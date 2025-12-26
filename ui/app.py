@@ -4,7 +4,7 @@ import uuid
 import streamlit as st
 
 # -------------------------------------------------
-# PATH FIX (REQUIRED)
+# PATH FIX (REQUIRED FOR STREAMLIT)
 # -------------------------------------------------
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("Sreejita Framework")
-st.caption("v3.6 — Deterministic Analytics with Optional AI Narrative")
+st.caption("v3.6 — HTML Primary · Optional AI Narrative · Optional PDF Export")
 
 # -------------------------------------------------
 # INPUTS
@@ -57,6 +57,7 @@ if st.button("🚀 Run Analysis"):
         st.stop()
 
     with st.spinner("Running analysis…"):
+        # ---- Temp upload location ----
         temp_dir = Path("ui/temp")
         temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,6 +65,7 @@ if st.button("🚀 Run Analysis"):
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
+        # ---- Run backend ----
         result = run_analysis_from_ui(
             input_path=str(temp_path),
             narrative_enabled=enable_narrative,
