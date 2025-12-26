@@ -42,17 +42,18 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # -------------------------------------------------
-# ORCHESTRATOR (v3.5 SAFE)
+# ORCHESTRATOR (v3.5 / v3.6 SAFE)
 # -------------------------------------------------
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
-    v3.5 Orchestrator — SINGLE SOURCE OF TRUTH
+    Orchestrator — SINGLE SOURCE OF TRUTH
 
     Responsibilities:
-    - Load data safely
+    - Load data safely (CSV + Excel)
     - Decide domain
     - Execute domain lifecycle
+    - Generate visuals into run_dir/visuals
     - Return a STANDARDIZED payload
     """
 
@@ -102,13 +103,17 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     recommendations = enrich_recommendations(raw_recommendations)
 
     # -------------------------------------------------
-    # 4. VISUALS (ENGINE-GENERATED)
+    # 4. VISUALS (ENGINE-GENERATED, RUN-DIR SAFE)
     # -------------------------------------------------
     visuals = []
     if hasattr(engine, "generate_visuals"):
         try:
-            # HybridReport controls final output_dir
-            visuals = engine.generate_visuals(df, None)
+            run_dir = Path(config["run_dir"])
+            visuals_dir = run_dir / "visuals"
+            visuals_dir.mkdir(parents=True, exist_ok=True)
+
+            visuals = engine.generate_visuals(df, visuals_dir)
+
         except Exception as e:
             log.warning("Visual generation failed: %s", e)
 

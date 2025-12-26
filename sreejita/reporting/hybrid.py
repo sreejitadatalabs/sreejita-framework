@@ -280,13 +280,10 @@ class HybridReport(BaseReport):
 def run(input_path: str, config: Dict[str, Any]) -> str:
     from sreejita.reporting.orchestrator import generate_report_payload
 
-    domain_results = generate_report_payload(
-        input_path=input_path,
-        config=config,
-    )
+    run_dir = Path(config["run_dir"])
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    output_dir = Path(config.get("output_dir", "runs"))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
-    return str(engine.build(domain_results, output_dir, config.get("metadata"), config))
+    return str(engine.build(domain_results, run_dir, config.get("metadata"), config))

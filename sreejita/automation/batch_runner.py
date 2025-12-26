@@ -51,7 +51,7 @@ def run_single_file(
     # 2️⃣ Force Hybrid output into THIS folder
     # -------------------------------------------------
     local_config = dict(config)
-    local_config["output_dir"] = str(file_run_dir)
+    local_config["run_dir"] = str(file_run_dir)
 
     # -------------------------------------------------
     # 3️⃣ Generate Markdown (AUTHORITATIVE, INTERNAL)

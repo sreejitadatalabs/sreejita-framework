@@ -23,54 +23,25 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------
 # PROGRAMMATIC ENTRY (USED BY STREAMLIT / API)
 # -------------------------------------------------
-def run_single_file(
-    input_path: str,
-    config_path: Optional[str] = None,
-    config: Optional[Dict[str, Any]] = None,
-) -> str:
-    """
-    Programmatic execution for UI / API use.
-
-    Streamlit-safe, pytest-safe, v3.5-safe.
-    Heavy imports are intentionally lazy.
-    """
-
-    # 🔥 Robust lazy imports (Streamlit-safe)
+def run_single_file(input_path: str, config_path=None, config=None) -> str:
     import importlib
+    from datetime import datetime
 
-    # domain bootstrap (side effects only)
     importlib.import_module("sreejita.domains.bootstrap_v2")
 
-    # reporting adapters
-    hybrid_module = importlib.import_module("sreejita.reporting.hybrid")
-    html_renderer_module = importlib.import_module(
-        "sreejita.reporting.html_renderer"
-    )
+    hybrid = importlib.import_module("sreejita.reporting.hybrid")
+    renderer_mod = importlib.import_module("sreejita.reporting.html_renderer")
 
-    run_hybrid = hybrid_module.run
-    HTMLReportRenderer = html_renderer_module.HTMLReportRenderer
+    run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    # -----------------------------
-    # Load config safely
-    # -----------------------------
-    if config is not None:
-        final_config = config
-    else:
-        final_config = load_config(config_path) if config_path else {}
+    final_config = config or load_config(config_path)
+    final_config["run_dir"] = str(run_dir)
 
-    # -----------------------------
-    # Generate Markdown
-    # -----------------------------
-    md_path = Path(run_hybrid(input_path, final_config))
-
-    # -----------------------------
-    # Render HTML
-    # -----------------------------
-    renderer = HTMLReportRenderer()
-    html_path = renderer.render(md_path)
+    md_path = Path(hybrid.run(input_path, final_config))
+    html_path = renderer_mod.HTMLReportRenderer().render(md_path)
 
     return str(html_path)
-
 
 # -------------------------------------------------
 # CLI ENTRY
