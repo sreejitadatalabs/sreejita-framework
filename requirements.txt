@@ -11,3 +11,5 @@ streamlit
 openpyxl
 markdown
 google-generativeai
+playwright
+chromium
