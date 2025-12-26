@@ -1,6 +1,8 @@
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
