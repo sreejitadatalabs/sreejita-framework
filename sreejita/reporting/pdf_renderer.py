@@ -20,13 +20,6 @@ class PDFRenderer:
         html_path: Path,
         output_dir: Optional[Path] = None,
     ) -> Optional[Path]:
-        """
-        Render PDF from an existing HTML file.
-
-        Returns:
-            Path to PDF if successful, else None
-        """
-
         html_path = Path(html_path)
         if not html_path.exists():
             logger.error("HTML file not found: %s", html_path)
@@ -40,7 +33,7 @@ class PDFRenderer:
         try:
             self._run_async(self._render_async(html_path, pdf_path))
         except Exception as e:
-            logger.warning("PDF generation failed: %s", e)
+            logger.warning("PDF generation failed (non-blocking): %s", e)
             return None
 
         if pdf_path.exists():
@@ -61,15 +54,16 @@ class PDFRenderer:
         """
         try:
             loop = asyncio.get_running_loop()
+            if loop.is_running():
+                # Streamlit / Jupyter
+                task = asyncio.create_task(coro)
+                loop.run_until_complete(task)
+                return
         except RuntimeError:
-            loop = None
+            pass
 
-        if loop and loop.is_running():
-            # Streamlit / Jupyter case
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
-            future.result()
-        else:
-            asyncio.run(coro)
+        # CLI / normal Python
+        asyncio.run(coro)
 
     # -------------------------------------------------
     # CORE RENDERER
@@ -94,7 +88,7 @@ class PDFRenderer:
                 await page.goto(
                     html_path.resolve().as_uri(),
                     wait_until="networkidle",
-                    timeout=60_000,  # 60s hard stop
+                    timeout=60_000,
                 )
 
                 await page.pdf(
