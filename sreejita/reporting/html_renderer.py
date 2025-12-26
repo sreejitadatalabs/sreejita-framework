@@ -8,11 +8,12 @@ import markdown
 
 class HTMLReportRenderer:
     """
-    Markdown → HTML renderer (v3.4)
+    Markdown → HTML renderer (v3.5)
 
     - Client-ready styling
     - Visual evidence auto-resolution
-    - HTML is canonical output (PDF later)
+    - Preserves visuals/ directory
+    - HTML is canonical output
     """
 
     IMG_REGEX = re.compile(r'<img[^>]+src="([^"]+)"')
@@ -23,15 +24,19 @@ class HTMLReportRenderer:
         output_dir: Optional[Path] = None,
     ) -> Path:
 
+        md_path = Path(md_path)
         if not md_path.exists():
             raise FileNotFoundError(f"Markdown file not found: {md_path}")
 
-        md_path = Path(md_path)
+        # HTML must live next to markdown
         output_dir = output_dir or md_path.parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
         html_path = output_dir / md_path.with_suffix(".html").name
 
+        # -------------------------------------------------
+        # Convert Markdown → HTML
+        # -------------------------------------------------
         md_text = md_path.read_text(encoding="utf-8")
 
         html_body = markdown.markdown(
@@ -39,20 +44,23 @@ class HTMLReportRenderer:
             extensions=["tables", "fenced_code"],
         )
 
-        visuals_dir = md_path.parent / "visuals"
+        # -------------------------------------------------
+        # Ensure visuals directory exists
+        # -------------------------------------------------
+        visuals_src = md_path.parent / "visuals"
+        visuals_dst = output_dir / "visuals"
 
-        for img_src in self.IMG_REGEX.findall(html_body):
-            img_name = Path(img_src).name
-            for src in [
-                md_path.parent / img_name,
-                visuals_dir / img_name,
-            ]:
-                if src.exists():
-                    target = output_dir / img_name
-                    if not target.exists():
-                        shutil.copy(src, target)
-                    break
+        if visuals_src.exists() and visuals_src.is_dir():
+            visuals_dst.mkdir(exist_ok=True)
 
+            for img in visuals_src.glob("*"):
+                target = visuals_dst / img.name
+                if not target.exists():
+                    shutil.copy(img, target)
+
+        # -------------------------------------------------
+        # Final HTML
+        # -------------------------------------------------
         html = f"""<!DOCTYPE html>
 <html>
 <head>
