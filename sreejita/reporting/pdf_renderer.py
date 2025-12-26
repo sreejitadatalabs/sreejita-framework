@@ -1,76 +1,93 @@
-import subprocess
 from pathlib import Path
 from typing import Optional
+import asyncio
+import logging
+
+logger = logging.getLogger("sreejita.pdf")
 
 
-class PandocPDFRenderer:
+class PDFRenderer:
     """
-    Converts Markdown reports into PDF using Pandoc.
-    Pure rendering layer (v3.x compliant).
+    v3.6 Chromium-based PDF Renderer
+
+    - HTML → PDF using Playwright (Chromium)
+    - Fail-safe: never blocks report generation
+    - SaaS-ready
     """
-
-    def __init__(self, pandoc_path: str = "pandoc"):
-        self.pandoc_path = pandoc_path
-        self._verify_pandoc()
-
-    def _verify_pandoc(self):
-        """Fail fast if Pandoc is not installed."""
-        try:
-            subprocess.run(
-                [self.pandoc_path, "--version"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except Exception:
-            raise EnvironmentError(
-                "Pandoc is not installed or not available in PATH. "
-                "Install pandoc to enable PDF generation."
-            )
 
     def render(
         self,
-        md_path: Path,
+        html_path: Path,
         output_dir: Optional[Path] = None,
-        title: str = "Sreejita Executive Report",
-    ) -> Path:
+    ) -> Optional[Path]:
         """
-        Convert a Markdown file to PDF.
+        Render PDF from an existing HTML file.
+
+        Returns:
+            Path to PDF if successful, else None
         """
 
-        if not md_path.exists():
-            raise FileNotFoundError(f"Markdown file not found: {md_path}")
+        html_path = Path(html_path)
+        if not html_path.exists():
+            logger.error("HTML file not found: %s", html_path)
+            return None
 
-        if output_dir is None:
-            output_dir = md_path.parent
-
+        output_dir = output_dir or html_path.parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        pdf_path = output_dir / md_path.with_suffix(".pdf").name
-
-        cmd = [
-            self.pandoc_path,
-            str(md_path),
-            "-o",
-            str(pdf_path),
-            "--pdf-engine=xelatex",
-            "--toc",
-            "--number-sections",
-            "--metadata",
-            f"title={title}",
-        ]
+        pdf_path = output_dir / html_path.with_suffix(".pdf").name
 
         try:
-            subprocess.run(
-                cmd,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                "Pandoc PDF generation failed:\n"
-                f"{e.stderr.decode(errors='ignore')}"
+            asyncio.run(self._render_async(html_path, pdf_path))
+            if pdf_path.exists():
+                logger.info("PDF generated: %s", pdf_path)
+                return pdf_path
+        except RuntimeError:
+            # event loop already running (Streamlit)
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(
+                    self._render_async(html_path, pdf_path)
+                )
+                if pdf_path.exists():
+                    return pdf_path
+            except Exception as e:
+                logger.warning("PDF generation failed: %s", e)
+        except Exception as e:
+            logger.warning("PDF generation failed: %s", e)
+
+        return None
+
+    async def _render_async(self, html_path: Path, pdf_path: Path):
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                ],
             )
 
-        return pdf_path
+            page = await browser.new_page()
+
+            # Important: file:// URL
+            await page.goto(
+                html_path.resolve().as_uri(),
+                wait_until="networkidle",
+            )
+
+            await page.pdf(
+                path=str(pdf_path),
+                format="A4",
+                print_background=True,
+                margin={
+                    "top": "20mm",
+                    "bottom": "20mm",
+                    "left": "15mm",
+                    "right": "15mm",
+                },
+            )
+
+            await browser.close()
