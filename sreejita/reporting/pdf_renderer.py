@@ -11,8 +11,8 @@ class PDFRenderer:
     v3.6 Chromium-based PDF Renderer
 
     - HTML → PDF using Playwright (Chromium)
-    - Never blocks report generation
-    - Safe for CLI, Streamlit, Docker, CI
+    - Non-blocking & fail-safe
+    - Works in CLI, Streamlit, Jupyter, Docker, CI
     """
 
     def render(
@@ -20,6 +20,7 @@ class PDFRenderer:
         html_path: Path,
         output_dir: Optional[Path] = None,
     ) -> Optional[Path]:
+
         html_path = Path(html_path)
         if not html_path.exists():
             logger.error("HTML file not found: %s", html_path)
@@ -30,6 +31,8 @@ class PDFRenderer:
 
         pdf_path = output_dir / html_path.with_suffix(".pdf").name
 
+        logger.info("Starting PDF render: %s", html_path)
+
         try:
             self._run_async(self._render_async(html_path, pdf_path))
         except Exception as e:
@@ -37,39 +40,47 @@ class PDFRenderer:
             return None
 
         if pdf_path.exists():
-            logger.info("PDF generated: %s", pdf_path)
+            logger.info("PDF generated successfully: %s", pdf_path)
             return pdf_path
 
+        logger.warning("PDF render completed but file not found")
         return None
 
     # -------------------------------------------------
-    # ASYNC SAFETY LAYER
+    # ASYNC SAFETY LAYER (CRITICAL)
     # -------------------------------------------------
     def _run_async(self, coro):
         """
-        Runs async code safely across:
+        Safely execute async code across:
         - CLI
         - Streamlit
         - Jupyter
         """
+
         try:
             loop = asyncio.get_running_loop()
-            if loop.is_running():
-                # Streamlit / Jupyter
-                task = asyncio.create_task(coro)
-                loop.run_until_complete(task)
-                return
         except RuntimeError:
-            pass
+            loop = None
 
-        # CLI / normal Python
-        asyncio.run(coro)
+        if loop and loop.is_running():
+            # Streamlit / Jupyter case
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            future.result()
+        else:
+            # CLI / normal Python
+            asyncio.run(coro)
 
     # -------------------------------------------------
     # CORE RENDERER
     # -------------------------------------------------
     async def _render_async(self, html_path: Path, pdf_path: Path):
-        from playwright.async_api import async_playwright
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as e:
+            raise RuntimeError(
+                "Playwright not installed. "
+                "Run: pip install playwright && playwright install chromium"
+            ) from e
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
