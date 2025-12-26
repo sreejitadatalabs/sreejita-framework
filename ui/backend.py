@@ -1,7 +1,5 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
-
 from sreejita.cli import run_single_file
 from sreejita.config.defaults import DEFAULT_CONFIG
 
@@ -11,11 +9,7 @@ def run_analysis_from_ui(
     narrative_enabled: bool = False,
     narrative_provider: str = "gemini",
     generate_pdf: bool = False,
-) -> Dict[str, Any]:
-    """
-    UI-safe wrapper around v3.6 CLI core.
-    """
-
+):
     run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -34,7 +28,7 @@ def run_analysis_from_ui(
     )
 
     return {
-        "html": result.get("html"),
-        "pdf": result.get("pdf"),
+        "html_report_path": result.get("html"),
+        "pdf_report_path": result.get("pdf"),
         "run_dir": result.get("run_dir"),
     }
