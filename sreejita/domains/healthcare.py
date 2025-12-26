@@ -97,7 +97,7 @@ def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 # =====================================================
-# HEALTHCARE DOMAIN (v3.0 - FULL AUTHORITY)
+# HEALTHCARE DOMAIN (v3.5 – UNIVERSAL)
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -160,11 +160,9 @@ class HealthcareDomain(BaseDomain):
     # ---------------- VISUALS ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        import matplotlib
-        matplotlib.use("Agg")  # REQUIRED for headless environments
-
         visuals: List[Dict[str, Any]] = []
-        output_dir = Path(output_dir)
+    
+        output_dir = Path(output_dir).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
     
         def human_fmt(x, _):
@@ -174,69 +172,134 @@ class HealthcareDomain(BaseDomain):
                 return f"{x/1_000:.0f}K"
             return str(int(x))
     
-        # -------- Visual 1: Length of Stay Distribution --------
+        # =================================================
+        # 1️⃣ Length of Stay Distribution (Operational)
+        # =================================================
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
-        if los and df[los].notna().any() and pd.api.types.is_numeric_dtype(df[los]):
+        if los and pd.api.types.is_numeric_dtype(df[los]) and df[los].notna().any():
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df[los].dropna().hist(ax=ax, bins=15, color="#1f77b4", edgecolor="white")
+            ax.set_title("Length of Stay Distribution")
+            ax.set_xlabel("Days")
+    
             p = output_dir / "length_of_stay.png"
-            plt.figure(figsize=(7, 4))
-            df[los].dropna().hist(bins=15, color="#1f77b4", edgecolor="white")
-            plt.title("Length of Stay Distribution")
-            plt.xlabel("Days")
-            plt.tight_layout()
-            plt.savefig(p, bbox_inches="tight")
-            plt.close()
-            visuals.append({
-                "path": str(p),
-                "caption": "Patient stay duration distribution",
-            })
+            fig.savefig(str(p), bbox_inches="tight")
+            plt.close(fig)
     
-        # -------- Visual 2: Billing by Insurance --------
+            if p.exists():
+                visuals.append({
+                    "path": str(p),
+                    "caption": "Patient stay duration distribution",
+                })
+    
+        # =================================================
+        # 2️⃣ Patient Volume Over Time (Universal)
+        # =================================================
+        date_col = (
+            resolve_column(df, "admission_date")
+            or resolve_column(df, "visit_date")
+            or resolve_column(df, "date")
+        )
+    
+        if date_col:
+            try:
+                dfx = df.copy()
+                dfx[date_col] = pd.to_datetime(dfx[date_col], errors="coerce")
+                dfx = dfx.dropna(subset=[date_col])
+    
+                if not dfx.empty:
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    dfx.set_index(date_col).resample("M").size().plot(ax=ax)
+                    ax.set_title("Patient Volume Trend")
+                    ax.set_ylabel("Visits")
+    
+                    p = output_dir / "patient_volume_trend.png"
+                    fig.savefig(str(p), bbox_inches="tight")
+                    plt.close(fig)
+    
+                    if p.exists():
+                        visuals.append({
+                            "path": str(p),
+                            "caption": "Monthly patient volume trend",
+                        })
+            except Exception:
+                pass
+    
+        # =================================================
+        # 3️⃣ Billing / Cost Distribution (Financial)
+        # =================================================
         bill = resolve_column(df, "billing_amount") or resolve_column(df, "cost")
-        ins = resolve_column(df, "insurance")
-        if bill and ins and pd.api.types.is_numeric_dtype(df[bill]):
-            p = output_dir / "billing_by_insurance.png"
-            plt.figure(figsize=(7, 4))
-            ax = (
-                df.groupby(ins)[bill]
-                .sum()
-                .sort_values(ascending=False)
-                .head(7)
-                .plot(kind="bar", color="#2ca02c")
-            )
-            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.title("Billing by Insurance Provider")
-            plt.xticks(rotation=45, ha="right")
-            plt.tight_layout()
-            plt.savefig(p, bbox_inches="tight")
-            plt.close()
-            visuals.append({
-                "path": str(p),
-                "caption": "Revenue concentration by payer",
-            })
+        if bill and pd.api.types.is_numeric_dtype(df[bill]):
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df[bill].dropna().hist(ax=ax, bins=20, color="#2ca02c", edgecolor="white")
+            ax.set_title("Treatment Cost Distribution")
+            ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
     
-        # -------- Visual 3: Avg Cost by Condition --------
+            p = output_dir / "cost_distribution.png"
+            fig.savefig(str(p), bbox_inches="tight")
+            plt.close(fig)
+    
+            if p.exists():
+                visuals.append({
+                    "path": str(p),
+                    "caption": "Distribution of treatment costs",
+                })
+    
+        # =================================================
+        # 4️⃣ Avg Cost by Condition (Clinical + Financial)
+        # =================================================
         diag = resolve_column(df, "diagnosis") or resolve_column(df, "medical_condition")
         if diag and bill and pd.api.types.is_numeric_dtype(df[bill]):
-            p = output_dir / "cost_by_condition.png"
-            plt.figure(figsize=(7, 4))
+            fig, ax = plt.subplots(figsize=(7, 4))
             (
                 df.groupby(diag)[bill]
                 .mean()
                 .sort_values(ascending=False)
                 .head(7)
-                .plot(kind="barh", color="#d62728")
+                .plot(kind="barh", ax=ax, color="#d62728")
             )
-            plt.gca().xaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.title("Avg Cost by Condition (Top 7)")
-            plt.tight_layout()
-            plt.savefig(p, bbox_inches="tight")
-            plt.close()
-            visuals.append({
-                "path": str(p),
-                "caption": "Average treatment cost by condition",
-            })
+            ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
+            ax.set_title("Avg Cost by Condition (Top 7)")
     
-        return visuals
+            p = output_dir / "cost_by_condition.png"
+            fig.savefig(str(p), bbox_inches="tight")
+            plt.close(fig)
+    
+            if p.exists():
+                visuals.append({
+                    "path": str(p),
+                    "caption": "Average treatment cost by condition",
+                })
+    
+        # =================================================
+        # 5️⃣ Readmission Rate by Condition (Quality)
+        # =================================================
+        readm = resolve_column(df, "readmitted")
+        if readm and diag and pd.api.types.is_numeric_dtype(df[readm]):
+            fig, ax = plt.subplots(figsize=(7, 4))
+            (
+                df.groupby(diag)[readm]
+                .mean()
+                .sort_values(ascending=False)
+                .head(7)
+                .plot(kind="bar", ax=ax, color="#ff7f0e")
+            )
+            ax.set_title("Readmission Rate by Condition")
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
+            plt.xticks(rotation=45, ha="right")
+    
+            p = output_dir / "readmission_by_condition.png"
+            fig.savefig(str(p), bbox_inches="tight")
+            plt.close(fig)
+    
+            if p.exists():
+                visuals.append({
+                    "path": str(p),
+                    "caption": "Readmission rate by condition",
+                })
+    
+        return visuals[:6]  # executive-safe cap
+
 
     # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
