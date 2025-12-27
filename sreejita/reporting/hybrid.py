@@ -17,7 +17,7 @@ class HybridReport(BaseReport):
     - Deterministic intelligence
     - Optional AI-assisted narrative
     - Markdown = single source of truth
-    - Payload preserved for PDF rendering
+    - Payload preserved for ReportLab PDF
     """
 
     name = "hybrid"
@@ -25,7 +25,6 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     # ENGINE ENTRY POINT
     # -------------------------------------------------
-
     def build(
         self,
         domain_results: Dict[str, Dict[str, Any]],
@@ -64,9 +63,8 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # OPTIONAL AI NARRATIVE (v3.5)
+    # OPTIONAL AI NARRATIVE
     # -------------------------------------------------
-
     def _write_optional_narrative(
         self,
         f,
@@ -120,14 +118,13 @@ class HybridReport(BaseReport):
             confidence_band=narrative_cfg.get("confidence_band", "MEDIUM"),
         )
 
-        llm_client = LLMClient(narrative_cfg)
-
         try:
-            narrative_text = generate_narrative(narrative_input, llm_client)
-        except Exception:
-            f.write(
-                "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
+            narrative_text = generate_narrative(
+                narrative_input,
+                LLMClient(narrative_cfg),
             )
+        except Exception:
+            f.write("\n> ⚠️ *AI narrative could not be generated for this run.*\n\n")
             return
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
@@ -139,7 +136,6 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     # HEADER
     # -------------------------------------------------
-
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
         f.write("# 📊 Executive Decision Report\n\n")
 
@@ -160,7 +156,6 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     # DOMAIN SECTION
     # -------------------------------------------------
-
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
         f.write("\n---\n\n")
         f.write(f"## 🔹 {domain.replace('_', ' ').title()}\n\n")
@@ -174,12 +169,10 @@ class HybridReport(BaseReport):
         recs = result.get("recommendations", [])
         visuals = result.get("visuals", [])
 
-        # ---- INSIGHTS ----
+        # INSIGHTS
         f.write("### 🧠 Strategic Intelligence\n")
         if insights:
             for ins in insights:
-                if not ins.get("title") or not ins.get("so_what"):
-                    continue
                 f.write(
                     f"#### {self._level_icon(ins.get('level'))} {ins['title']}\n"
                 )
@@ -187,8 +180,8 @@ class HybridReport(BaseReport):
         else:
             f.write("_Operations within normal parameters._\n\n")
 
-        # ---- KPIs ----
-        if isinstance(kpis, dict) and kpis:
+        # KPIs
+        if kpis:
             f.write("### 📉 Key Performance Indicators\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
@@ -199,35 +192,30 @@ class HybridReport(BaseReport):
                 )
             f.write("\n")
 
-        # ---- VISUALS ----
-        if isinstance(visuals, list) and visuals:
+        # VISUALS
+        if visuals:
             f.write("### 👁️ Visual Evidence\n")
             for idx, vis in enumerate(visuals[:3], start=1):
-                path = vis.get("path")
-                if not path:
-                    continue
-                img = f"visuals/{Path(path).name}"
+                img = f"visuals/{Path(vis['path']).name}"
                 caption = vis.get("caption", "Visualization")
                 f.write(f"![{caption}]({img})\n")
                 f.write(f"> *Fig {idx}.1 — {caption}*\n\n")
 
-        # ---- ACTION ----
-        if isinstance(recs, list) and recs:
+        # ACTION
+        if recs:
             primary = recs[0]
-            if "action" in primary:
-                f.write("### 🚀 Action Plan\n")
-                f.write("| Action | Priority | Timeline |\n")
-                f.write("| :--- | :--- | :--- |\n")
-                f.write(
-                    f"| {primary['action']} | "
-                    f"{primary.get('priority', 'HIGH')} | "
-                    f"{primary.get('timeline', 'Immediate')} |\n\n"
-                )
+            f.write("### 🚀 Action Plan\n")
+            f.write("| Action | Priority | Timeline |\n")
+            f.write("| :--- | :--- | :--- |\n")
+            f.write(
+                f"| {primary['action']} | "
+                f"{primary.get('priority', 'HIGH')} | "
+                f"{primary.get('timeline', 'Immediate')} |\n\n"
+            )
 
     # -------------------------------------------------
     # FOOTER
     # -------------------------------------------------
-
     def _write_footer(self, f):
         f.write("\n---\n")
         f.write(
@@ -238,7 +226,6 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     # HELPERS
     # -------------------------------------------------
-
     def _prioritize_insights(self, insights: List[Dict[str, Any]]):
         order = {"RISK": 0, "WARNING": 1, "INFO": 2}
         return sorted(insights, key=lambda i: order.get(i.get("level"), 3))[:5]
@@ -253,36 +240,27 @@ class HybridReport(BaseReport):
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
             abs_v = abs(v)
-
-            if any(x in key.lower() for x in ["rate", "ratio", "margin", "conversion"]) and abs_v <= 2:
+            if any(x in key.lower() for x in ["rate", "ratio", "margin"]) and abs_v <= 2:
                 return f"{v:.1%}"
-
             if abs_v >= 1_000_000:
                 return f"{v / 1_000_000:.1f}M"
-
             if abs_v >= 1_000:
                 return f"{v / 1_000:.1f}K"
-
-            if isinstance(v, float):
-                return f"{v:.2f}"
-
             return f"{v:,}"
-
         return str(v)
 
 
 # =====================================================
-# FIXED ENTRY POINT (CRITICAL)
+# STABLE ENTRY POINT (v3.5.1)
 # =====================================================
-
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    v3.5.1 STABLE CONTRACT
+    v3.5.1 Stable contract
 
     Returns:
         {
             "markdown": <path>,
-            "payload": <domain_results>
+            "payload": <dict>
         }
     """
     from sreejita.reporting.orchestrator import generate_report_payload
@@ -293,14 +271,24 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
-    md_path = engine.build(
-        domain_results,
-        run_dir,
-        config.get("metadata"),
-        config,
+    md_path = Path(
+        engine.build(domain_results, run_dir, config.get("metadata"), config)
     )
+
+    # Build payload for ReportLab
+    primary = engine._sort_domains(domain_results.keys())[0]
+    result = domain_results.get(primary, {})
+
+    payload = {
+        "meta": {"domain": primary.replace("_", " ").title()},
+        "summary": [i.get("title") for i in result.get("insights", [])[:5] if i.get("title")],
+        "kpis": result.get("kpis", {}),
+        "visuals": result.get("visuals", []),
+        "insights": result.get("insights", []),
+        "recommendations": result.get("recommendations", []),
+    }
 
     return {
         "markdown": str(md_path),
-        "payload": domain_results,
+        "payload": payload,
     }

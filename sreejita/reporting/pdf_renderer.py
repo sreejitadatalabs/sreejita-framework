@@ -1,3 +1,4 @@
+# sreejita/reporting/pdf_renderer.py
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -23,33 +24,33 @@ from reportlab.lib.units import inch
 
 
 # =====================================================
-# EXECUTIVE FORMATTERS
+# KPI FORMATTERS (EXECUTIVE SAFE)
 # =====================================================
 
-def format_number(value):
+def format_number(x):
     try:
-        v = float(value)
+        x = float(x)
     except Exception:
-        return str(value)
+        return str(x)
 
-    if abs(v) >= 1_000_000:
-        return f"{v / 1_000_000:.2f}M"
-    if abs(v) >= 1_000:
-        return f"{v / 1_000:.1f}K"
-    if abs(v) < 1 and v != 0:
-        return f"{v:.2f}"
-    return f"{int(v):,}"
+    if abs(x) >= 1_000_000:
+        return f"{x / 1_000_000:.2f}M"
+    if abs(x) >= 1_000:
+        return f"{x / 1_000:.1f}K"
+    if abs(x) < 1 and x != 0:
+        return f"{x:.2f}"
+    return f"{int(x):,}"
 
 
-def format_percent(value):
+def format_percent(x):
     try:
-        return f"{float(value) * 100:.1f}%"
+        return f"{float(x) * 100:.1f}%"
     except Exception:
-        return str(value)
+        return str(x)
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (v3.5.1 — FINAL)
+# EXECUTIVE PDF RENDERER (v3.5.1 — STABLE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -87,9 +88,9 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # -------------------------------------------------
+        # -------------------------
         # STYLES
-        # -------------------------------------------------
+        # -------------------------
         styles.add(
             ParagraphStyle(
                 name="Title",
@@ -118,45 +119,46 @@ class ExecutivePDFRenderer:
             )
         )
 
-        # -------------------------------------------------
-        # COVER PAGE
-        # -------------------------------------------------
+        # -------------------------
+        # COVER
+        # -------------------------
         story.append(Paragraph("Sreejita Executive Report", styles["Title"]))
         story.append(Spacer(1, 12))
 
         meta = payload.get("meta", {})
-        story.append(Paragraph(
-            f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
-            styles["Body"]
-        ))
-        story.append(Paragraph(
-            f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
-            styles["Body"]
-        ))
+        story.append(
+            Paragraph(f"<b>Domain:</b> {meta.get('domain', 'Unknown')}", styles["Body"])
+        )
+        story.append(
+            Paragraph(
+                f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+                styles["Body"],
+            )
+        )
 
         story.append(PageBreak())
 
-        # -------------------------------------------------
+        # -------------------------
         # EXECUTIVE SUMMARY
-        # -------------------------------------------------
+        # -------------------------
         story.append(Paragraph("Executive Summary", styles["Section"]))
-        for line in payload.get("summary", []):
-            story.append(Paragraph(f"• {line}", styles["Body"]))
+        for item in payload.get("summary", []):
+            story.append(Paragraph(f"• {item}", styles["Body"]))
             story.append(Spacer(1, 6))
 
-        # -------------------------------------------------
+        # -------------------------
         # KPI SNAPSHOT
-        # -------------------------------------------------
+        # -------------------------
         story.append(Paragraph("Key Metrics", styles["Section"]))
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
             if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"]):
-                val = format_percent(v)
+                value = format_percent(v)
             else:
-                val = format_number(v)
+                value = format_number(v)
 
-            table_data.append([k.replace("_", " ").title(), val])
+            table_data.append([k.replace("_", " ").title(), value])
 
         table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
         table.setStyle(
@@ -170,9 +172,9 @@ class ExecutivePDFRenderer:
         )
         story.append(table)
 
-        # -------------------------------------------------
+        # -------------------------
         # VISUAL EVIDENCE
-        # -------------------------------------------------
+        # -------------------------
         visuals = payload.get("visuals", [])
         if visuals:
             story.append(PageBreak())
@@ -180,22 +182,14 @@ class ExecutivePDFRenderer:
 
             for vis in visuals:
                 img_path = self._render_chart(vis)
-                story.append(
-                    Image(
-                        img_path,
-                        width=5.5 * inch,
-                        height=3.2 * inch,
-                    )
-                )
-                story.append(
-                    Paragraph(vis.get("caption", ""), styles["Body"])
-                )
+                story.append(Image(img_path, width=5.5 * inch, height=3.2 * inch))
+                story.append(Paragraph(vis.get("caption", ""), styles["Body"]))
                 story.append(Spacer(1, 12))
                 os.remove(img_path)
 
-        # -------------------------------------------------
+        # -------------------------
         # INSIGHTS
-        # -------------------------------------------------
+        # -------------------------
         story.append(PageBreak())
         story.append(Paragraph("Insights & Risks", styles["Section"]))
 
@@ -208,9 +202,9 @@ class ExecutivePDFRenderer:
             )
             story.append(Spacer(1, 8))
 
-        # -------------------------------------------------
+        # -------------------------
         # RECOMMENDATIONS
-        # -------------------------------------------------
+        # -------------------------
         story.append(Paragraph("Recommendations", styles["Section"]))
         for rec in payload.get("recommendations", []):
             story.append(
@@ -221,15 +215,15 @@ class ExecutivePDFRenderer:
             )
             story.append(Spacer(1, 6))
 
-        # -------------------------------------------------
+        # -------------------------
         # BUILD PDF
-        # -------------------------------------------------
+        # -------------------------
         doc.build(story)
         return output_path
 
-    # -------------------------------------------------
-    # SIMPLE CHART RENDERER (SAFE)
-    # -------------------------------------------------
+    # -------------------------
+    # SIMPLE CHART RENDERER
+    # -------------------------
     def _render_chart(self, vis: Dict[str, Any]) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.figure(figsize=(6, 4))
