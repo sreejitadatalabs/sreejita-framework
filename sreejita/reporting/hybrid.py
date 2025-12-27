@@ -274,10 +274,16 @@ class HybridReport(BaseReport):
 
 
 # =====================================================
-# BACKWARD-COMPATIBLE ENTRY POINT
+# BACKWARD-COMPATIBLE ENTRY POINT (v3.5.1)
 # =====================================================
 
-def run(input_path: str, config: Dict[str, Any]) -> str:
+def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    v3.5.1 Stable entry:
+    - Generates Markdown
+    - Builds Executive PDF payload
+    """
+
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config["run_dir"])
@@ -286,4 +292,33 @@ def run(input_path: str, config: Dict[str, Any]) -> str:
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
-    return str(engine.build(domain_results, run_dir, config.get("metadata"), config))
+    md_path = Path(
+        engine.build(domain_results, run_dir, config.get("metadata"), config)
+    )
+
+    # -------------------------------
+    # BUILD PDF PAYLOAD (CRITICAL)
+    # -------------------------------
+    primary_domain = engine._sort_domains(domain_results.keys())[0]
+    result = domain_results.get(primary_domain, {})
+
+    payload = {
+        "meta": {
+            "domain": primary_domain.replace("_", " ").title(),
+        },
+        "summary": [
+            ins.get("title")
+            for ins in result.get("insights", [])[:5]
+            if ins.get("title")
+        ],
+        "kpis": result.get("kpis", {}),
+        "visuals": result.get("visuals", []),
+        "insights": result.get("insights", []),
+        "recommendations": result.get("recommendations", []),
+    }
+
+    return {
+        "markdown": str(md_path),
+        "payload": payload,
+        "run_dir": str(run_dir),
+    }
