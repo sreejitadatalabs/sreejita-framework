@@ -1,5 +1,4 @@
 # sreejita/reporting/pdf_renderer_reportlab.py
-
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -24,14 +23,50 @@ from reportlab.platypus import (
 from reportlab.lib.units import inch
 
 
+# =====================================================
+# KPI FORMATTERS (EXECUTIVE SAFE)
+# =====================================================
+
+def format_number(x):
+    try:
+        x = float(x)
+    except Exception:
+        return str(x)
+
+    if abs(x) >= 1_000_000:
+        return f"{x/1_000_000:.2f}M"
+    if abs(x) >= 1_000:
+        return f"{x/1_000:.1f}K"
+    if abs(x) < 1 and x != 0:
+        return f"{x:.2f}"
+    return f"{int(x):,}"
+
+
+def format_percent(x):
+    try:
+        return f"{float(x) * 100:.1f}%"
+    except Exception:
+        return str(x)
+
+
+# =====================================================
+# EXECUTIVE PDF RENDERER (STABLE)
+# =====================================================
+
 class ExecutivePDFRenderer:
     """
     Sreejita v3.5.1 — Executive PDF Renderer (ReportLab)
 
-    ✔ Streamlit safe
-    ✔ GitHub safe
-    ✔ Client ready
+    ✔ Streamlit-safe
+    ✔ GitHub-safe
+    ✔ No async
+    ✔ No browser
+    ✔ Visuals guaranteed
     """
+
+    PRIMARY = HexColor("#1f2937")
+    BORDER = HexColor("#e5e7eb")
+    HEADER_BG = HexColor("#f3f4f6")
 
     def render(
         self,
@@ -57,10 +92,11 @@ class ExecutivePDFRenderer:
         # -------------------------
         styles.add(
             ParagraphStyle(
-                name="TitleStyle",
+                name="Title",
                 fontSize=22,
-                spaceAfter=20,
+                spaceAfter=24,
                 alignment=TA_CENTER,
+                textColor=self.PRIMARY,
             )
         )
 
@@ -69,8 +105,8 @@ class ExecutivePDFRenderer:
                 name="Section",
                 fontSize=16,
                 spaceBefore=20,
-                spaceAfter=10,
-                textColor=HexColor("#1f2937"),
+                spaceAfter=12,
+                textColor=self.PRIMARY,
             )
         )
 
@@ -83,14 +119,19 @@ class ExecutivePDFRenderer:
         )
 
         # -------------------------
-        # COVER PAGE
+        # COVER
         # -------------------------
-        story.append(Paragraph("Sreejita Executive Report", styles["TitleStyle"]))
+        story.append(Paragraph("Sreejita Executive Report", styles["Title"]))
         story.append(Spacer(1, 12))
 
         meta = payload.get("meta", {})
         story.append(Paragraph(f"<b>Domain:</b> {meta.get('domain', 'Unknown')}", styles["Body"]))
-        story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", styles["Body"]))
+        story.append(
+            Paragraph(
+                f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+                styles["Body"],
+            )
+        )
         story.append(PageBreak())
 
         # -------------------------
@@ -106,21 +147,25 @@ class ExecutivePDFRenderer:
         # -------------------------
         story.append(Paragraph("Key Metrics", styles["Section"]))
 
-        kpis = payload.get("kpis", {})
         table_data = [["Metric", "Value"]]
-        for k, v in kpis.items():
-            table_data.append([k.replace("_", " ").title(), str(v)])
+        for k, v in payload.get("kpis", {}).items():
+            if "rate" in k or "percent" in k:
+                value = format_percent(v)
+            else:
+                value = format_number(v)
 
-        table = Table(table_data, colWidths=[3 * inch, 2 * inch])
+            table_data.append([k.replace("_", " ").title(), value])
+
+        table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
         table.setStyle(
             TableStyle(
                 [
-                    ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#d1d5db")),
-                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f3f4f6")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+                    ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ]
             )
         )
-
         story.append(table)
 
         # -------------------------
@@ -132,8 +177,8 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Visual Evidence", styles["Section"]))
 
             for vis in visuals:
-                img_path = self._create_chart(vis)
-                story.append(Image(img_path, width=5.5 * inch, height=3.5 * inch))
+                img_path = self._render_chart(vis)
+                story.append(Image(img_path, width=5.5 * inch, height=3.2 * inch))
                 story.append(Paragraph(vis.get("caption", ""), styles["Body"]))
                 story.append(Spacer(1, 12))
                 os.remove(img_path)
@@ -143,7 +188,6 @@ class ExecutivePDFRenderer:
         # -------------------------
         story.append(PageBreak())
         story.append(Paragraph("Insights & Risks", styles["Section"]))
-
         for ins in payload.get("insights", []):
             story.append(
                 Paragraph(
@@ -166,21 +210,18 @@ class ExecutivePDFRenderer:
             )
             story.append(Spacer(1, 6))
 
-        # -------------------------
-        # BUILD PDF
-        # -------------------------
         doc.build(story)
         return output_path
 
     # -------------------------
-    # CHART HELPER
+    # SIMPLE CHART RENDERER
     # -------------------------
-    def _create_chart(self, vis: Dict[str, Any]) -> str:
+    def _render_chart(self, vis: Dict[str, Any]) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.figure(figsize=(6, 4))
-        plt.plot(vis.get("data", []))
+        plt.plot(vis.get("data", []), color="#2563eb")
         plt.title(vis.get("title", ""))
         plt.tight_layout()
-        plt.savefig(tmp.name)
+        plt.savefig(tmp.name, dpi=150)
         plt.close()
         return tmp.name
