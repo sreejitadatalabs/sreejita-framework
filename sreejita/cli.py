@@ -1,6 +1,6 @@
 """
 Sreejita Framework CLI
-v3.6 — HTML Primary + Optional Chromium PDF
+v3.6 — HTML Primary + Optional External PDF
 """
 
 import argparse
@@ -14,7 +14,6 @@ import importlib
 from sreejita.__version__ import __version__
 from sreejita.config.loader import load_config
 
-# automation (safe to import)
 from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
@@ -42,7 +41,7 @@ def run_single_file(
         }
     """
 
-    # Lazy domain bootstrap
+    # ---- Bootstrap domains ----
     importlib.import_module("sreejita.domains.bootstrap_v2")
 
     hybrid = importlib.import_module("sreejita.reporting.hybrid")
@@ -50,31 +49,56 @@ def run_single_file(
         "sreejita.reporting.html_renderer"
     )
 
-    run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    # -------------------------------------------------
+    # CONFIG (AUTHORITATIVE)
+    # -------------------------------------------------
+    if config:
+        final_config = config
+        run_dir = Path(final_config["run_dir"])
+    else:
+        final_config = load_config(config_path)
+        run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+        final_config["run_dir"] = str(run_dir)
+
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    final_config = config or load_config(config_path)
-    final_config["run_dir"] = str(run_dir)
+    logger.info("Run directory: %s", run_dir)
 
-    # Markdown
+    # -------------------------------------------------
+    # MARKDOWN
+    # -------------------------------------------------
     md_path = Path(hybrid.run(input_path, final_config))
 
-    # HTML (PRIMARY)
+    # -------------------------------------------------
+    # HTML (PRIMARY ARTIFACT)
+    # -------------------------------------------------
     html_renderer = html_renderer_mod.HTMLReportRenderer()
     html_path = html_renderer.render(md_path, output_dir=run_dir)
 
     pdf_path = None
 
-    # Optional PDF (v3.6)
+    # -------------------------------------------------
+    # OPTIONAL PDF (v3.6)
+    # -------------------------------------------------
     if generate_pdf:
         try:
             pdf_renderer_mod = importlib.import_module(
                 "sreejita.reporting.pdf_renderer"
             )
             pdf_renderer = pdf_renderer_mod.PDFRenderer()
-            pdf_path = pdf_renderer.render(html_path, output_dir=run_dir)
+
+            pdf_path = pdf_renderer.render(
+                html_path=html_path,
+                output_dir=run_dir,
+            )
+
+            if pdf_path:
+                logger.info("PDF generated: %s", pdf_path)
+            else:
+                logger.warning("PDF renderer returned None")
+
         except Exception as e:
-            logger.warning("PDF generation failed (non-blocking): %s", e)
+            logger.exception("PDF generation failed (non-blocking)")
 
     return {
         "html": str(html_path),

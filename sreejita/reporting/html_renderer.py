@@ -11,7 +11,7 @@ class HTMLReportRenderer:
     - Executive-grade HTML theme
     - Visual evidence preserved (visuals/)
     - HTML is canonical output
-    - PDF-safe (Chromium compatible)
+    - PDF-safe (Chromium / Browserless compatible)
     """
 
     def render(
@@ -23,14 +23,14 @@ class HTMLReportRenderer:
         if not md_path.exists():
             raise FileNotFoundError(f"Markdown file not found: {md_path}")
 
-        # HTML lives next to markdown by default
-        output_dir = output_dir or md_path.parent
+        # HTML output directory
+        output_dir = Path(output_dir or md_path.parent)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         html_path = output_dir / md_path.with_suffix(".html").name
 
         # -------------------------------------------------
-        # Markdown → HTML body
+        # Markdown → HTML
         # -------------------------------------------------
         md_text = md_path.read_text(encoding="utf-8")
 
@@ -54,12 +54,18 @@ class HTMLReportRenderer:
                     shutil.copy(img, target)
 
         # -------------------------------------------------
-        # Executive HTML + CSS Theme (v3.6)
+        # BASE HREF (🔥 THIS FIXES PDF IMAGES 🔥)
+        # -------------------------------------------------
+        base_href = output_dir.resolve().as_uri() + "/"
+
+        # -------------------------------------------------
+        # Executive HTML + CSS Theme
         # -------------------------------------------------
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<base href="{base_href}">
 <title>Sreejita Executive Report</title>
 
 <style>
