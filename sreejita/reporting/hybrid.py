@@ -255,12 +255,13 @@ class HybridReport(BaseReport):
 # =====================================================
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    v3.5.1 Stable contract
+    v3.5.1 FINAL CONTRACT
 
     Returns:
         {
             "markdown": <path>,
-            "payload": <dict>
+            "payload": <pdf_payload>,
+            "run_dir": <path>
         }
     """
     from sreejita.reporting.orchestrator import generate_report_payload
@@ -268,20 +269,31 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     run_dir = Path(config["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # 1️⃣ Generate domain results
     domain_results = generate_report_payload(input_path, config)
 
+    # 2️⃣ Build Markdown
     engine = HybridReport()
-    md_path = Path(
-        engine.build(domain_results, run_dir, config.get("metadata"), config)
+    md_path = engine.build(
+        domain_results,
+        run_dir,
+        config.get("metadata"),
+        config,
     )
 
-    # Build payload for ReportLab
-    primary = engine._sort_domains(domain_results.keys())[0]
-    result = domain_results.get(primary, {})
+    # 3️⃣ Build PDF payload (AUTHORITATIVE)
+    primary_domain = engine._sort_domains(domain_results.keys())[0]
+    result = domain_results.get(primary_domain, {})
 
     payload = {
-        "meta": {"domain": primary.replace("_", " ").title()},
-        "summary": [i.get("title") for i in result.get("insights", [])[:5] if i.get("title")],
+        "meta": {
+            "domain": primary_domain.replace("_", " ").title(),
+        },
+        "summary": [
+            ins.get("title")
+            for ins in result.get("insights", [])[:5]
+            if ins.get("title")
+        ],
         "kpis": result.get("kpis", {}),
         "visuals": result.get("visuals", []),
         "insights": result.get("insights", []),
@@ -291,4 +303,5 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "markdown": str(md_path),
         "payload": payload,
+        "run_dir": str(run_dir),
     }
