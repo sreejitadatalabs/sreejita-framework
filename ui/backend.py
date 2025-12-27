@@ -62,4 +62,3 @@ def run_analysis_from_ui(
     "pdf": result.get("pdf"),
     "run_dir": result.get("run_dir"),
     }
-
