@@ -1,12 +1,10 @@
-# sreejita/reporting/pdf_renderer.py
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 import tempfile
-import os
+import io
 
 import matplotlib.pyplot as plt
-
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
@@ -21,46 +19,47 @@ from reportlab.platypus import (
     PageBreak,
 )
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 
 
 # =====================================================
 # FORMATTERS
 # =====================================================
 
-def fmt_number(v):
+def format_number(x):
     try:
-        v = float(v)
+        x = float(x)
     except Exception:
-        return str(v)
+        return str(x)
 
-    if abs(v) >= 1_000_000:
-        return f"{v / 1_000_000:.2f}M"
-    if abs(v) >= 1_000:
-        return f"{v / 1_000:.1f}K"
-    if abs(v) < 1 and v != 0:
-        return f"{v:.2f}"
-    return f"{int(v):,}"
+    if abs(x) >= 1_000_000:
+        return f"{x / 1_000_000:.2f}M"
+    if abs(x) >= 1_000:
+        return f"{x / 1_000:.1f}K"
+    if abs(x) < 1 and x != 0:
+        return f"{x:.2f}"
+    return f"{int(x):,}"
 
 
-def fmt_percent(v):
+def format_percent(x):
     try:
-        return f"{float(v) * 100:.1f}%"
+        return f"{float(x) * 100:.1f}%"
     except Exception:
-        return str(v)
+        return str(x)
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (HARD-STABLE)
+# EXECUTIVE PDF RENDERER (FINAL)
 # =====================================================
 
 class ExecutivePDFRenderer:
     """
-    v3.5.1 FINAL PDF ENGINE
+    Sreejita v3.5.1 — FINAL PDF Renderer
 
-    - No ReportLab style collisions
-    - Payload-driven
-    - Visual-safe
-    - Guaranteed PDF or explicit error
+    ✔ No filesystem race conditions
+    ✔ Images embedded in-memory
+    ✔ Streamlit & GitHub safe
+    ✔ Deterministic PDF generation
     """
 
     PRIMARY = HexColor("#1f2937")
@@ -83,12 +82,11 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # ---------- SAFE CUSTOM STYLES ----------
         styles.add(ParagraphStyle(
             name="ExecTitle",
             fontSize=22,
             alignment=TA_CENTER,
-            spaceAfter=24,
+            spaceAfter=20,
             textColor=self.PRIMARY,
         ))
 
@@ -107,106 +105,83 @@ class ExecutivePDFRenderer:
         ))
 
         # =====================================================
-        # PAGE 1 — EXECUTIVE BRIEF
+        # PAGE 1 — EXECUTIVE BRIEF + KPIs
         # =====================================================
-
         story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
-        story.append(Spacer(1, 10))
-
         meta = payload.get("meta", {})
-        story.append(Paragraph(
-            f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
-            styles["ExecBody"]
-        ))
-        story.append(Paragraph(
-            f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}",
-            styles["ExecBody"]
-        ))
+        story.append(Paragraph(f"<b>Domain:</b> {meta.get('domain','Unknown')}", styles["ExecBody"]))
+        story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}", styles["ExecBody"]))
+        story.append(Spacer(1, 14))
+
+        story.append(Paragraph("Executive Brief (1-minute read)", styles["ExecSection"]))
+        for line in payload.get("summary", []):
+            story.append(Paragraph(f"• {line}", styles["ExecBody"]))
 
         story.append(Spacer(1, 14))
         story.append(Paragraph("Key Metrics", styles["ExecSection"]))
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
-            if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"]):
-                val = fmt_percent(v)
-            else:
-                val = fmt_number(v)
-            table_data.append([k.replace("_", " ").title(), val])
+            value = format_percent(v) if "rate" in k else format_number(v)
+            table_data.append([k.replace("_"," ").title(), value])
 
-        table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
+        table = Table(table_data, colWidths=[3.5*inch, 2*inch])
         table.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
-            ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
+            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ]))
         story.append(table)
 
         # =====================================================
-        # PAGE 2–3 — VISUAL EVIDENCE
+        # VISUAL PAGES (2 visuals per page)
         # =====================================================
-
         visuals = payload.get("visuals", [])
-        if visuals:
+        for i in range(0, len(visuals), 2):
             story.append(PageBreak())
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
-            for i, vis in enumerate(visuals):
-                img = self._render_chart(vis)
-                story.append(Image(img, width=5.5 * inch, height=3.2 * inch))
-                story.append(Paragraph(vis.get("caption", ""), styles["ExecBody"]))
+            for vis in visuals[i:i+2]:
+                img = self._render_chart_in_memory(vis)
+                story.append(Image(img, width=5.5*inch, height=3.2*inch))
+                story.append(Paragraph(vis.get("caption",""), styles["ExecBody"]))
                 story.append(Spacer(1, 12))
-                os.remove(img)
-
-                if (i + 1) % 2 == 0:
-                    story.append(PageBreak())
 
         # =====================================================
-        # PAGE 4 — INSIGHTS + RECOMMENDATIONS
+        # FINAL PAGE — INSIGHTS + RECOMMENDATIONS
         # =====================================================
-
         story.append(PageBreak())
         story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
-
         for ins in payload.get("insights", []):
             story.append(Paragraph(
-                f"<b>{ins.get('level','INFO')}:</b> "
-                f"{ins.get('title','')} — {ins.get('so_what','')}",
+                f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')} — {ins.get('so_what','')}",
                 styles["ExecBody"]
             ))
-            story.append(Spacer(1, 8))
 
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("Recommendations", styles["ExecSection"]))
-
+        story.append(Spacer(1, 14))
+        story.append(Paragraph("Recommended Actions", styles["ExecSection"]))
         for rec in payload.get("recommendations", []):
             story.append(Paragraph(
-                f"<b>{rec.get('priority','HIGH')}:</b> "
-                f"{rec.get('action','')} ({rec.get('timeline','Immediate')})",
+                f"<b>{rec.get('priority','HIGH')}:</b> {rec.get('action','')} ({rec.get('timeline','Immediate')})",
                 styles["ExecBody"]
             ))
-            story.append(Spacer(1, 6))
 
         # =====================================================
-        # BUILD (GUARANTEED)
+        # BUILD (SAFE)
         # =====================================================
-
         doc.build(story)
-
-        if not output_path.exists():
-            raise RuntimeError("PDF build finished but file not found")
-
         return output_path
 
-    # -------------------------------------------------
-    # SAFE CHART RENDERER
-    # -------------------------------------------------
-    def _render_chart(self, vis: Dict[str, Any]) -> str:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    # =====================================================
+    # IN-MEMORY CHART RENDERER (NO FILESYSTEM)
+    # =====================================================
+    def _render_chart_in_memory(self, vis: Dict[str, Any]) -> ImageReader:
+        buffer = io.BytesIO()
         plt.figure(figsize=(6, 4))
         plt.plot(vis.get("data", []))
-        plt.title(vis.get("title", ""))
+        plt.title(vis.get("title",""))
         plt.tight_layout()
-        plt.savefig(tmp.name, dpi=150)
+        plt.savefig(buffer, format="png", dpi=150)
         plt.close()
-        return tmp.name
+        buffer.seek(0)
+        return ImageReader(buffer)
