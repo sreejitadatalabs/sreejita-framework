@@ -13,14 +13,13 @@ if str(ROOT) not in sys.path:
 from ui.backend import run_analysis_from_ui
 
 # -------------------------------------------------
-# PDF AVAILABILITY CHECK
+# PDF AVAILABILITY CHECK (REPORTLAB = SAFE)
 # -------------------------------------------------
 def pdf_supported() -> bool:
     """
-    Streamlit Cloud / GitHub environments do NOT support
-    local Chromium or Playwright.
+    ReportLab PDF works in Streamlit + GitHub.
     """
-    return False  # Explicit and honest
+    return True
 
 
 # -------------------------------------------------
@@ -33,7 +32,7 @@ st.set_page_config(
 )
 
 st.title("Sreejita Framework")
-st.caption("v3.6 — HTML Primary · Optional AI Narrative · PDF via Service")
+st.caption("v3.5.1 — Markdown Source · Executive PDF (Stable)")
 
 # -------------------------------------------------
 # INPUTS
@@ -51,24 +50,15 @@ enable_narrative = st.checkbox(
 provider = st.selectbox(
     "AI Provider",
     options=["gemini", "openai"],
-    help="Gemini for testing, OpenAI for production",
 )
 
 # -------------------------------------------------
-# PDF OPTION (SAFE)
+# PDF OPTION
 # -------------------------------------------------
-if pdf_supported():
-    export_pdf = st.checkbox(
-        "📄 Export PDF (Chromium)",
-        value=False,
-    )
-else:
-    export_pdf = False
-    st.info(
-        "📄 PDF export is disabled in this environment.\n\n"
-        "HTML reports include all visuals and are client-shareable.\n"
-        "PDF export will be enabled via cloud service in next release."
-    )
+export_pdf = st.checkbox(
+    "📄 Export Executive PDF",
+    value=True,
+)
 
 # -------------------------------------------------
 # RUN
@@ -79,15 +69,12 @@ if st.button("🚀 Run Analysis"):
         st.stop()
 
     with st.spinner("Running analysis…"):
-        # ---- Temp upload location ----
         temp_dir = Path("ui/temp")
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         temp_path = temp_dir / f"{uuid.uuid4().hex}_{uploaded_file.name}"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        temp_path.write_bytes(uploaded_file.getbuffer())
 
-        # ---- Run backend ----
         result = run_analysis_from_ui(
             input_path=str(temp_path),
             narrative_enabled=enable_narrative,
@@ -100,19 +87,21 @@ if st.button("🚀 Run Analysis"):
     # -------------------------------------------------
     st.success("✅ Analysis complete")
 
-    if result.get("html"):
-        with open(result["html"], "rb") as f:
+    # ---- MARKDOWN (AUTHORITATIVE) ----
+    if result.get("markdown"):
+        with open(result["markdown"], "rb") as f:
             st.download_button(
-                "🌐 Download HTML Report",
+                "📝 Download Markdown Report",
                 f,
-                file_name=Path(result["html"]).name,
-                mime="text/html",
+                file_name=Path(result["markdown"]).name,
+                mime="text/markdown",
             )
 
+    # ---- PDF (EXECUTIVE) ----
     if result.get("pdf"):
         with open(result["pdf"], "rb") as f:
             st.download_button(
-                "📄 Download PDF Report",
+                "📄 Download Executive PDF",
                 f,
                 file_name=Path(result["pdf"]).name,
                 mime="application/pdf",
