@@ -13,6 +13,17 @@ if str(ROOT) not in sys.path:
 from ui.backend import run_analysis_from_ui
 
 # -------------------------------------------------
+# PDF AVAILABILITY CHECK
+# -------------------------------------------------
+def pdf_supported() -> bool:
+    """
+    Streamlit Cloud / GitHub environments do NOT support
+    local Chromium or Playwright.
+    """
+    return False  # Explicit and honest
+
+
+# -------------------------------------------------
 # UI CONFIG
 # -------------------------------------------------
 st.set_page_config(
@@ -22,7 +33,7 @@ st.set_page_config(
 )
 
 st.title("Sreejita Framework")
-st.caption("v3.6 — HTML Primary · Optional AI Narrative · Optional PDF Export")
+st.caption("v3.6 — HTML Primary · Optional AI Narrative · PDF via Service")
 
 # -------------------------------------------------
 # INPUTS
@@ -43,10 +54,21 @@ provider = st.selectbox(
     help="Gemini for testing, OpenAI for production",
 )
 
-export_pdf = st.checkbox(
-    "📄 Export PDF (Chromium)",
-    value=False,
-)
+# -------------------------------------------------
+# PDF OPTION (SAFE)
+# -------------------------------------------------
+if pdf_supported():
+    export_pdf = st.checkbox(
+        "📄 Export PDF (Chromium)",
+        value=False,
+    )
+else:
+    export_pdf = False
+    st.info(
+        "📄 PDF export is disabled in this environment.\n\n"
+        "HTML reports include all visuals and are client-shareable.\n"
+        "PDF export will be enabled via cloud service in next release."
+    )
 
 # -------------------------------------------------
 # RUN
