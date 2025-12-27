@@ -41,11 +41,15 @@ def run_single_file(
         }
     """
 
-    # ---- Bootstrap domains ----
+    # -------------------------------------------------
+    # Bootstrap domains (lazy, safe)
+    # -------------------------------------------------
     importlib.import_module("sreejita.domains.bootstrap_v2")
     hybrid = importlib.import_module("sreejita.reporting.hybrid")
 
-    # ---- Config & run dir ----
+    # -------------------------------------------------
+    # Config & run directory (AUTHORITATIVE)
+    # -------------------------------------------------
     if config:
         final_config = config
         run_dir = Path(final_config["run_dir"])
@@ -58,7 +62,7 @@ def run_single_file(
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
-    # HYBRID RUN (RETURNS PAYLOAD)
+    # HYBRID REPORT (MARKDOWN + PAYLOAD)
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
@@ -68,7 +72,7 @@ def run_single_file(
     pdf_path = None
 
     # -------------------------------------------------
-    # REPORTLAB PDF (v3.5.1 FINAL)
+    # EXECUTIVE PDF (ReportLab — FINAL)
     # -------------------------------------------------
     if generate_pdf:
         try:
@@ -78,7 +82,10 @@ def run_single_file(
             pdf_renderer = pdf_mod.ExecutivePDFRenderer()
 
             pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
-            pdf_renderer.render(payload=payload, output_path=pdf_path)
+            pdf_renderer.render(
+                payload=payload,
+                output_path=pdf_path,
+            )
 
             logger.info("PDF generated: %s", pdf_path)
 
@@ -113,24 +120,29 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
+    # ---- VERSION ----
     if args.version:
         print(f"Sreejita Framework v{__version__}")
         return 0
 
+    # ---- LOGGING ----
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
+    # ---- CONFIG VALIDATION ----
     if (args.batch or args.watch or args.schedule or args.input) and not args.config:
         parser.error("--config is required")
 
     config = load_config(args.config) if args.config else {}
 
+    # ---- WATCH ----
     if args.watch:
         start_watcher(args.watch, args.config)
         return 0
 
+    # ---- SCHEDULE ----
     if args.schedule:
         if not args.batch:
             parser.error("--schedule requires --batch")
@@ -141,10 +153,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
+    # ---- BATCH ----
     if args.batch:
         run_batch(args.batch, args.config)
         return 0
 
+    # ---- SINGLE FILE ----
     if not args.input:
         parser.error("Input file required")
 

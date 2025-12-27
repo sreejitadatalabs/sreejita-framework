@@ -1,4 +1,4 @@
-# sreejita/reporting/pdf_renderer_reportlab.py
+# sreejita/reporting/pdf_renderer.py
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -34,9 +34,9 @@ def format_number(x):
         return str(x)
 
     if abs(x) >= 1_000_000:
-        return f"{x/1_000_000:.2f}M"
+        return f"{x / 1_000_000:.2f}M"
     if abs(x) >= 1_000:
-        return f"{x/1_000:.1f}K"
+        return f"{x / 1_000:.1f}K"
     if abs(x) < 1 and x != 0:
         return f"{x:.2f}"
     return f"{int(x):,}"
@@ -50,7 +50,7 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (STABLE)
+# EXECUTIVE PDF RENDERER (v3.5.1 — STABLE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -58,10 +58,11 @@ class ExecutivePDFRenderer:
     Sreejita v3.5.1 — Executive PDF Renderer (ReportLab)
 
     ✔ Streamlit-safe
-    ✔ GitHub-safe
+    ✔ GitHub Web-safe
     ✔ No async
     ✔ No browser
-    ✔ Visuals guaranteed
+    ✔ Visuals embedded
+    ✔ Client-ready
     """
 
     PRIMARY = HexColor("#1f2937")
@@ -125,13 +126,16 @@ class ExecutivePDFRenderer:
         story.append(Spacer(1, 12))
 
         meta = payload.get("meta", {})
-        story.append(Paragraph(f"<b>Domain:</b> {meta.get('domain', 'Unknown')}", styles["Body"]))
+        story.append(
+            Paragraph(f"<b>Domain:</b> {meta.get('domain', 'Unknown')}", styles["Body"])
+        )
         story.append(
             Paragraph(
                 f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
                 styles["Body"],
             )
         )
+
         story.append(PageBreak())
 
         # -------------------------
@@ -149,7 +153,7 @@ class ExecutivePDFRenderer:
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
-            if "rate" in k or "percent" in k:
+            if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"]):
                 value = format_percent(v)
             else:
                 value = format_number(v)
@@ -188,6 +192,7 @@ class ExecutivePDFRenderer:
         # -------------------------
         story.append(PageBreak())
         story.append(Paragraph("Insights & Risks", styles["Section"]))
+
         for ins in payload.get("insights", []):
             story.append(
                 Paragraph(
@@ -210,6 +215,9 @@ class ExecutivePDFRenderer:
             )
             story.append(Spacer(1, 6))
 
+        # -------------------------
+        # BUILD PDF
+        # -------------------------
         doc.build(story)
         return output_path
 

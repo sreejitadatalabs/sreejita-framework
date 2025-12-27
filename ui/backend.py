@@ -10,15 +10,20 @@ def run_analysis_from_ui(
     input_path: str,
     narrative_enabled: bool = False,
     narrative_provider: str = "gemini",
-    generate_pdf: bool = False,
+    generate_pdf: bool = True,  # PDF is DEFAULT in v3.5.1
 ) -> Dict[str, Any]:
     """
-    v3.6 UI-safe wrapper around CLI core.
+    v3.5.1 UI-safe wrapper (STABLE)
+
+    ReportLab-only pipeline.
+    No HTML.
+    No browsers.
+    Guaranteed PDF.
 
     Returns:
         {
-            "html": <path>,
-            "pdf": <path or None>,
+            "pdf": <path>,
+            "markdown": <path>,
             "run_dir": <path>
         }
     """
@@ -30,7 +35,7 @@ def run_analysis_from_ui(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # Config (isolated copy)
+    # Config (isolated, authoritative)
     # -------------------------------------------------
     config = DEFAULT_CONFIG.copy()
     config["run_dir"] = str(run_dir)
@@ -41,19 +46,19 @@ def run_analysis_from_ui(
     }
 
     # -------------------------------------------------
-    # Delegate to CLI core (HTML → optional PDF)
+    # Delegate to CLI (PDF PRIMARY)
     # -------------------------------------------------
     result = run_single_file(
         input_path=input_path,
         config=config,
-        generate_pdf=generate_pdf,
+        generate_pdf=True,
     )
 
     # -------------------------------------------------
     # Stable contract for Streamlit
     # -------------------------------------------------
     return {
-        "html": result.get("html"),
         "pdf": result.get("pdf"),
+        "markdown": result.get("markdown"),
         "run_dir": result.get("run_dir"),
     }

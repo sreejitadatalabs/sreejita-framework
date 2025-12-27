@@ -3,8 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from sreejita.reports.hybrid import run as run_hybrid
-from sreejita.reporting.html_renderer import HTMLReportRenderer
+from sreejita.reporting.hybrid import run as run_hybrid
 from sreejita.config.loader import load_config
 from sreejita.utils.logger import get_logger
 from sreejita.automation.retry import retry
@@ -14,26 +13,29 @@ log = get_logger("batch-runner")
 SUPPORTED_EXT = (".csv", ".xlsx")
 
 
+# =====================================================
+# PROCESS SINGLE FILE (BATCH SAFE)
+# =====================================================
+
 @retry(times=3, delay=5)
 def run_single_file(
     file_path: Path,
-    config: dict,
+    config: Dict[str, Any],
     run_dir: Path,
 ) -> Dict[str, Any]:
     """
-    Process a single file in batch mode.
+    v3.5.1 Batch Contract (FINAL):
 
-    v3.3 CONTRACT:
-    - Markdown is INTERNAL only
-    - HTML is the FINAL output
-    - One isolated folder per input file
-    - Batch execution must NEVER fail due to rendering
+    - Markdown is generated (internal)
+    - Payload is generated (for PDF)
+    - PDF is the FINAL artifact
+    - Batch must NEVER fail due to rendering
     """
 
     src = Path(file_path)
 
     # -------------------------------------------------
-    # 1️⃣ Create per-file run folder
+    # 1️⃣ Create isolated per-file run directory
     # -------------------------------------------------
     file_run_dir = run_dir / src.stem
     input_dir = file_run_dir / "input"
@@ -48,43 +50,59 @@ def run_single_file(
     log.info("Processing file: %s", src.name)
 
     # -------------------------------------------------
-    # 2️⃣ Force Hybrid output into THIS folder
+    # 2️⃣ Force Hybrid output into this folder
     # -------------------------------------------------
     local_config = dict(config)
     local_config["run_dir"] = str(file_run_dir)
 
     # -------------------------------------------------
-    # 3️⃣ Generate Markdown (AUTHORITATIVE, INTERNAL)
+    # 3️⃣ Generate Markdown + Payload (AUTHORITATIVE)
     # -------------------------------------------------
-    md_path = Path(run_hybrid(str(dst), local_config))
+    result = run_hybrid(str(dst), local_config)
+
+    md_path = Path(result["markdown"])
+    payload = result["payload"]
 
     if not md_path.exists():
-        raise RuntimeError(f"Markdown report not created: {md_path}")
+        raise RuntimeError(f"Markdown not generated: {md_path}")
 
-    log.info("Markdown generated (internal): %s", md_path)
+    log.info("Markdown generated: %s", md_path.name)
+
+    pdf_path = None
 
     # -------------------------------------------------
-    # 4️⃣ Render HTML (FINAL OUTPUT)
+    # 4️⃣ Generate Executive PDF (ReportLab)
     # -------------------------------------------------
-    html_path = None
     try:
-        renderer = HTMLReportRenderer()
-        html_path = renderer.render(md_path)
-        log.info("HTML report generated: %s", html_path)
+        from sreejita.reporting.pdf_renderer import ExecutivePDFRenderer
+
+        pdf_renderer = ExecutivePDFRenderer()
+        pdf_path = file_run_dir / "Sreejita_Executive_Report.pdf"
+
+        pdf_renderer.render(
+            payload=payload,
+            output_path=pdf_path,
+        )
+
+        log.info("PDF generated: %s", pdf_path)
 
     except Exception as e:
-        # ABSOLUTE RULE: batch must never fail due to rendering
-        log.warning("HTML rendering failed: %s", e)
+        # ❗ ABSOLUTE RULE: batch must NEVER fail
+        log.warning("PDF generation failed (non-blocking): %s", e)
 
     log.info("Completed file: %s", src.name)
 
     return {
         "file": src.name,
-        "md_path": str(md_path),
-        "html_path": str(html_path) if html_path else None,
+        "markdown": str(md_path),
+        "pdf": str(pdf_path) if pdf_path else None,
         "run_dir": str(file_run_dir),
     }
 
+
+# =====================================================
+# BATCH ENTRY POINT
+# =====================================================
 
 def run_batch(
     input_folder: str,
@@ -92,8 +110,14 @@ def run_batch(
     output_root: str = "runs",
 ):
     """
-    Batch processing entry point (v3.3 SAFE).
+    v3.5.1 Batch Runner (STABLE)
+
+    - One timestamped run directory
+    - One subfolder per file
+    - Safe retries
+    - Zero global failure risk
     """
+
     config = load_config(config_path)
 
     timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
@@ -106,6 +130,7 @@ def run_batch(
     ]
 
     log.info("Found %d input files", len(files))
+    log.info("Batch run directory: %s", run_dir)
 
     for file in files:
         src = Path(input_folder) / file
@@ -119,6 +144,7 @@ def run_batch(
                 / "failed"
                 / f"{src.stem}_{int(datetime.utcnow().timestamp())}{src.suffix}"
             )
+            failed_path.parent.mkdir(exist_ok=True)
             failed_path.write_bytes(src.read_bytes())
 
             log.error(
@@ -127,4 +153,4 @@ def run_batch(
                 str(e),
             )
 
-    log.info("Batch run completed: %s", run_dir)
+    log.info("Batch run completed successfully: %s", run_dir)
