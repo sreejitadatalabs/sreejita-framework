@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
+import copy
 
 from sreejita.cli import run_single_file
 from sreejita.config.defaults import DEFAULT_CONFIG
@@ -15,17 +16,10 @@ def run_analysis_from_ui(
     """
     v3.5.1 UI-safe wrapper (STABLE)
 
-    ReportLab-only pipeline.
-    No HTML.
-    No browsers.
-    Guaranteed PDF.
-
-    Returns:
-        {
-            "pdf": <path>,
-            "markdown": <path>,
-            "run_dir": <path>
-        }
+    - Markdown source of truth
+    - ReportLab PDF (guaranteed)
+    - No HTML
+    - No browser dependencies
     """
 
     # -------------------------------------------------
@@ -35,15 +29,12 @@ def run_analysis_from_ui(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # Config (isolated, authoritative)
+    # CONFIG (DEEP COPY — CRITICAL FIX)
     # -------------------------------------------------
-    config = DEFAULT_CONFIG.copy()
+    config = copy.deepcopy(DEFAULT_CONFIG)
     config["run_dir"] = str(run_dir)
-    config["narrative"] = {
-        "enabled": narrative_enabled,
-        "provider": narrative_provider,
-        "confidence_band": "MEDIUM",
-    }
+    config["narrative"]["enabled"] = narrative_enabled
+    config["narrative"]["provider"] = narrative_provider
 
     # -------------------------------------------------
     # Delegate to CLI (PDF PRIMARY)
@@ -51,15 +42,28 @@ def run_analysis_from_ui(
     result = run_single_file(
         input_path=input_path,
         config=config,
-        generate_pdf=True,
+        generate_pdf=generate_pdf,
     )
+
+    # -------------------------------------------------
+    # HARD VALIDATION (NO SILENT FAILURES)
+    # -------------------------------------------------
+    markdown = result.get("markdown")
+    pdf = result.get("pdf")
+
+    if not markdown or not Path(markdown).exists():
+        raise RuntimeError("Markdown report was not generated")
+
+    if generate_pdf and (not pdf or not Path(pdf).exists()):
+        raise RuntimeError(
+            "PDF generation failed — check pdf_renderer or payload contract"
+        )
 
     # -------------------------------------------------
     # Stable contract for Streamlit
     # -------------------------------------------------
     return {
-    "markdown": result.get("markdown"),
-    "pdf": result.get("pdf"),
-    "run_dir": result.get("run_dir"),
+        "markdown": markdown,
+        "pdf": pdf,
+        "run_dir": str(run_dir),
     }
-
