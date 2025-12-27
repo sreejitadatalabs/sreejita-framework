@@ -11,7 +11,3 @@ streamlit
 openpyxl
 markdown
 google-generativeai
-fastapi
-uvicorn
-playwright
-pydantic
