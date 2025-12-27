@@ -58,7 +58,8 @@ def run_analysis_from_ui(
     # Stable contract for Streamlit
     # -------------------------------------------------
     return {
-        "pdf": result.get("pdf"),
-        "markdown": result.get("markdown"),
-        "run_dir": result.get("run_dir"),
+    "markdown": result.get("markdown"),
+    "pdf": result.get("pdf"),
+    "run_dir": result.get("run_dir"),
     }
+
