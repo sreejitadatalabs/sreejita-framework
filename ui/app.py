@@ -13,16 +13,6 @@ if str(ROOT) not in sys.path:
 from ui.backend import run_analysis_from_ui
 
 # -------------------------------------------------
-# PDF AVAILABILITY CHECK (REPORTLAB = SAFE)
-# -------------------------------------------------
-def pdf_supported() -> bool:
-    """
-    ReportLab PDF works in Streamlit + GitHub.
-    """
-    return True
-
-
-# -------------------------------------------------
 # UI CONFIG
 # -------------------------------------------------
 st.set_page_config(
@@ -52,9 +42,6 @@ provider = st.selectbox(
     options=["gemini", "openai"],
 )
 
-# -------------------------------------------------
-# PDF OPTION
-# -------------------------------------------------
 export_pdf = st.checkbox(
     "📄 Export Executive PDF",
     value=True,
@@ -68,27 +55,33 @@ if st.button("🚀 Run Analysis"):
         st.error("Please upload a file first.")
         st.stop()
 
-    with st.spinner("Running analysis…"):
-        temp_dir = Path("ui/temp")
-        temp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with st.spinner("Running analysis…"):
+            temp_dir = Path("ui/temp")
+            temp_dir.mkdir(parents=True, exist_ok=True)
 
-        temp_path = temp_dir / f"{uuid.uuid4().hex}_{uploaded_file.name}"
-        temp_path.write_bytes(uploaded_file.getbuffer())
+            temp_path = temp_dir / f"{uuid.uuid4().hex}_{uploaded_file.name}"
+            temp_path.write_bytes(uploaded_file.getbuffer())
 
-        result = run_analysis_from_ui(
-            input_path=str(temp_path),
-            narrative_enabled=enable_narrative,
-            narrative_provider=provider,
-            generate_pdf=export_pdf,
-        )
+            result = run_analysis_from_ui(
+                input_path=str(temp_path),
+                narrative_enabled=enable_narrative,
+                narrative_provider=provider,
+                generate_pdf=export_pdf,
+            )
+
+    except Exception as e:
+        st.error("❌ Analysis failed")
+        st.exception(e)
+        st.stop()
 
     # -------------------------------------------------
     # OUTPUTS
     # -------------------------------------------------
     st.success("✅ Analysis complete")
 
-    # ---- MARKDOWN (AUTHORITATIVE) ----
-    if result.get("markdown"):
+    # ---- MARKDOWN ----
+    if result.get("markdown") and Path(result["markdown"]).exists():
         with open(result["markdown"], "rb") as f:
             st.download_button(
                 "📝 Download Markdown Report",
@@ -96,15 +89,20 @@ if st.button("🚀 Run Analysis"):
                 file_name=Path(result["markdown"]).name,
                 mime="text/markdown",
             )
+    else:
+        st.warning("⚠️ Markdown report not generated")
 
-    # ---- PDF (EXECUTIVE) ----
-    if result.get("pdf"):
-        with open(result["pdf"], "rb") as f:
-            st.download_button(
-                "📄 Download Executive PDF",
-                f,
-                file_name=Path(result["pdf"]).name,
-                mime="application/pdf",
-            )
+    # ---- PDF ----
+    if export_pdf:
+        if result.get("pdf") and Path(result["pdf"]).exists():
+            with open(result["pdf"], "rb") as f:
+                st.download_button(
+                    "📄 Download Executive PDF",
+                    f,
+                    file_name=Path(result["pdf"]).name,
+                    mime="application/pdf",
+                )
+        else:
+            st.warning("⚠️ PDF was requested but not generated")
 
-    st.caption(f"📁 Run folder: `{result['run_dir']}`")
+    st.caption(f"📁 Run folder: `{result.get('run_dir')}`")
