@@ -66,8 +66,20 @@ def run_single_file(
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
+    if not isinstance(result, dict):
+        raise RuntimeError(
+            "Hybrid.run() returned invalid type. "
+            "Expected dict with keys: markdown, payload, run_dir"
+        )
+
+    if "markdown" not in result or "payload" not in result:
+        raise RuntimeError(
+            f"Hybrid.run() returned invalid contract: {result}"
+        )
+
     md_path = Path(result["markdown"])
     payload = result["payload"]
+
 
     pdf_path = None
 
