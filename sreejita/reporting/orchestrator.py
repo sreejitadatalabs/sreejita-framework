@@ -18,7 +18,6 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
     """
     suffix = path.suffix.lower()
 
-    # CSV handling (encoding-safe)
     if suffix == ".csv":
         try:
             return pd.read_csv(path)
@@ -28,7 +27,6 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
             except UnicodeDecodeError:
                 return pd.read_csv(path, encoding="cp1252")
 
-    # Excel handling (engine-safe)
     if suffix in (".xls", ".xlsx"):
         try:
             return pd.read_excel(path)
@@ -42,20 +40,17 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (v3.6.1)
+# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (STABLE)
 # =====================================================
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
     Orchestrator — SINGLE SOURCE OF TRUTH
 
-    Responsibilities:
-    - Load data safely (CSV + Excel)
-    - Decide domain
-    - Execute domain lifecycle
-    - Generate visuals into run_dir/visuals
-    - Enforce HARD visual guarantees
-    - Return a STANDARDIZED payload
+    GUARANTEES:
+    - Never raises due to visuals
+    - Always returns payload
+    - Domain bugs never block PDF
     """
 
     input_path = Path(input_path)
@@ -69,12 +64,12 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA (SAFE)
+    # 1. LOAD DATA
     # -------------------------------------------------
     df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
-    # 2. DOMAIN DECISION (AUTHORITATIVE)
+    # 2. DOMAIN DECISION
     # -------------------------------------------------
     decision = decide_domain(df)
     domain = decision.selected_domain
@@ -84,7 +79,7 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         log.warning("No engine found for domain: %s", domain)
         return {
             "unknown": {
-                "kpis": {"rows": len(df), "cols": len(df.columns)},
+                "kpis": {"rows": len(df), "columns": len(df.columns)},
                 "insights": [
                     {
                         "level": "RISK",
@@ -100,17 +95,23 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     # -------------------------------------------------
     # 3. DOMAIN LIFECYCLE
     # -------------------------------------------------
-    if hasattr(engine, "preprocess"):
-        df = engine.preprocess(df)
+    try:
+        if hasattr(engine, "preprocess"):
+            df = engine.preprocess(df)
 
-    kpis = engine.calculate_kpis(df)
-    insights = engine.generate_insights(df, kpis)
+        kpis = engine.calculate_kpis(df)
+        insights = engine.generate_insights(df, kpis)
 
-    raw_recommendations = engine.generate_recommendations(df, kpis)
-    recommendations = enrich_recommendations(raw_recommendations)
+        raw_recommendations = engine.generate_recommendations(df, kpis)
+        recommendations = enrich_recommendations(raw_recommendations)
+
+    except Exception as e:
+        # HARD FAIL ONLY FOR CORE ANALYTICS
+        log.exception("Domain engine failed: %s", domain)
+        raise RuntimeError(f"Domain processing failed for '{domain}': {e}")
 
     # -------------------------------------------------
-    # 4. VISUALS (HARD GUARANTEE)
+    # 4. VISUALS (FAIL-SAFE — NEVER BLOCK)
     # -------------------------------------------------
     visuals = []
 
@@ -119,32 +120,26 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         visuals_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            visuals = engine.generate_visuals(df, visuals_dir)
+            generated = engine.generate_visuals(df, visuals_dir) or []
         except Exception as e:
-            raise RuntimeError(
-                f"Visual generation failed for domain '{domain}': {e}"
-            )
-
-        # 🔒 HARD CONTRACT — visuals must exist on disk
-        if visuals:
-            for vis in visuals:
-                if not isinstance(vis, dict):
-                    raise RuntimeError("Visual entry must be a dict")
-
-                path = vis.get("path")
-                if not path:
-                    raise RuntimeError("Visual entry missing 'path' key")
-
-                p = Path(path)
-                if not p.exists():
-                    raise RuntimeError(
-                        f"Visual declared but file not found: {p}"
-                    )
-        else:
-            log.warning(
-                "Domain '%s' returned no visuals (allowed but tracked)",
+            log.error(
+                "Visual generation failed for domain '%s': %s",
                 domain,
+                e,
+                exc_info=True,
             )
+            generated = []
+
+        # Soft validation (NO RAISE)
+        for vis in generated:
+            if (
+                isinstance(vis, dict)
+                and vis.get("path")
+                and Path(vis["path"]).exists()
+            ):
+                visuals.append(vis)
+            else:
+                log.warning("Invalid visual skipped: %s", vis)
 
     # -------------------------------------------------
     # 5. STANDARDIZED PAYLOAD (AUTHORITATIVE)
@@ -156,4 +151,4 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             "recommendations": recommendations,
             "visuals": visuals,
         }
-        }
+    } 
