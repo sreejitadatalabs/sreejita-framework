@@ -2,17 +2,20 @@ from pathlib import Path
 from typing import Optional
 import shutil
 import markdown
+import re
 
 
 class HTMLReportRenderer:
     """
-    Markdown → HTML renderer (v3.6)
+    Markdown → HTML renderer (v3.6.1 – HARDENED)
 
-    - Executive-grade HTML theme
-    - Visual evidence preserved (visuals/)
-    - HTML is canonical output
-    - PDF-safe (Chromium / Browserless compatible)
+    GUARANTEES:
+    - HTML always written OR exception raised
+    - visuals/ copied OR exception raised
+    - Markdown image references validated
     """
+
+    IMG_MD_REGEX = re.compile(r'!\[.*?\]\((.*?)\)')
 
     def render(
         self,
@@ -23,43 +26,65 @@ class HTMLReportRenderer:
         if not md_path.exists():
             raise FileNotFoundError(f"Markdown file not found: {md_path}")
 
-        # HTML output directory
         output_dir = Path(output_dir or md_path.parent)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         html_path = output_dir / md_path.with_suffix(".html").name
 
         # -------------------------------------------------
-        # Markdown → HTML
+        # READ MARKDOWN
         # -------------------------------------------------
         md_text = md_path.read_text(encoding="utf-8")
 
+        # -------------------------------------------------
+        # FIND IMAGE REFERENCES IN MARKDOWN
+        # -------------------------------------------------
+        referenced_images = self.IMG_MD_REGEX.findall(md_text)
+
+        # -------------------------------------------------
+        # CONVERT MARKDOWN → HTML
+        # -------------------------------------------------
         html_body = markdown.markdown(
             md_text,
             extensions=["tables", "fenced_code"],
         )
 
         # -------------------------------------------------
-        # Preserve visuals/ directory (CRITICAL)
+        # VISUALS CONTRACT (HARD RULE)
         # -------------------------------------------------
         visuals_src = md_path.parent / "visuals"
         visuals_dst = output_dir / "visuals"
 
-        if visuals_src.exists() and visuals_src.is_dir():
+        if referenced_images:
+            if not visuals_src.exists():
+                raise RuntimeError(
+                    "Markdown references visuals but visuals/ directory is missing"
+                )
+
             visuals_dst.mkdir(exist_ok=True)
 
+            copied = []
             for img in visuals_src.glob("*"):
                 target = visuals_dst / img.name
                 if not target.exists():
                     shutil.copy(img, target)
+                copied.append(target.name)
+
+            # Validate references
+            for ref in referenced_images:
+                ref_name = Path(ref).name
+                if ref_name not in copied:
+                    raise RuntimeError(
+                        f"Referenced image '{ref_name}' not found in visuals/"
+                    )
 
         # -------------------------------------------------
-        # BASE HREF (🔥 THIS FIXES PDF IMAGES 🔥)
+        # BASE HREF (CRITICAL FOR PDF / BROWSERLESS)
         # -------------------------------------------------
         base_href = output_dir.resolve().as_uri() + "/"
 
         # -------------------------------------------------
-        # Executive HTML + CSS Theme
+        # EXECUTIVE HTML
         # -------------------------------------------------
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -69,102 +94,21 @@ class HTMLReportRenderer:
 <title>Sreejita Executive Report</title>
 
 <style>
-:root {{
-  --bg: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --primary: #0f172a;
-  --border: #e5e7eb;
-
-  --info: #2563eb;
-  --warning: #d97706;
-  --risk: #b91c1c;
-}}
-
 body {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  background: #ffffff;
+  color: #1f2937;
   margin: 0;
   padding: 40px;
 }}
-
 .report {{
   max-width: 1100px;
   margin: 0 auto;
 }}
-
-h1 {{
-  font-size: 28px;
-  margin-bottom: 8px;
-  color: var(--primary);
-}}
-
-h2 {{
-  font-size: 20px;
-  margin-top: 40px;
-  margin-bottom: 16px;
-  color: var(--primary);
-  border-left: 4px solid var(--primary);
-  padding-left: 12px;
-}}
-
-h3 {{
-  font-size: 16px;
-  margin-top: 24px;
-  color: var(--primary);
-}}
-
-p {{
-  line-height: 1.6;
-  font-size: 15px;
-}}
-
-hr {{
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 32px 0;
-}}
-
-table {{
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 16px;
-  font-size: 14px;
-}}
-
-th, td {{
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-}}
-
-th {{
-  background: #f9fafb;
-  text-align: left;
-}}
-
-blockquote {{
-  background: #f9fafb;
-  border-left: 4px solid var(--info);
-  padding: 12px 16px;
-  margin: 20px 0;
-  color: #374151;
-}}
-
 img {{
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid #e5e7eb;
   margin: 12px 0;
-}}
-
-.report-footer {{
-  margin-top: 48px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
 }}
 </style>
 </head>
@@ -172,8 +116,8 @@ img {{
 <body>
   <div class="report">
     {html_body}
-
-    <div class="report-footer">
+    <hr>
+    <div style="font-size:12px;color:#6b7280;text-align:center;">
       Generated by <strong>Sreejita Framework</strong> · v3.6 · Confidential
     </div>
   </div>
@@ -182,4 +126,11 @@ img {{
 """
 
         html_path.write_text(html, encoding="utf-8")
+
+        # -------------------------------------------------
+        # FINAL GUARANTEE
+        # -------------------------------------------------
+        if not html_path.exists():
+            raise RuntimeError("HTML generation failed — file not written")
+
         return html_path
