@@ -24,7 +24,7 @@ def run_analysis_from_ui(
     """
 
     # -------------------------------------------------
-    # Run directory (UI-safe, timestamped)
+    # Run directory (Streamlit-safe)
     # -------------------------------------------------
     run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def run_analysis_from_ui(
     }
 
     # -------------------------------------------------
-    # Delegate to CLI core (v3.6)
+    # Delegate to CLI core (HTML → optional PDF)
     # -------------------------------------------------
     result = run_single_file(
         input_path=input_path,
@@ -50,7 +50,7 @@ def run_analysis_from_ui(
     )
 
     # -------------------------------------------------
-    # Stable contract for Streamlit / API
+    # Stable contract for Streamlit
     # -------------------------------------------------
     return {
         "html": result.get("html"),
