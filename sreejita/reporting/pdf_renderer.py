@@ -49,7 +49,7 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER — v3.5.1 (FINAL)
+# EXECUTIVE PDF RENDERER — v3.5.1 (FINAL, STABLE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -58,7 +58,7 @@ class ExecutivePDFRenderer:
     ✔ GitHub-safe
     ✔ No browser
     ✔ No async
-    ✔ No style collisions
+    ✔ No temp-file race conditions
     ✔ Guaranteed PDF output
     """
 
@@ -87,8 +87,11 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
+        # 🔒 Track temp images and clean up AFTER build
+        temp_images: List[str] = []
+
         # -------------------------------------------------
-        # UNIQUE STYLE NAMES (🔥 FIX)
+        # UNIQUE STYLES
         # -------------------------------------------------
         styles.add(
             ParagraphStyle(
@@ -99,7 +102,6 @@ class ExecutivePDFRenderer:
                 textColor=self.PRIMARY,
             )
         )
-
         styles.add(
             ParagraphStyle(
                 name="ExecSection",
@@ -109,7 +111,6 @@ class ExecutivePDFRenderer:
                 textColor=self.PRIMARY,
             )
         )
-
         styles.add(
             ParagraphStyle(
                 name="ExecBody",
@@ -118,9 +119,9 @@ class ExecutivePDFRenderer:
             )
         )
 
-        # -------------------------------------------------
+        # =================================================
         # PAGE 1 — EXECUTIVE BRIEF + KPIs
-        # -------------------------------------------------
+        # =================================================
         story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
         story.append(Spacer(1, 12))
 
@@ -139,8 +140,8 @@ class ExecutivePDFRenderer:
         )
 
         story.append(Spacer(1, 16))
-
         story.append(Paragraph("Executive Brief", styles["ExecSection"]))
+
         for line in payload.get("summary", []):
             story.append(Paragraph(f"• {line}", styles["ExecBody"]))
             story.append(Spacer(1, 4))
@@ -169,9 +170,9 @@ class ExecutivePDFRenderer:
         )
         story.append(table)
 
-        # -------------------------------------------------
-        # PAGE 2 & 3 — VISUAL EVIDENCE (OPTIONAL)
-        # -------------------------------------------------
+        # =================================================
+        # PAGE 2 & 3 — VISUAL EVIDENCE
+        # =================================================
         visuals = payload.get("visuals", [])
         if visuals:
             story.append(PageBreak())
@@ -179,16 +180,18 @@ class ExecutivePDFRenderer:
 
             for vis in visuals[:4]:
                 img_path = self._render_chart(vis)
+                temp_images.append(img_path)
+
                 story.append(Image(img_path, width=5.5 * inch, height=3.2 * inch))
                 story.append(Paragraph(vis.get("caption", ""), styles["ExecBody"]))
                 story.append(Spacer(1, 12))
-                os.remove(img_path)
 
-        # -------------------------------------------------
+        # =================================================
         # PAGE 4 — INSIGHTS & RECOMMENDATIONS
-        # -------------------------------------------------
+        # =================================================
         story.append(PageBreak())
         story.append(Paragraph("Insights & Risks", styles["ExecSection"]))
+
         for ins in payload.get("insights", []):
             story.append(
                 Paragraph(
@@ -201,6 +204,7 @@ class ExecutivePDFRenderer:
 
         story.append(Spacer(1, 12))
         story.append(Paragraph("Recommendations", styles["ExecSection"]))
+
         for rec in payload.get("recommendations", []):
             story.append(
                 Paragraph(
@@ -211,10 +215,17 @@ class ExecutivePDFRenderer:
             )
             story.append(Spacer(1, 6))
 
-        # -------------------------------------------------
-        # BUILD PDF (GUARANTEED)
-        # -------------------------------------------------
+        # =================================================
+        # BUILD PDF (CRITICAL SECTION)
+        # =================================================
         doc.build(story)
+
+        # ✅ SAFE CLEANUP AFTER BUILD
+        for p in temp_images:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
 
         if not output_path.exists():
             raise RuntimeError("PDF build completed but file not found")
@@ -222,7 +233,7 @@ class ExecutivePDFRenderer:
         return output_path
 
     # -------------------------------------------------
-    # SAFE CHART GENERATOR (PDF-ONLY)
+    # SAFE CHART GENERATOR
     # -------------------------------------------------
     def _render_chart(self, vis: Dict[str, Any]) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
