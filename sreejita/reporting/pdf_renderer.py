@@ -1,4 +1,5 @@
 # sreejita/reporting/pdf_renderer.py
+
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -50,7 +51,7 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (STABLE)
+# EXECUTIVE PDF RENDERER (FINAL)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -58,7 +59,8 @@ class ExecutivePDFRenderer:
     Sreejita v3.5.1 — Executive PDF Renderer (ReportLab)
 
     ✔ Streamlit-safe
-    ✔ GitHub Web-safe
+    ✔ GitHub-safe
+    ✔ No HTML
     ✔ No browser
     ✔ Deterministic
     """
@@ -67,11 +69,7 @@ class ExecutivePDFRenderer:
     BORDER = HexColor("#e5e7eb")
     HEADER_BG = HexColor("#f3f4f6")
 
-    def render(
-        self,
-        payload: Dict[str, Any],
-        output_path: Path,
-    ) -> Path:
+    def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         output_path = Path(output_path)
 
         doc = SimpleDocTemplate(
@@ -83,71 +81,70 @@ class ExecutivePDFRenderer:
             bottomMargin=36,
         )
 
-        styles = getSampleStyleSheet()
+        base_styles = getSampleStyleSheet()
         story: List = []
 
-        # -------------------------
-        # STYLES
-        # -------------------------
-        styles.add(ParagraphStyle(
-            name="Title",
+        # ✅ USE UNIQUE STYLE NAMES (CRITICAL FIX)
+        base_styles.add(ParagraphStyle(
+            name="SR_Title",
             fontSize=22,
             spaceAfter=24,
             alignment=TA_CENTER,
             textColor=self.PRIMARY,
         ))
 
-        styles.add(ParagraphStyle(
-            name="Section",
+        base_styles.add(ParagraphStyle(
+            name="SR_Section",
             fontSize=16,
             spaceBefore=20,
             spaceAfter=12,
             textColor=self.PRIMARY,
         ))
 
-        styles.add(ParagraphStyle(
-            name="Body",
+        base_styles.add(ParagraphStyle(
+            name="SR_Body",
             fontSize=11,
             leading=14,
         ))
 
-        # -------------------------
+        # -------------------------------------------------
         # COVER
-        # -------------------------
-        story.append(Paragraph("Sreejita Executive Report", styles["Title"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Sreejita Executive Report", base_styles["SR_Title"]))
         story.append(Spacer(1, 12))
 
         meta = payload.get("meta", {})
         story.append(Paragraph(
             f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
-            styles["Body"],
+            base_styles["SR_Body"],
         ))
         story.append(Paragraph(
             f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}",
-            styles["Body"],
+            base_styles["SR_Body"],
         ))
 
         story.append(PageBreak())
 
-        # -------------------------
+        # -------------------------------------------------
         # EXECUTIVE SUMMARY
-        # -------------------------
-        story.append(Paragraph("Executive Summary", styles["Section"]))
-        for item in payload.get("summary", []):
-            story.append(Paragraph(f"• {item}", styles["Body"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Executive Summary", base_styles["SR_Section"]))
+        for line in payload.get("summary", []):
+            story.append(Paragraph(f"• {line}", base_styles["SR_Body"]))
             story.append(Spacer(1, 6))
 
-        # -------------------------
+        # -------------------------------------------------
         # KPI SNAPSHOT
-        # -------------------------
-        story.append(Paragraph("Key Metrics", styles["Section"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Key Metrics", base_styles["SR_Section"]))
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
-            if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"]):
-                value = format_percent(v)
-            else:
-                value = format_number(v)
+            value = (
+                format_percent(v)
+                if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"])
+                else format_number(v)
+            )
             table_data.append([k.replace("_", " ").title(), value])
 
         table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
@@ -158,68 +155,51 @@ class ExecutivePDFRenderer:
         ]))
         story.append(table)
 
-        # -------------------------
-        # VISUAL EVIDENCE
-        # -------------------------
-        temp_images: List[str] = []
-
+        # -------------------------------------------------
+        # VISUALS (INLINE GENERATED)
+        # -------------------------------------------------
         visuals = payload.get("visuals", [])
         if visuals:
             story.append(PageBreak())
-            story.append(Paragraph("Visual Evidence", styles["Section"]))
+            story.append(Paragraph("Visual Evidence", base_styles["SR_Section"]))
 
             for vis in visuals:
                 img_path = self._render_chart(vis)
-                temp_images.append(img_path)
-
-                story.append(Image(
-                    img_path,
-                    width=5.5 * inch,
-                    height=3.2 * inch,
-                ))
-                story.append(Paragraph(vis.get("caption", ""), styles["Body"]))
+                story.append(Image(img_path, width=5.5 * inch, height=3.2 * inch))
+                story.append(Paragraph(vis.get("caption", ""), base_styles["SR_Body"]))
                 story.append(Spacer(1, 12))
+                os.remove(img_path)
 
-        # -------------------------
+        # -------------------------------------------------
         # INSIGHTS
-        # -------------------------
+        # -------------------------------------------------
         story.append(PageBreak())
-        story.append(Paragraph("Insights & Risks", styles["Section"]))
+        story.append(Paragraph("Insights & Risks", base_styles["SR_Section"]))
+
         for ins in payload.get("insights", []):
             story.append(Paragraph(
                 f"<b>{ins['level']}:</b> {ins['title']} — {ins['so_what']}",
-                styles["Body"],
+                base_styles["SR_Body"],
             ))
             story.append(Spacer(1, 8))
 
-        # -------------------------
+        # -------------------------------------------------
         # RECOMMENDATIONS
-        # -------------------------
-        story.append(Paragraph("Recommendations", styles["Section"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Recommendations", base_styles["SR_Section"]))
         for rec in payload.get("recommendations", []):
             story.append(Paragraph(
                 f"<b>{rec['priority']}:</b> {rec['action']} ({rec['timeline']})",
-                styles["Body"],
+                base_styles["SR_Body"],
             ))
             story.append(Spacer(1, 6))
 
-        # -------------------------
-        # BUILD PDF
-        # -------------------------
         doc.build(story)
-
-        # ✅ SAFE CLEANUP (AFTER BUILD)
-        for p in temp_images:
-            try:
-                os.remove(p)
-            except Exception:
-                pass
-
         return output_path
 
-    # -------------------------
-    # CHART RENDERER
-    # -------------------------
+    # -------------------------------------------------
+    # SAFE INLINE CHART
+    # -------------------------------------------------
     def _render_chart(self, vis: Dict[str, Any]) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.figure(figsize=(6, 4))
