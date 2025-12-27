@@ -1,32 +1,49 @@
 import requests
 from pathlib import Path
 import logging
+import os
 
 logger = logging.getLogger("sreejita.pdf")
 
 BROWSERLESS_ENDPOINT = "https://chrome.browserless.io/pdf"
-API_KEY = "<YOUR_API_KEY>"  # put in secrets later
 
 
 class PDFRenderer:
     """
-    Streamlit-safe PDF Renderer using Browserless (Chromium)
+    v3.6 — External Chromium PDF Renderer (Browserless)
+
+    - Streamlit Cloud compatible
+    - GitHub Web compatible
+    - No local Chromium / Playwright
     """
 
-    def render(self, html_path: Path, output_dir: Path) -> Path | None:
+    def render(
+        self,
+        html_path: Path,
+        output_dir: Path,
+    ) -> Path | None:
+
         html_path = Path(html_path)
         if not html_path.exists():
-            logger.error("HTML not found: %s", html_path)
+            logger.error("HTML file not found: %s", html_path)
             return None
 
+        output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
         pdf_path = output_dir / html_path.with_suffix(".pdf").name
 
-        # Browserless needs a URL → so we serve file via file://
-        html_url = html_path.resolve().as_uri()
+        # 🔐 Read API key safely
+        api_key = os.environ.get("BROWSERLESS_API_KEY")
+        if not api_key:
+            logger.error("BROWSERLESS_API_KEY not set")
+            return None
+
+        # ✅ Read full HTML content
+        html_content = html_path.read_text(encoding="utf-8")
 
         payload = {
-            "url": html_url,
+            "html": html_content,
             "options": {
                 "printBackground": True,
                 "format": "A4",
@@ -40,17 +57,17 @@ class PDFRenderer:
         }
 
         try:
-            resp = requests.post(
-                f"{BROWSERLESS_ENDPOINT}?token={API_KEY}",
+            response = requests.post(
+                f"{BROWSERLESS_ENDPOINT}?token={api_key}",
                 json=payload,
-                timeout=60,
+                timeout=90,
             )
 
-            resp.raise_for_status()
+            response.raise_for_status()
 
-            with open(pdf_path, "wb") as f:
-                f.write(resp.content)
+            pdf_path.write_bytes(response.content)
 
+            logger.info("PDF generated successfully: %s", pdf_path)
             return pdf_path
 
         except Exception as e:
