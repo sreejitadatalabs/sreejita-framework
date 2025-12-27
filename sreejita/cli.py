@@ -1,6 +1,6 @@
 """
 Sreejita Framework CLI
-v3.6 — HTML Primary + Optional External PDF
+v3.5.1 — Markdown + ReportLab PDF (STABLE)
 """
 
 import argparse
@@ -31,11 +31,11 @@ def run_single_file(
     generate_pdf: bool = False,
 ) -> Dict[str, Optional[str]]:
     """
-    v3.6 Programmatic Entry
+    v3.5.1 Programmatic Entry (STABLE)
 
     Returns:
         {
-            "html": <path>,
+            "markdown": <path>,
             "pdf": <path or None>,
             "run_dir": <path>
         }
@@ -43,15 +43,9 @@ def run_single_file(
 
     # ---- Bootstrap domains ----
     importlib.import_module("sreejita.domains.bootstrap_v2")
-
     hybrid = importlib.import_module("sreejita.reporting.hybrid")
-    html_renderer_mod = importlib.import_module(
-        "sreejita.reporting.html_renderer"
-    )
 
-    # -------------------------------------------------
-    # CONFIG (AUTHORITATIVE)
-    # -------------------------------------------------
+    # ---- Config & run dir ----
     if config:
         final_config = config
         run_dir = Path(final_config["run_dir"])
@@ -61,47 +55,38 @@ def run_single_file(
         final_config["run_dir"] = str(run_dir)
 
     run_dir.mkdir(parents=True, exist_ok=True)
-
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
-    # MARKDOWN
+    # HYBRID RUN (RETURNS PAYLOAD)
     # -------------------------------------------------
-    md_path = Path(hybrid.run(input_path, final_config))
+    result = hybrid.run(input_path, final_config)
 
-    # -------------------------------------------------
-    # HTML (PRIMARY ARTIFACT)
-    # -------------------------------------------------
-    html_renderer = html_renderer_mod.HTMLReportRenderer()
-    html_path = html_renderer.render(md_path, output_dir=run_dir)
+    md_path = Path(result["markdown"])
+    payload = result["payload"]
 
     pdf_path = None
 
     # -------------------------------------------------
-    # OPTIONAL PDF (v3.6)
+    # REPORTLAB PDF (v3.5.1 FINAL)
     # -------------------------------------------------
     if generate_pdf:
         try:
-            pdf_renderer_mod = importlib.import_module(
+            pdf_mod = importlib.import_module(
                 "sreejita.reporting.pdf_renderer"
             )
-            pdf_renderer = pdf_renderer_mod.PDFRenderer()
+            pdf_renderer = pdf_mod.ExecutivePDFRenderer()
 
-            pdf_path = pdf_renderer.render(
-                html_path=html_path,
-                output_dir=run_dir,
-            )
+            pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
+            pdf_renderer.render(payload=payload, output_path=pdf_path)
 
-            if pdf_path:
-                logger.info("PDF generated: %s", pdf_path)
-            else:
-                logger.warning("PDF renderer returned None")
+            logger.info("PDF generated: %s", pdf_path)
 
-        except Exception as e:
-            logger.exception("PDF generation failed (non-blocking)")
+        except Exception:
+            logger.exception("PDF generation failed")
 
     return {
-        "html": str(html_path),
+        "markdown": str(md_path),
         "pdf": str(pdf_path) if pdf_path else None,
         "run_dir": str(run_dir),
     }
@@ -122,7 +107,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--watch", help="Watch folder for new files")
     parser.add_argument("--schedule", action="store_true")
 
-    parser.add_argument("--pdf", action="store_true", help="Export PDF (v3.6)")
+    parser.add_argument("--pdf", action="store_true", help="Export Executive PDF")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -174,10 +159,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     print("\n✅ Report generated")
-    print(f"🌐 HTML: {result['html']}")
+    print(f"📝 Markdown: {result['markdown']}")
 
     if result["pdf"]:
-        print(f"📄 PDF:  {result['pdf']}")
+        print(f"📄 PDF: {result['pdf']}")
 
     print(f"📁 Run folder: {result['run_dir']}")
     return 0
