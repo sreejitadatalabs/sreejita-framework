@@ -7,16 +7,17 @@ from sreejita.reporting.base import BaseReport
 
 
 # =====================================================
-# HYBRID REPORT (v3.5 – MD SOURCE OF TRUTH)
+# HYBRID REPORT (v3.5.1 — STABLE)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
-    Hybrid v3.5 Report Engine
+    Hybrid v3.5.1 Report Engine
 
-    - Deterministic intelligence (v3.4)
-    - Optional AI-assisted narrative layer (v3.5)
-    - Markdown remains the single source of truth
+    - Deterministic intelligence
+    - Optional AI-assisted narrative
+    - Markdown = single source of truth
+    - Payload preserved for PDF rendering
     """
 
     name = "hybrid"
@@ -43,7 +44,7 @@ class HybridReport(BaseReport):
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
 
-            # v3.5 OPTIONAL AI NARRATIVE (FAIL-SAFE)
+            # Optional AI Narrative (FAIL-SAFE)
             self._write_optional_narrative(
                 f,
                 run_id,
@@ -63,7 +64,7 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # OPTIONAL NARRATIVE SECTION (v3.5)
+    # OPTIONAL AI NARRATIVE (v3.5)
     # -------------------------------------------------
 
     def _write_optional_narrative(
@@ -75,9 +76,9 @@ class HybridReport(BaseReport):
     ):
         narrative_cfg = config.get("narrative", {})
         if not narrative_cfg.get("enabled", False):
-            return  # v3.4 behavior
+            return
 
-        # Lazy imports (CRITICAL for optional AI)
+        # Lazy imports (CRITICAL)
         from sreejita.narrative.schema import (
             NarrativeInput,
             NarrativeInsight,
@@ -124,7 +125,6 @@ class HybridReport(BaseReport):
         try:
             narrative_text = generate_narrative(narrative_input, llm_client)
         except Exception:
-            # v3.5 rule: AI failure must NEVER block report generation
             f.write(
                 "\n> ⚠️ *AI narrative could not be generated for this run.*\n\n"
             )
@@ -132,13 +132,12 @@ class HybridReport(BaseReport):
 
         f.write("\n## 🤖 AI-Assisted Narrative (Optional)\n\n")
         f.write(
-            "> ⚠️ *This section is AI-assisted and optional. It summarizes existing decisions "
-            "using a language model. No new metrics or recommendations are introduced. *\n\n"
+            "> ⚠️ *This section is AI-assisted. It summarizes existing insights only.*\n\n"
         )
         f.write(narrative_text.strip() + "\n\n")
 
     # -------------------------------------------------
-    # HEADER & EXEC SUMMARY
+    # HEADER
     # -------------------------------------------------
 
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
@@ -147,7 +146,7 @@ class HybridReport(BaseReport):
         f.write("## Executive Summary\n\n")
         f.write(f"- **Run ID:** {run_id}\n")
         f.write(f"- **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n")
-        f.write("- **Framework Version:** Sreejita v3.5\n")
+        f.write("- **Framework Version:** Sreejita v3.5.1\n")
 
         if metadata:
             for k, v in metadata.items():
@@ -155,12 +154,11 @@ class HybridReport(BaseReport):
 
         f.write(
             "\n> This report presents decision-grade insights generated using "
-            "**Sreejita Composite Intelligence**, focusing on risks, "
-            "opportunities, and recommended actions.\n\n"
+            "**Sreejita Composite Intelligence**.\n\n"
         )
 
     # -------------------------------------------------
-    # DOMAIN SECTIONS
+    # DOMAIN SECTION
     # -------------------------------------------------
 
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
@@ -176,6 +174,7 @@ class HybridReport(BaseReport):
         recs = result.get("recommendations", [])
         visuals = result.get("visuals", [])
 
+        # ---- INSIGHTS ----
         f.write("### 🧠 Strategic Intelligence\n")
         if insights:
             for ins in insights:
@@ -188,6 +187,7 @@ class HybridReport(BaseReport):
         else:
             f.write("_Operations within normal parameters._\n\n")
 
+        # ---- KPIs ----
         if isinstance(kpis, dict) and kpis:
             f.write("### 📉 Key Performance Indicators\n")
             f.write("| Metric | Value |\n")
@@ -199,9 +199,10 @@ class HybridReport(BaseReport):
                 )
             f.write("\n")
 
+        # ---- VISUALS ----
         if isinstance(visuals, list) and visuals:
             f.write("### 👁️ Visual Evidence\n")
-            for idx, vis in enumerate(visuals[:2], start=1):
+            for idx, vis in enumerate(visuals[:3], start=1):
                 path = vis.get("path")
                 if not path:
                     continue
@@ -210,6 +211,7 @@ class HybridReport(BaseReport):
                 f.write(f"![{caption}]({img})\n")
                 f.write(f"> *Fig {idx}.1 — {caption}*\n\n")
 
+        # ---- ACTION ----
         if isinstance(recs, list) and recs:
             primary = recs[0]
             if "action" in primary:
@@ -223,15 +225,19 @@ class HybridReport(BaseReport):
                 )
 
     # -------------------------------------------------
-    # FOOTER & HELPERS
+    # FOOTER
     # -------------------------------------------------
 
     def _write_footer(self, f):
         f.write("\n---\n")
         f.write(
             "_Prepared by **Sreejita Data Labs** · "
-            "Framework v3.5 · Confidential_\n"
+            "Framework v3.5.1 · Confidential_\n"
         )
+
+    # -------------------------------------------------
+    # HELPERS
+    # -------------------------------------------------
 
     def _prioritize_insights(self, insights: List[Dict[str, Any]]):
         order = {"RISK": 0, "WARNING": 1, "INFO": 2}
@@ -248,22 +254,15 @@ class HybridReport(BaseReport):
         if isinstance(v, (int, float)):
             abs_v = abs(v)
 
-            # Percentages
-            if any(
-                x in key.lower()
-                for x in ["rate", "ratio", "margin", "conversion"]
-            ) and abs_v <= 2:
+            if any(x in key.lower() for x in ["rate", "ratio", "margin", "conversion"]) and abs_v <= 2:
                 return f"{v:.1%}"
 
-            # Millions
             if abs_v >= 1_000_000:
                 return f"{v / 1_000_000:.1f}M"
 
-            # Thousands
             if abs_v >= 1_000:
                 return f"{v / 1_000:.1f}K"
 
-            # Small numbers
             if isinstance(v, float):
                 return f"{v:.2f}"
 
@@ -272,12 +271,20 @@ class HybridReport(BaseReport):
         return str(v)
 
 
-
 # =====================================================
-# BACKWARD-COMPATIBLE ENTRY POINT
+# FIXED ENTRY POINT (CRITICAL)
 # =====================================================
 
-def run(input_path: str, config: Dict[str, Any]) -> str:
+def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    v3.5.1 STABLE CONTRACT
+
+    Returns:
+        {
+            "markdown": <path>,
+            "payload": <domain_results>
+        }
+    """
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config["run_dir"])
@@ -286,4 +293,14 @@ def run(input_path: str, config: Dict[str, Any]) -> str:
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
-    return str(engine.build(domain_results, run_dir, config.get("metadata"), config))
+    md_path = engine.build(
+        domain_results,
+        run_dir,
+        config.get("metadata"),
+        config,
+    )
+
+    return {
+        "markdown": str(md_path),
+        "payload": domain_results,
+    }
