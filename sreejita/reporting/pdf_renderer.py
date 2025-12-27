@@ -1,4 +1,5 @@
 # sreejita/reporting/pdf_renderer.py
+
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -50,7 +51,7 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (v3.5.1 — STABLE)
+# EXECUTIVE PDF RENDERER (v3.5.1 — FINAL & STABLE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -61,6 +62,7 @@ class ExecutivePDFRenderer:
     ✔ GitHub Web-safe
     ✔ No async
     ✔ No browser
+    ✔ No Playwright / Chromium
     ✔ Visuals embedded
     ✔ Client-ready
     """
@@ -88,12 +90,12 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # -------------------------
-        # STYLES
-        # -------------------------
+        # -------------------------------------------------
+        # CUSTOM STYLES (⚠️ NO NAME COLLISIONS)
+        # -------------------------------------------------
         styles.add(
             ParagraphStyle(
-                name="Title",
+                name="ExecTitle",
                 fontSize=22,
                 spaceAfter=24,
                 alignment=TA_CENTER,
@@ -103,7 +105,7 @@ class ExecutivePDFRenderer:
 
         styles.add(
             ParagraphStyle(
-                name="Section",
+                name="ExecSection",
                 fontSize=16,
                 spaceBefore=20,
                 spaceAfter=12,
@@ -113,43 +115,46 @@ class ExecutivePDFRenderer:
 
         styles.add(
             ParagraphStyle(
-                name="Body",
+                name="ExecBody",
                 fontSize=11,
                 leading=14,
             )
         )
 
-        # -------------------------
-        # COVER
-        # -------------------------
-        story.append(Paragraph("Sreejita Executive Report", styles["Title"]))
+        # -------------------------------------------------
+        # COVER PAGE
+        # -------------------------------------------------
+        story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
         story.append(Spacer(1, 12))
 
         meta = payload.get("meta", {})
         story.append(
-            Paragraph(f"<b>Domain:</b> {meta.get('domain', 'Unknown')}", styles["Body"])
+            Paragraph(
+                f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
+                styles["ExecBody"],
+            )
         )
         story.append(
             Paragraph(
                 f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
-                styles["Body"],
+                styles["ExecBody"],
             )
         )
 
         story.append(PageBreak())
 
-        # -------------------------
+        # -------------------------------------------------
         # EXECUTIVE SUMMARY
-        # -------------------------
-        story.append(Paragraph("Executive Summary", styles["Section"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Executive Summary", styles["ExecSection"]))
         for item in payload.get("summary", []):
-            story.append(Paragraph(f"• {item}", styles["Body"]))
+            story.append(Paragraph(f"• {item}", styles["ExecBody"]))
             story.append(Spacer(1, 6))
 
-        # -------------------------
+        # -------------------------------------------------
         # KPI SNAPSHOT
-        # -------------------------
-        story.append(Paragraph("Key Metrics", styles["Section"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Key Metrics", styles["ExecSection"]))
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
@@ -172,58 +177,60 @@ class ExecutivePDFRenderer:
         )
         story.append(table)
 
-        # -------------------------
+        # -------------------------------------------------
         # VISUAL EVIDENCE
-        # -------------------------
+        # -------------------------------------------------
         visuals = payload.get("visuals", [])
         if visuals:
             story.append(PageBreak())
-            story.append(Paragraph("Visual Evidence", styles["Section"]))
+            story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
             for vis in visuals:
                 img_path = self._render_chart(vis)
                 story.append(Image(img_path, width=5.5 * inch, height=3.2 * inch))
-                story.append(Paragraph(vis.get("caption", ""), styles["Body"]))
+                story.append(
+                    Paragraph(vis.get("caption", ""), styles["ExecBody"])
+                )
                 story.append(Spacer(1, 12))
                 os.remove(img_path)
 
-        # -------------------------
+        # -------------------------------------------------
         # INSIGHTS
-        # -------------------------
+        # -------------------------------------------------
         story.append(PageBreak())
-        story.append(Paragraph("Insights & Risks", styles["Section"]))
+        story.append(Paragraph("Insights & Risks", styles["ExecSection"]))
 
         for ins in payload.get("insights", []):
             story.append(
                 Paragraph(
                     f"<b>{ins['level']}:</b> {ins['title']} — {ins['so_what']}",
-                    styles["Body"],
+                    styles["ExecBody"],
                 )
             )
             story.append(Spacer(1, 8))
 
-        # -------------------------
+        # -------------------------------------------------
         # RECOMMENDATIONS
-        # -------------------------
-        story.append(Paragraph("Recommendations", styles["Section"]))
+        # -------------------------------------------------
+        story.append(Paragraph("Recommendations", styles["ExecSection"]))
         for rec in payload.get("recommendations", []):
             story.append(
                 Paragraph(
                     f"<b>{rec['priority']}:</b> {rec['action']} ({rec['timeline']})",
-                    styles["Body"],
+                    styles["ExecBody"],
                 )
             )
             story.append(Spacer(1, 6))
 
-        # -------------------------
-        # BUILD PDF
-        # -------------------------
+        # -------------------------------------------------
+        # BUILD PDF (FINAL)
+        # -------------------------------------------------
         doc.build(story)
         return output_path
 
-    # -------------------------
-    # SIMPLE CHART RENDERER
-    # -------------------------
+    # -------------------------------------------------
+    # SIMPLE CHART RENDERER (SAFE)
+    # -------------------------------------------------
     def _render_chart(self, vis: Dict[str, Any]) -> str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.figure(figsize=(6, 4))
