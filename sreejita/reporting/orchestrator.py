@@ -8,9 +8,9 @@ from sreejita.reporting.recommendation_enricher import enrich_recommendations
 log = logging.getLogger("sreejita.orchestrator")
 
 
-# -------------------------------------------------
+# =====================================================
 # SAFE TABULAR LOADER (CSV + EXCEL)
-# -------------------------------------------------
+# =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
     """
@@ -41,9 +41,9 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
-# -------------------------------------------------
-# ORCHESTRATOR (v3.5 / v3.6 SAFE)
-# -------------------------------------------------
+# =====================================================
+# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (v3.6.1)
+# =====================================================
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
@@ -54,12 +54,19 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     - Decide domain
     - Execute domain lifecycle
     - Generate visuals into run_dir/visuals
+    - Enforce HARD visual guarantees
     - Return a STANDARDIZED payload
     """
 
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    if "run_dir" not in config:
+        raise RuntimeError("config['run_dir'] is required")
+
+    run_dir = Path(config["run_dir"])
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
     # 1. LOAD DATA (SAFE)
@@ -103,22 +110,44 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     recommendations = enrich_recommendations(raw_recommendations)
 
     # -------------------------------------------------
-    # 4. VISUALS (ENGINE-GENERATED, RUN-DIR SAFE)
+    # 4. VISUALS (HARD GUARANTEE)
     # -------------------------------------------------
     visuals = []
+
     if hasattr(engine, "generate_visuals"):
+        visuals_dir = run_dir / "visuals"
+        visuals_dir.mkdir(parents=True, exist_ok=True)
+
         try:
-            run_dir = Path(config["run_dir"])
-            visuals_dir = run_dir / "visuals"
-            visuals_dir.mkdir(parents=True, exist_ok=True)
-
             visuals = engine.generate_visuals(df, visuals_dir)
-
         except Exception as e:
-            log.warning("Visual generation failed: %s", e)
+            raise RuntimeError(
+                f"Visual generation failed for domain '{domain}': {e}"
+            )
+
+        # 🔒 HARD CONTRACT — visuals must exist on disk
+        if visuals:
+            for vis in visuals:
+                if not isinstance(vis, dict):
+                    raise RuntimeError("Visual entry must be a dict")
+
+                path = vis.get("path")
+                if not path:
+                    raise RuntimeError("Visual entry missing 'path' key")
+
+                p = Path(path)
+                if not p.exists():
+                    raise RuntimeError(
+                        f"Visual declared but file not found: {p}"
+                    )
+        else:
+            log.warning(
+                "Domain '%s' returned no visuals (allowed but tracked)",
+                domain,
+            )
 
     # -------------------------------------------------
-    # 5. STANDARDIZED PAYLOAD
+    # 5. STANDARDIZED PAYLOAD (AUTHORITATIVE)
     # -------------------------------------------------
     return {
         domain: {
@@ -127,4 +156,4 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             "recommendations": recommendations,
             "visuals": visuals,
         }
-    }
+        }
