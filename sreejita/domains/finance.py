@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from typing import Dict, Any, List, Set, Optional
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, Any, List, Set, Optional
 from matplotlib.ticker import FuncFormatter
 
 from sreejita.core.column_resolver import resolve_column
@@ -13,7 +13,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# HELPERS (PURE, DEFENSIVE)
+# HELPERS
 # =====================================================
 
 def _safe_div(n, d):
@@ -21,257 +21,289 @@ def _safe_div(n, d):
         return None
     return n / d
 
-
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    candidates = ["date", "timestamp", "period", "month", "year"]
+    candidates = ["date", "timestamp", "period", "month", "year", "fiscal_date"]
     for c in df.columns:
-        if any(k in c.lower() for k in candidates):
-            try:
-                pd.to_datetime(df[c].dropna().iloc[:10])
-                return c
-            except Exception:
-                continue
+        for k in candidates:
+            if k in c.lower():
+                try:
+                    pd.to_datetime(df[c].dropna().iloc[0])
+                    return c
+                except Exception:
+                    continue
     return None
 
-
 def _benford_deviation(series: pd.Series) -> float:
-    """Returns deviation score from Benford's Law."""
+    """Calculates deviation from Benford's Law (Fraud Detection)."""
     s = series.dropna().astype(str)
     first_digits = s.str.lstrip("-").str.replace(".", "", regex=False).str[0]
     first_digits = first_digits[first_digits.str.isnumeric()]
-    if first_digits.empty:
-        return 0.0
+    
+    if len(first_digits) < 100: return 0.0
 
     observed = first_digits.value_counts(normalize=True)
     benford = {str(d): np.log10(1 + 1/d) for d in range(1, 10)}
-    deviation = sum(abs(observed.get(str(d), 0) - benford[str(d)]) for d in range(1, 9))
+    
+    deviation = sum(abs(observed.get(str(d), 0) - benford[str(d)]) for d in range(1, 10))
     return deviation
 
 
 # =====================================================
-# FINANCE DOMAIN — UNIVERSAL 10/10
+# FINANCE DOMAIN (UNIVERSAL 10/10)
 # =====================================================
 
 class FinanceDomain(BaseDomain):
     name = "finance"
-    description = "Universal Finance Intelligence (Corporate, Investment, Banking, Fraud)"
+    description = "Universal Finance Intelligence (Corporate, Market, Banking, Fraud)"
 
     # ---------------- PREPROCESS ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.time_col = _detect_time_column(df)
+        
+        self.cols = {
+            # Corporate
+            "revenue": resolve_column(df, "revenue") or resolve_column(df, "sales"),
+            "expense": resolve_column(df, "expense") or resolve_column(df, "cost") or resolve_column(df, "opex"),
+            "profit": resolve_column(df, "profit") or resolve_column(df, "net_income") or resolve_column(df, "ebitda"),
+            # Balance Sheet
+            "assets": resolve_column(df, "assets"),
+            "equity": resolve_column(df, "equity"),
+            "debt": resolve_column(df, "debt") or resolve_column(df, "liabilities"),
+            # Banking
+            "receivables": resolve_column(df, "accounts_receivable"),
+            "loans": resolve_column(df, "loan_amount"),
+            "npa": resolve_column(df, "non_performing_assets"),
+            "collateral": resolve_column(df, "collateral_value"),
+            "interest": resolve_column(df, "interest_expense"),
+            # Market
+            "close": resolve_column(df, "close") or resolve_column(df, "adj_close") or resolve_column(df, "price"),
+            "volume": resolve_column(df, "volume"),
+        }
+        
+        # Numeric Safety
+        for c in self.cols.values():
+            if c and df[c].dtype == object:
+                df[c] = pd.to_numeric(df[c].astype(str).str.replace(r'[$,]', '', regex=True), errors='coerce').fillna(0)
+
+        # Date Cleaning
+        if self.time_col:
+            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
+            df = df.sort_values(self.time_col)
+
         return df
 
     # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis: Dict[str, Any] = {}
+        c = self.cols
 
-        # Resolve columns
-        revenue = resolve_column(df, "revenue") or resolve_column(df, "sales")
-        expense = resolve_column(df, "expense") or resolve_column(df, "cost")
-        profit = resolve_column(df, "profit") or resolve_column(df, "net_income")
-        assets = resolve_column(df, "assets")
-        equity = resolve_column(df, "equity")
-        debt = resolve_column(df, "debt") or resolve_column(df, "liability")
-        interest = resolve_column(df, "interest_expense")
-        receivables = resolve_column(df, "accounts_receivable")
-        loans = resolve_column(df, "loan_amount")
-        npa = resolve_column(df, "non_performing_assets")
-        collateral = resolve_column(df, "collateral_value")
-        close = resolve_column(df, "close") or resolve_column(df, "price")
-
-        # ---------- Profitability ----------
-        if revenue:
-            kpis["total_revenue"] = df[revenue].sum()
-        if expense:
-            kpis["total_expense"] = df[expense].sum()
-        if profit:
-            kpis["total_profit"] = df[profit].sum()
-        elif "total_revenue" in kpis and "total_expense" in kpis:
+        # 1. Profitability
+        if c["revenue"]: kpis["total_revenue"] = df[c["revenue"]].sum()
+        if c["expense"]: kpis["total_expense"] = df[c["expense"]].sum()
+        
+        if c["profit"]:
+            kpis["total_profit"] = df[c["profit"]].sum()
+        elif c["revenue"] and c["expense"]:
             kpis["total_profit"] = kpis["total_revenue"] - kpis["total_expense"]
 
-        if "total_profit" in kpis and "total_revenue" in kpis:
+        if kpis.get("total_revenue") and kpis.get("total_profit"):
             kpis["gross_margin"] = _safe_div(kpis["total_profit"], kpis["total_revenue"])
 
-        if assets and "total_profit" in kpis:
-            kpis["roa"] = _safe_div(kpis["total_profit"], df[assets].mean())
+        # 2. Solvency & Risk
+        if c["debt"] and c["equity"]:
+            kpis["debt_to_equity"] = _safe_div(df[c["debt"]].mean(), df[c["equity"]].mean())
 
-        if equity and "total_profit" in kpis:
-            kpis["roe"] = _safe_div(kpis["total_profit"], df[equity].mean())
+        if c["profit"] and c["interest"]:
+            # Interest Coverage Ratio
+            kpis["interest_coverage"] = _safe_div(df[c["profit"]].sum(), df[c["interest"]].sum())
 
-        # ---------- Liquidity ----------
-        if receivables and revenue:
-            kpis["dso"] = _safe_div(df[receivables].mean(), df[revenue].mean()) * 365
+        # 3. Liquidity
+        if c["receivables"] and c["revenue"]:
+            # Days Sales Outstanding (DSO)
+            kpis["dso"] = _safe_div(df[c["receivables"]].mean(), df[c["revenue"]].mean()) * 365
 
-        # ---------- Risk ----------
-        if debt and equity:
-            kpis["debt_to_equity"] = _safe_div(df[debt].mean(), df[equity].mean())
+        # 4. Banking Health
+        if c["npa"] and c["loans"]:
+            kpis["npa_rate"] = _safe_div(df[c["npa"]].sum(), df[c["loans"]].sum())
 
-        if profit and interest:
-            kpis["interest_coverage"] = _safe_div(df[profit].sum(), df[interest].sum())
+        if c["loans"] and c["collateral"]:
+            kpis["ltv"] = _safe_div(df[c["loans"]].mean(), df[c["collateral"]].mean())
 
-        # ---------- Investment ----------
-        if close and self.time_col:
-            prices = df[close].dropna()
+        # 5. Market Stats
+        if c["close"] and self.time_col:
+            prices = df.set_index(self.time_col)[c["close"]].sort_index()
             returns = prices.pct_change().dropna()
-            if not returns.empty:
-                kpis["volatility"] = returns.std()
-                kpis["sharpe_ratio"] = _safe_div(returns.mean(), returns.std())
-                kpis["var_95"] = np.percentile(returns, 5)
+            kpis["volatility"] = returns.std() * np.sqrt(252)
+            if returns.std() > 0:
+                kpis["sharpe_ratio"] = (returns.mean() * 252) / kpis["volatility"]
+            kpis["var_95"] = np.percentile(returns, 5)
 
-        # ---------- Banking ----------
-        if loans and collateral:
-            kpis["ltv"] = _safe_div(df[loans].mean(), df[collateral].mean())
-
-        if npa and loans:
-            kpis["npa_rate"] = _safe_div(df[npa].sum(), df[loans].sum())
-
-        # ---------- Fraud ----------
-        if expense:
-            kpis["benford_deviation"] = _benford_deviation(df[expense])
+        # 6. Fraud Score
+        if c["expense"]:
+            kpis["benford_deviation"] = _benford_deviation(df[c["expense"]])
 
         return kpis
 
-    # ---------------- VISUALS (10+ POSSIBLE, RANKED) ----------------
+    # ---------------- VISUALS (8 CANDIDATES) ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
-
         kpis = self.calculate_kpis(df)
-        time = self.time_col
+        c = self.cols
 
-        def save(fig, name, caption, importance):
+        def save(fig, name, caption, imp, cat):
             p = output_dir / name
             fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
             visuals.append({
                 "path": str(p),
                 "caption": caption,
-                "importance": importance
+                "importance": imp,
+                "category": cat
             })
 
-        # 1. Revenue vs Expense
-        if "total_revenue" in kpis and "total_expense" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["Revenue", "Expense"], [kpis["total_revenue"], kpis["total_expense"]])
-            ax.set_title("Revenue vs Expense")
-            save(fig, "pnl.png", "Revenue vs Expense", 0.9)
+        def human_fmt(x, _):
+            if x >= 1e6: return f"{x/1e6:.1f}M"
+            if x >= 1e3: return f"{x/1e3:.0f}K"
+            return str(int(x))
 
-        # 2. Profit Margin
-        if "gross_margin" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["Margin"], [kpis["gross_margin"]])
-            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
-            ax.set_title("Profit Margin")
-            save(fig, "margin.png", "Profit Margin", 0.8)
+        # 1. Market Price Trend
+        if c["close"] and self.time_col:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.set_index(self.time_col)[c["close"]].plot(ax=ax, color="#1f77b4")
+            ax.set_title("Asset Price Trend")
+            save(fig, "price_trend.png", "Price history", 0.9, "market")
 
-        # 3. DSO
-        if "dso" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["DSO"], [kpis["dso"]])
-            ax.set_title("Days Sales Outstanding")
-            save(fig, "dso.png", "Receivables Efficiency", 0.85)
+        # 2. Revenue vs Expense (Waterfall or Bar)
+        if kpis.get("total_revenue") and kpis.get("total_expense"):
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Revenue", "Expense", "Profit"], 
+                   [kpis["total_revenue"], kpis["total_expense"], kpis["total_profit"]], 
+                   color=["green", "red", "blue"])
+            ax.set_title("P&L Overview")
+            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            save(fig, "pnl.png", "Profitability summary", 0.85, "corporate")
 
-        # 4. Debt to Equity
-        if "debt_to_equity" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["Debt/Equity"], [kpis["debt_to_equity"]])
+        # 3. Benford Fraud Detection
+        if kpis.get("benford_deviation", 0) > 0:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            score = kpis["benford_deviation"]
+            ax.bar(["Anomaly Score"], [score], color="red" if score > 0.15 else "orange")
+            ax.axhline(0.15, color="black", linestyle="--", label="Fraud Threshold")
+            ax.set_ylim(0, 0.3)
+            ax.set_title("Fraud Detection (Benford's Law)")
+            save(fig, "fraud.png", "Anomaly detection", 1.0 if score > 0.15 else 0.6, "fraud")
+
+        # 4. Leverage Ratio
+        if kpis.get("debt_to_equity"):
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.bar(["Debt/Equity"], [kpis["debt_to_equity"]], color="maroon")
+            ax.axhline(2.0, color="gray", linestyle="--")
             ax.set_title("Leverage Ratio")
-            save(fig, "de_ratio.png", "Leverage Risk", 0.9)
+            save(fig, "leverage.png", "Solvency risk", 0.88, "risk")
 
-        # 5. Sharpe Ratio
-        if "sharpe_ratio" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["Sharpe"], [kpis["sharpe_ratio"]])
-            ax.set_title("Risk-Adjusted Return")
-            save(fig, "sharpe.png", "Investment Efficiency", 0.85)
+        # 5. Volatility / Risk Profile
+        if kpis.get("volatility"):
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.bar(["Volatility"], [kpis["volatility"]], color="purple")
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
+            ax.set_title("Annualized Volatility")
+            save(fig, "volatility.png", "Market risk", 0.8, "risk")
 
-        # 6. VaR
-        if "var_95" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["VaR (95%)"], [kpis["var_95"]])
-            ax.set_title("Value at Risk")
-            save(fig, "var.png", "Downside Risk", 0.9)
+        # 6. Interest Coverage (New!)
+        if c["profit"] and c["interest"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["EBIT", "Interest"], [df[c["profit"]].sum(), df[c["interest"]].sum()])
+            ax.set_title(f"Interest Coverage: {kpis.get('interest_coverage',0):.1f}x")
+            save(fig, "coverage.png", "Debt service ability", 0.85, "corporate")
 
-        # 7. Benford
-        if "benford_deviation" in kpis:
-            fig, ax = plt.subplots()
-            ax.bar(["Benford Deviation"], [kpis["benford_deviation"]])
-            ax.set_title("Fraud Risk Indicator")
-            save(fig, "benford.png", "Fraud Anomaly Score", 0.95)
+        # 7. NPA Composition (New!)
+        if c["npa"] and c["loans"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            npa_val = df[c["npa"]].sum()
+            total_val = df[c["loans"]].sum()
+            ax.pie([total_val - npa_val, npa_val], labels=["Good Loans", "NPA"], autopct='%1.1f%%', colors=["#2ca02c", "#d62728"])
+            ax.set_title("Loan Portfolio Health")
+            save(fig, "npa_pie.png", "Asset quality", 0.92, "banking")
+
+        # 8. Gross Margin Trend (New!)
+        if self.time_col and c["revenue"] and c["profit"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            temp = df.set_index(self.time_col).resample('M').sum()
+            margin = temp[c["profit"]] / temp[c["revenue"]].replace(0, 1)
+            margin.plot(ax=ax, color="green")
+            ax.set_title("Gross Margin Trend")
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
+            save(fig, "margin_trend.png", "Profitability trend", 0.8, "corporate")
 
         visuals.sort(key=lambda v: v["importance"], reverse=True)
-        return visuals
+        return visuals[:4]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- INSIGHTS (COMPOSITE + ATOMIC) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
+        
+        margin = kpis.get("gross_margin", 1.0)
+        debt_eq = kpis.get("debt_to_equity", 0)
+        int_cov = kpis.get("interest_coverage", 10)
+        dso = kpis.get("dso", 0)
+        benford = kpis.get("benford_deviation", 0)
 
-        if kpis.get("gross_margin", 1) < 0.1:
+        # Composite 1: Leverage Trap (High Debt + Low Ability to Pay)
+        if debt_eq > 2.0 and int_cov < 1.5:
             insights.append({
-                "level": "RISK",
-                "title": "Shrinking Margins",
-                "so_what": "Costs are rising faster than revenue."
+                "level": "CRITICAL", "title": "Leverage Trap",
+                "so_what": f"High debt ({debt_eq:.1f}x equity) with dangerously low interest coverage ({int_cov:.1f}x)."
             })
 
-        if kpis.get("dso", 0) > 45:
+        # Composite 2: Paper Profits (Profit exists, but Cash is stuck)
+        if margin > 0.10 and dso > 90:
             insights.append({
-                "level": "WARNING",
-                "title": "Slow Collections",
-                "so_what": f"DSO is {kpis['dso']:.0f} days."
+                "level": "RISK", "title": "Paper Profits Warning",
+                "so_what": f"Profitable on paper, but cash is stuck in receivables (DSO: {dso:.0f} days)."
             })
 
-        if kpis.get("debt_to_equity", 0) > 2:
+        # Atomic Fallbacks
+        if benford > 0.15:
             insights.append({
-                "level": "RISK",
-                "title": "High Leverage",
-                "so_what": "Debt levels may threaten solvency."
+                "level": "CRITICAL", "title": "Potential Fraud Detected",
+                "so_what": "Expense values violate Benford's Law naturally occurring patterns."
             })
 
-        if kpis.get("sharpe_ratio", 1) < 1:
+        if margin < 0.10 and not any("Profits" in i["title"] for i in insights):
             insights.append({
-                "level": "WARNING",
-                "title": "Poor Risk-Adjusted Returns",
-                "so_what": "Returns do not justify risk taken."
+                "level": "WARNING", "title": "Thin Margins",
+                "so_what": f"Gross margin is {margin:.1%}, leaving little room for opex."
             })
 
-        if kpis.get("benford_deviation", 0) > 0.15:
-            insights.append({
-                "level": "RISK",
-                "title": "Fraud Signal Detected",
-                "so_what": "Transaction patterns deviate from Benford’s Law."
-            })
+        if not insights:
+            insights.append({"level": "INFO", "title": "Financials Stable", "so_what": "Solvency and profitability metrics healthy."})
 
-        return insights or [{
-            "level": "INFO",
-            "title": "Financials Stable",
-            "so_what": "No material financial risks detected."
-        }]
+        return insights
 
     # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
+        titles = [i["title"] for i in self.generate_insights(df, kpis)]
 
-        if kpis.get("gross_margin", 1) < 0.1:
-            recs.append({"action": "Audit COGS and supplier pricing", "priority": "HIGH"})
-
-        if kpis.get("dso", 0) > 45:
-            recs.append({"action": "Automate invoice reminders and collections", "priority": "HIGH"})
-
-        if kpis.get("debt_to_equity", 0) > 2:
-            recs.append({"action": "Pause new debt and reduce leverage", "priority": "HIGH"})
-
-        if kpis.get("sharpe_ratio", 1) < 1:
-            recs.append({"action": "Rebalance portfolio toward lower volatility assets", "priority": "MEDIUM"})
+        if "Leverage Trap" in titles:
+            recs.append({"action": "Freeze new borrowing and restructure existing debt immediately.", "priority": "HIGH"})
+        
+        if "Paper Profits Warning" in titles:
+            recs.append({"action": "Aggressively chase overdue invoices and tighten credit terms.", "priority": "HIGH"})
 
         if kpis.get("benford_deviation", 0) > 0.15:
-            recs.append({"action": "Trigger forensic audit on expense transactions", "priority": "CRITICAL"})
+            recs.append({"action": "Trigger forensic audit of expense ledger.", "priority": "CRITICAL"})
 
-        return recs or [{"action": "Continue monitoring financial KPIs", "priority": "LOW"}]
+        if not recs:
+            recs.append({"action": "Reinvest surplus cash into growth or debt reduction.", "priority": "LOW"})
+
+        return recs
 
 
 # =====================================================
@@ -280,25 +312,18 @@ class FinanceDomain(BaseDomain):
 
 class FinanceDomainDetector(BaseDomainDetector):
     domain_name = "finance"
-    TOKENS: Set[str] = {
-        "revenue", "expense", "profit", "asset", "liability",
-        "equity", "loan", "interest", "price", "volume", "budget"
-    }
+    TOKENS = {"revenue", "expense", "profit", "asset", "liability", "equity", "loan", "interest", "price", "volume", "ledger"}
 
     def detect(self, df) -> DomainDetectionResult:
         cols = {str(c).lower() for c in df.columns}
         hits = [c for c in cols if any(t in c for t in self.TOKENS)]
-        confidence = min(len(hits) / 3, 1.0)
-        return DomainDetectionResult(
-            domain="finance",
-            confidence=confidence,
-            signals={"matched_columns": hits},
-        )
-
+        confidence = min(len(hits)/3, 1.0)
+        
+        # Boost if Balance Sheet terms exist
+        if any("asset" in c for c in hits) and any("liability" in c for c in hits):
+            confidence = max(confidence, 0.95)
+            
+        return DomainDetectionResult("finance", confidence, {"matched_columns": hits})
 
 def register(registry):
-    registry.register(
-        name="finance",
-        domain_cls=FinanceDomain,
-        detector_cls=FinanceDomainDetector,
-    )
+    registry.register("finance", FinanceDomain, FinanceDomainDetector)
