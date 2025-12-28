@@ -22,7 +22,7 @@ class NarrativeResult:
     financial_impact: List[str]
     risks: List[str]
     action_plan: List[ActionItem]
-    key_findings: List[Dict[str, Any]]  # intentionally permissive
+    key_findings: List[Dict[str, Any]]  # pass-through (auditable)
 
 
 # =====================================================
@@ -36,114 +36,146 @@ def build_narrative(
     recommendations: List[Dict[str, Any]],
 ) -> NarrativeResult:
     """
-    Deterministic executive narrative engine.
+    Deterministic executive narrative engine (v3.6.1).
 
-    Design guarantees:
-    - NO LLM usage
-    - NO external dependencies
-    - MUST NEVER FAIL (defensive by design)
-    - Domain-agnostic narrative synthesis
+    GUARANTEES:
+    - No LLM usage
+    - KPI-driven executive logic
+    - Never empty sections
+    - Domain-aware but not domain-coupled
     """
 
-    # Normalize inputs defensively
     kpis = kpis or {}
     insights = insights or []
     recommendations = recommendations or []
 
-    # -----------------------------
-    # EXECUTIVE SUMMARY
-    # -----------------------------
+    # =================================================
+    # EXECUTIVE SUMMARY (FIX 4 — REALITY AWARE)
+    # =================================================
     summary: List[str] = []
 
-    if isinstance(insights, list) and insights:
-        for ins in insights[:3]:
-            title = ins.get("title", "Operational observation")
-            so_what = ins.get("so_what", "Requires review.")
+    # ---- Healthcare-specific truth enforcement ----
+    if domain == "healthcare":
+        long_stay_rate = kpis.get("long_stay_rate", 0)
+        readmission_rate = kpis.get("readmission_rate", 0)
+
+        if long_stay_rate > 0.25:
+            summary.append(
+                f"Operational strain detected: {long_stay_rate:.1%} of patients exceed "
+                "length-of-stay targets, indicating discharge bottlenecks and reduced bed availability."
+            )
+
+        if readmission_rate > 0.15:
+            summary.append(
+                f"Clinical risk elevated: Readmission rate at {readmission_rate:.1%} suggests "
+                "gaps in discharge planning or follow-up care."
+            )
+
+    # ---- Insight-driven reinforcement (secondary) ----
+    for ins in insights[:2]:
+        title = ins.get("title")
+        so_what = ins.get("so_what")
+        if title and so_what:
             summary.append(f"{title}: {so_what}")
-    else:
+
+    # ---- Absolute fallback (never empty) ----
+    if not summary:
         summary.append(
-            "Operational indicators suggest stable performance with localized improvement opportunities."
+            "Operational indicators are within expected thresholds with no immediate critical risks detected."
         )
 
-    # -----------------------------
-    # FINANCIAL IMPACT (SAFE & EXPLAINABLE)
-    # -----------------------------
+    # =================================================
+    # FINANCIAL IMPACT (EXPLAINABLE & TIED TO KPIs)
+    # =================================================
     financial: List[str] = []
 
-    # Intentional heuristic:
-    # We surface the *first* materially non-zero KPI to avoid overwhelming executives.
-    for k, v in kpis.items():
-        if isinstance(v, (int, float)) and abs(v) > 0:
+    if domain == "healthcare":
+        avg_cost = kpis.get("avg_cost_per_patient")
+        avg_los = kpis.get("avg_los")
+
+        if avg_cost and avg_los and avg_los > 7:
             financial.append(
-                f"{k.replace('_', ' ').title()} deviation may have downstream cost implications."
+                f"Extended length of stay is increasing cost per patient "
+                f"(average ${avg_cost:,.0f}), reducing throughput efficiency."
             )
-            break
 
     if not financial:
-        financial.append(
-            "No immediate material financial risk detected from current indicators."
-        )
+        for k, v in kpis.items():
+            if isinstance(v, (int, float)) and abs(v) > 0:
+                financial.append(
+                    f"{k.replace('_', ' ').title()} levels may have downstream financial implications."
+                )
+                break
 
-    # -----------------------------
-    # RISKS
-    # -----------------------------
+    if not financial:
+        financial.append("No immediate material financial risk detected.")
+
+    # =================================================
+    # RISKS (FIX — INCLUDE WARNING & CRITICAL)
+    # =================================================
     risks: List[str] = []
 
     for ins in insights:
-        if isinstance(ins, dict) and ins.get("level") == "RISK":
+        if ins.get("level") in {"CRITICAL", "RISK", "WARNING"}:
             risks.append(ins.get("title", "Identified operational risk"))
 
     if not risks:
-        risks.append("No critical risks identified at this time.")
+        risks.append("No critical or emerging risks identified at this time.")
 
-    # -----------------------------
-    # ACTION PLAN
-    # -----------------------------
+    # =================================================
+    # ACTION PLAN (EXECUTIVE-GRADE)
+    # =================================================
     actions: List[ActionItem] = []
 
-    # Limit to top 2 actions for executive clarity
+    # Prefer domain recommendations
     for rec in recommendations[:2]:
-        if not isinstance(rec, dict):
-            continue
-
-        actions.append(
-            ActionItem(
-                action=rec.get("action", "Operational improvement"),
-                owner=rec.get("owner", "Business Owner"),  # intentional default
-                timeline=rec.get("timeline", "90 days"),
-                success_kpi=rec.get("success_kpi", "Target KPI improvement"),
+        if isinstance(rec, dict):
+            actions.append(
+                ActionItem(
+                    action=rec.get("action", "Operational improvement"),
+                    owner=rec.get("owner", "Operations Leadership"),
+                    timeline=rec.get("timeline", "60–90 days"),
+                    success_kpi=rec.get("success_kpi", "Primary KPI improvement"),
+                )
             )
-        )
+
+    # KPI-driven fallback actions (healthcare)
+    if not actions and domain == "healthcare":
+        if kpis.get("long_stay_rate", 0) > 0.15:
+            actions.append(
+                ActionItem(
+                    action="Audit discharge planning for long-stay patients",
+                    owner="Clinical Operations",
+                    timeline="60 days",
+                    success_kpi="Reduce long stay rate below 15%",
+                )
+            )
 
     if not actions:
         actions.append(
             ActionItem(
-                action="Monitor key operational metrics",
+                action="Continue monitoring key operational metrics",
                 owner="Operations Lead",
                 timeline="Quarterly",
                 success_kpi="Metrics remain within tolerance",
             )
         )
 
-    # -----------------------------
+    # =================================================
     # FINAL ASSEMBLY
-    # -----------------------------
+    # =================================================
     return NarrativeResult(
         executive_summary=summary,
         financial_impact=financial,
         risks=risks,
         action_plan=actions,
-        key_findings=insights,  # pass-through for transparency
+        key_findings=insights,  # transparent pass-through
     )
 
 
 # -----------------------------------------------------
-# BACKWARD-COMPATIBILITY ALIAS (OPTIONAL, SAFE)
+# BACKWARD COMPATIBILITY (DO NOT REMOVE)
 # -----------------------------------------------------
 
 def generate_narrative(*args, **kwargs):
-    """
-    Backward-compatible alias.
-    DO NOT REMOVE.
-    """
     return build_narrative(*args, **kwargs)
