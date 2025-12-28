@@ -22,7 +22,7 @@ class NarrativeResult:
     financial_impact: List[str]
     risks: List[str]
     action_plan: List[ActionItem]
-    key_findings: List[Dict[str, str]]
+    key_findings: List[Dict[str, Any]]  # intentionally permissive
 
 
 # =====================================================
@@ -37,16 +37,25 @@ def build_narrative(
 ) -> NarrativeResult:
     """
     Deterministic executive narrative engine.
-    NO LLM.
-    NO external dependencies.
-    MUST NEVER FAIL.
+
+    Design guarantees:
+    - NO LLM usage
+    - NO external dependencies
+    - MUST NEVER FAIL (defensive by design)
+    - Domain-agnostic narrative synthesis
     """
+
+    # Normalize inputs defensively
+    kpis = kpis or {}
+    insights = insights or []
+    recommendations = recommendations or []
 
     # -----------------------------
     # EXECUTIVE SUMMARY
     # -----------------------------
-    summary = []
-    if insights:
+    summary: List[str] = []
+
+    if isinstance(insights, list) and insights:
         for ins in insights[:3]:
             title = ins.get("title", "Operational observation")
             so_what = ins.get("so_what", "Requires review.")
@@ -57,13 +66,16 @@ def build_narrative(
         )
 
     # -----------------------------
-    # FINANCIAL IMPACT (SAFE)
+    # FINANCIAL IMPACT (SAFE & EXPLAINABLE)
     # -----------------------------
-    financial = []
+    financial: List[str] = []
+
+    # Intentional heuristic:
+    # We surface the *first* materially non-zero KPI to avoid overwhelming executives.
     for k, v in kpis.items():
         if isinstance(v, (int, float)) and abs(v) > 0:
             financial.append(
-                f"{k.replace('_',' ').title()} deviation may have downstream cost implications."
+                f"{k.replace('_', ' ').title()} deviation may have downstream cost implications."
             )
             break
 
@@ -75,9 +87,10 @@ def build_narrative(
     # -----------------------------
     # RISKS
     # -----------------------------
-    risks = []
+    risks: List[str] = []
+
     for ins in insights:
-        if ins.get("level") == "RISK":
+        if isinstance(ins, dict) and ins.get("level") == "RISK":
             risks.append(ins.get("title", "Identified operational risk"))
 
     if not risks:
@@ -86,12 +99,17 @@ def build_narrative(
     # -----------------------------
     # ACTION PLAN
     # -----------------------------
-    actions = []
+    actions: List[ActionItem] = []
+
+    # Limit to top 2 actions for executive clarity
     for rec in recommendations[:2]:
+        if not isinstance(rec, dict):
+            continue
+
         actions.append(
             ActionItem(
                 action=rec.get("action", "Operational improvement"),
-                owner=rec.get("owner", "Business Owner"),
+                owner=rec.get("owner", "Business Owner"),  # intentional default
                 timeline=rec.get("timeline", "90 days"),
                 success_kpi=rec.get("success_kpi", "Target KPI improvement"),
             )
@@ -103,16 +121,19 @@ def build_narrative(
                 action="Monitor key operational metrics",
                 owner="Operations Lead",
                 timeline="Quarterly",
-                success_kpi="Metrics within tolerance",
+                success_kpi="Metrics remain within tolerance",
             )
         )
 
+    # -----------------------------
+    # FINAL ASSEMBLY
+    # -----------------------------
     return NarrativeResult(
         executive_summary=summary,
         financial_impact=financial,
         risks=risks,
         action_plan=actions,
-        key_findings=insights,
+        key_findings=insights,  # pass-through for transparency
     )
 
 
