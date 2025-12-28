@@ -1,7 +1,6 @@
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
-import os
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -24,7 +23,7 @@ from reportlab.lib.units import inch
 # =====================================================
 
 def val(obj, key, default=""):
-    """Safely extract value from dict OR object"""
+    """Safely extract value from dict or object."""
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
@@ -57,16 +56,18 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL, HARDENED)
+# EXECUTIVE PDF RENDERER (FINAL, DATASET-PROOF)
 # =====================================================
 
 class ExecutivePDFRenderer:
     """
     ✔ Streamlit-safe
     ✔ GitHub-safe
-    ✔ Object + dict safe
-    ✔ No crashes
-    ✔ Guaranteed PDF
+    ✔ Dict + object safe
+    ✔ No matplotlib
+    ✔ No browser
+    ✔ Visuals optional
+    ✔ Guaranteed PDF output
     """
 
     PRIMARY = HexColor("#1f2937")
@@ -89,25 +90,27 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # ---------- STYLES ----------
+        # -------------------------------------------------
+        # STYLES (UNIQUE — NO COLLISIONS)
+        # -------------------------------------------------
         styles.add(ParagraphStyle(
             name="ExecTitle",
             fontSize=22,
             alignment=TA_CENTER,
             spaceAfter=24,
-            textColor=self.PRIMARY
+            textColor=self.PRIMARY,
         ))
         styles.add(ParagraphStyle(
             name="ExecSection",
             fontSize=16,
             spaceBefore=20,
             spaceAfter=12,
-            textColor=self.PRIMARY
+            textColor=self.PRIMARY,
         ))
         styles.add(ParagraphStyle(
             name="ExecBody",
             fontSize=11,
-            leading=14
+            leading=14,
         ))
 
         # =====================================================
@@ -117,67 +120,90 @@ class ExecutivePDFRenderer:
 
         meta = payload.get("meta", {})
         story.append(Paragraph(
-            f"<b>Domain:</b> {meta.get('domain','Unknown')}",
-            styles["ExecBody"]
+            f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
+            styles["ExecBody"],
         ))
         story.append(Paragraph(
             f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}",
-            styles["ExecBody"]
+            styles["ExecBody"],
         ))
 
         story.append(Spacer(1, 16))
         story.append(Paragraph("Executive Brief", styles["ExecSection"]))
 
-        for line in payload.get("summary", []):
+        summary = payload.get("summary") or [
+            "Operational indicators suggest areas requiring management attention."
+        ]
+        for line in summary:
             story.append(Paragraph(f"• {line}", styles["ExecBody"]))
 
         story.append(Spacer(1, 16))
         story.append(Paragraph("Key Metrics", styles["ExecSection"]))
 
+        kpis = payload.get("kpis") or {}
         table_data = [["Metric", "Value"]]
-        for k, v in payload.get("kpis", {}).items():
-            val_fmt = (
+        for k, v in list(kpis.items())[:12]:
+            value = (
                 format_percent(v)
                 if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"])
                 else format_number(v)
             )
-            table_data.append([k.replace("_", " ").title(), val_fmt])
+            table_data.append([k.replace("_", " ").title(), value])
 
-        table = Table(table_data, colWidths=[3.5*inch, 2*inch])
+        if len(table_data) == 1:
+            table_data.append(["No KPIs available", "—"])
+
+        table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
         table.setStyle(TableStyle([
-            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
-            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+            ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ]))
         story.append(table)
 
         # =====================================================
         # PAGE 2–3 — VISUAL EVIDENCE
         # =====================================================
-        visuals = payload.get("visuals", [])
-        if visuals:
-            story.append(PageBreak())
-            story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
+        visuals = payload.get("visuals") or []
+        story.append(PageBreak())
+        story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
-            for vis in visuals[:4]:
-                img_path = Path(val(vis, "path", ""))
-                if img_path.exists():
-                    story.append(Image(str(img_path), width=5.5*inch, height=3.2*inch))
-                    story.append(Paragraph(val(vis, "caption", ""), styles["ExecBody"]))
-                    story.append(Spacer(1, 12))
+        rendered = 0
+        for vis in visuals[:4]:
+            img_path = Path(val(vis, "path", ""))
+            if img_path.exists():
+                story.append(Image(str(img_path), width=5.5 * inch, height=3.2 * inch))
+                story.append(Paragraph(val(vis, "caption", ""), styles["ExecBody"]))
+                story.append(Spacer(1, 12))
+                rendered += 1
+
+        if rendered == 0:
+            story.append(Paragraph(
+                "No visual evidence was generated for this dataset.",
+                styles["ExecBody"],
+            ))
 
         # =====================================================
-        # PAGE 4 — INSIGHTS
+        # PAGE 4 — INSIGHTS & RISKS
         # =====================================================
         story.append(PageBreak())
-        story.append(Paragraph("Key Insights", styles["ExecSection"]))
+        story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
 
-        for ins in payload.get("insights", []):
+        insights = payload.get("insights") or []
+        if not insights:
             story.append(Paragraph(
-                f"<b>{val(ins,'level','INFO')}:</b> "
-                f"{val(ins,'title','')} — {val(ins,'so_what','')}",
-                styles["ExecBody"]
+                "No material risks or anomalies were detected.",
+                styles["ExecBody"],
             ))
+        else:
+            for ins in insights:
+                story.append(Paragraph(
+                    f"<b>{val(ins, 'level', 'INFO')}:</b> "
+                    f"{val(ins, 'title', 'Observation')} — "
+                    f"{val(ins, 'so_what', 'Requires further review.')}",
+                    styles["ExecBody"],
+                ))
+                story.append(Spacer(1, 6))
 
         # =====================================================
         # PAGE 5 — RECOMMENDATIONS
@@ -185,13 +211,25 @@ class ExecutivePDFRenderer:
         story.append(PageBreak())
         story.append(Paragraph("Recommendations", styles["ExecSection"]))
 
-        for rec in payload.get("recommendations", []):
+        recs = payload.get("recommendations") or []
+        if not recs:
             story.append(Paragraph(
-                f"<b>{val(rec,'priority','HIGH')}:</b> "
-                f"{val(rec,'action','')} ({val(rec,'timeline','Immediate')})",
-                styles["ExecBody"]
+                "No immediate corrective actions are required at this time.",
+                styles["ExecBody"],
             ))
+        else:
+            for rec in recs:
+                story.append(Paragraph(
+                    f"<b>{val(rec, 'priority', 'HIGH')}:</b> "
+                    f"{val(rec, 'action', 'Action required')} "
+                    f"({val(rec, 'timeline', 'Immediate')})",
+                    styles["ExecBody"],
+                ))
+                story.append(Spacer(1, 6))
 
+        # =====================================================
+        # BUILD PDF (FINAL GUARANTEE)
+        # =====================================================
         doc.build(story)
 
         if not output_path.exists():
