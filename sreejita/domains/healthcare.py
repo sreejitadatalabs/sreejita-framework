@@ -101,7 +101,17 @@ class HealthcareDomain(BaseDomain):
         c = self.cols
 
         # 1. Volume
-        kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
+        # FIX: Check for pre-aggregated volume column
+        vol_col = resolve_column(df, "total_patients") or resolve_column(df, "volume")
+    
+        if vol_col:
+            # Aggregated Mode
+            k["total_patients"] = df[vol_col].sum()
+            k["is_aggregated"] = True
+        else:
+            # Patient-Level Mode
+            k["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
+            k["is_aggregated"] = False
 
         # 2. Operational (LOS & Bed Turnover)
         if c["los"]:
@@ -270,19 +280,38 @@ class HealthcareDomain(BaseDomain):
                 "so_what": f"High costs (${cost:,.0f}) are not yielding stable outcomes (High Readmissions)."
             })
 
-        if (
-            c.get("diagnosis")
-            and kpis.get("avg_cost_per_patient", 0) > 8000
-            and kpis.get("readmission_rate", 0) > 0.10
-        ):
-            insights.append({
-                "level": "WARNING",
-                "title": "High-Impact Service Line: Oncology",
-                "so_what": (
-                    "Oncology drives both the highest treatment costs and elevated "
-                    "readmission risk, making it a prime candidate for care pathway optimization."
-                )
+        # -----------------------------------------------
+        # DYNAMIC "PROBLEM CHILD" DETECTION
+        # -----------------------------------------------
+        if c["diagnosis"] and c["cost"] and c["readmitted"]:
+            # Find the diagnosis with highest weighted impact (Cost * Readmission Rate)
+            # Group by diagnosis
+            stats = df.groupby(c["diagnosis"]).agg({
+                c["cost"]: "mean",
+                c["readmitted"]: "mean",
+                c["pid"]: "count"
             })
+            
+            # Filter for significant volume (>5% of total patients) to avoid noise
+            significant = stats[stats[c["pid"]] > len(df) * 0.05]
+            
+            if not significant.empty:
+                # Sort by Cost * Readmission Rate
+                significant["impact_score"] = significant[c["cost"]] * significant[c["readmitted"]]
+                top_problem = significant["impact_score"].idxmax()
+                top_cost = significant.loc[top_problem, c["cost"]]
+                top_readmit = significant.loc[top_problem, c["readmitted"]]
+        
+                # Trigger Insight if it exceeds thresholds
+                if top_cost > 8000 and top_readmit > 0.10:
+                    insights.append({
+                        "level": "WARNING",
+                        "title": f"High-Impact Service Line: {top_problem}", # <--- DYNAMIC!
+                        "so_what": (
+                            f"{top_problem} drives high costs (${top_cost:,.0f}) and "
+                            f"elevated readmissions ({top_readmit:.1%})."
+                        )
+                    })
 
 
         # Atomic Fallbacks
