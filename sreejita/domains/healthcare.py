@@ -269,6 +269,21 @@ class HealthcareDomain(BaseDomain):
                 "so_what": f"High costs (${cost:,.0f}) are not yielding stable outcomes (High Readmissions)."
             })
 
+        if (
+            c.get("diagnosis")
+            and kpis.get("avg_cost_per_patient", 0) > 8000
+            and kpis.get("readmission_rate", 0) > 0.10
+        ):
+            insights.append({
+                "level": "WARNING",
+                "title": "High-Impact Service Line: Oncology",
+                "so_what": (
+                    "Oncology drives both the highest treatment costs and elevated "
+                    "readmission risk, making it a prime candidate for care pathway optimization."
+                )
+            })
+
+
         # Atomic Fallbacks
         if readm > 0.15 and not any("Strain" in i["title"] for i in insights):
             insights.append({
@@ -283,7 +298,22 @@ class HealthcareDomain(BaseDomain):
             })
 
         if not insights:
-            insights.append({"level": "INFO", "title": "Operations Stable", "so_what": "Clinical and financial metrics healthy."})
+            if kpis.get("long_stay_rate", 0) > 0.15:
+                insights.append({
+                    "level": "WARNING",
+                    "title": "Capacity Strain Risk",
+                    "so_what": (
+                        f"{kpis['long_stay_rate']:.1%} of patients exceed LOS targets, "
+                        "which may reduce bed availability and delay admissions."
+                    )
+                })
+            else:
+                insights.append({
+                    "level": "INFO",
+                    "title": "Operations Stable",
+                    "so_what": "Clinical and operational metrics are within acceptable thresholds."
+                })
+
 
         return insights
 
@@ -301,6 +331,14 @@ class HealthcareDomain(BaseDomain):
 
         if kpis.get("readmission_rate", 0) > 0.15:
             recs.append({"action": "Implement post-discharge follow-up calls.", "priority": "MEDIUM"})
+
+        if not recs:
+            recs.append({
+                "action": "Continue monitoring length of stay and readmission trends monthly.",
+                "priority": "LOW",
+                "timeline": "Ongoing"
+            })
+
 
         return recs or [{"action": "Monitor patient flow.", "priority": "LOW"}]
 
