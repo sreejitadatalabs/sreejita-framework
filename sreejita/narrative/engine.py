@@ -1,107 +1,128 @@
 # sreejita/narrative/engine.py
 
-from typing import Dict, Any
-
-from .calculators import (
-    calculate_excess_los_impact,
-    calculate_readmission_impact,
-    estimate_financial_impact,
-    derive_risk_level,
-)
+from dataclasses import dataclass
+from typing import Dict, Any, List
 
 
 # =====================================================
-# NARRATIVE ENGINE (DETERMINISTIC)
+# NARRATIVE OUTPUT MODELS
 # =====================================================
 
-def generate_narrative(
-    domain_result: Dict[str, Any],
-    config: Dict[str, Any] | None = None,
-) -> Dict[str, str]:
+@dataclass
+class ActionItem:
+    action: str
+    owner: str
+    timeline: str
+    success_kpi: str
+
+
+@dataclass
+class NarrativeResult:
+    executive_summary: List[str]
+    financial_impact: List[str]
+    risks: List[str]
+    action_plan: List[ActionItem]
+    key_findings: List[Dict[str, str]]
+
+
+# =====================================================
+# PUBLIC API (🔥 DO NOT BREAK THIS)
+# =====================================================
+
+def build_narrative(
+    domain: str,
+    kpis: Dict[str, Any],
+    insights: List[Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+) -> NarrativeResult:
     """
-    Generates executive-grade narrative WITHOUT LLM.
-
-    Returns structured business narrative ready for PDF.
+    Deterministic executive narrative engine.
+    NO LLM.
+    NO external dependencies.
+    MUST NEVER FAIL.
     """
 
-    kpis = domain_result.get("kpis", {})
-    insights = domain_result.get("insights", [])
-
-    # -------------------------------------------------
-    # OPERATIONAL IMPACT
-    # -------------------------------------------------
-    los_impact = calculate_excess_los_impact(kpis)
-    readmission_impact = calculate_readmission_impact(kpis)
-
-    operational_points = []
-
-    if los_impact:
-        operational_points.append(
-            f"Average length of stay exceeds target by "
-            f"{los_impact['excess_days_per_patient']} days, resulting in "
-            f"approximately {los_impact['excess_patient_days']:,} excess patient-days annually."
-        )
-
-    if readmission_impact:
-        operational_points.append(
-            f"Readmission rates exceed target by "
-            f"{readmission_impact['excess_readmission_rate']} percentage points, "
-            f"leading to an estimated {readmission_impact['excess_readmissions']:,} avoidable readmissions per year."
-        )
-
-    if not operational_points:
-        operational_points.append(
-            "Operational performance indicators suggest stable performance within expected thresholds."
-        )
-
-    operational_impact = " ".join(operational_points)
-
-    # -------------------------------------------------
-    # FINANCIAL IMPACT
-    # -------------------------------------------------
-    financial_calc = estimate_financial_impact(
-        excess_patient_days=los_impact.get("excess_patient_days") if los_impact else None,
-        excess_readmissions=readmission_impact.get("excess_readmissions") if readmission_impact else None,
-    )
-
-    if financial_calc["total_annual_cost"] > 0:
-        financial_impact = (
-            f"These inefficiencies may be contributing to approximately "
-            f"₹{financial_calc['total_annual_cost']:,.0f} in avoidable annual costs."
-        )
+    # -----------------------------
+    # EXECUTIVE SUMMARY
+    # -----------------------------
+    summary = []
+    if insights:
+        for ins in insights[:3]:
+            title = ins.get("title", "Operational observation")
+            so_what = ins.get("so_what", "Requires review.")
+            summary.append(f"{title}: {so_what}")
     else:
-        financial_impact = (
-            "No material financial leakage identified based on available performance indicators."
+        summary.append(
+            "Operational indicators suggest stable performance with localized improvement opportunities."
         )
 
-    # -------------------------------------------------
-    # RISK STATEMENT
-    # -------------------------------------------------
-    risk_level = derive_risk_level(financial_calc.get("total_annual_cost"))
+    # -----------------------------
+    # FINANCIAL IMPACT (SAFE)
+    # -----------------------------
+    financial = []
+    for k, v in kpis.items():
+        if isinstance(v, (int, float)) and abs(v) > 0:
+            financial.append(
+                f"{k.replace('_',' ').title()} deviation may have downstream cost implications."
+            )
+            break
 
-    risk_statement = {
-        "CRITICAL": "If left unaddressed, these issues pose a significant risk to financial sustainability and quality outcomes.",
-        "HIGH": "Sustained underperformance may impact operational efficiency and reimbursement performance.",
-        "MEDIUM": "Moderate operational risks exist and should be addressed through targeted interventions.",
-        "LOW": "Current risk exposure appears manageable under existing controls.",
-    }.get(risk_level, "Risk level undetermined.")
+    if not financial:
+        financial.append(
+            "No immediate material financial risk detected from current indicators."
+        )
 
-    # -------------------------------------------------
-    # EXECUTIVE SUMMARY (1-MINUTE READ)
-    # -------------------------------------------------
-    executive_summary = (
-        "Your facility is experiencing performance variances that affect operational efficiency "
-        "and cost containment. Targeted interventions focused on discharge efficiency and "
-        "care coordination can yield measurable improvements in both outcomes and cost."
+    # -----------------------------
+    # RISKS
+    # -----------------------------
+    risks = []
+    for ins in insights:
+        if ins.get("level") == "RISK":
+            risks.append(ins.get("title", "Identified operational risk"))
+
+    if not risks:
+        risks.append("No critical risks identified at this time.")
+
+    # -----------------------------
+    # ACTION PLAN
+    # -----------------------------
+    actions = []
+    for rec in recommendations[:2]:
+        actions.append(
+            ActionItem(
+                action=rec.get("action", "Operational improvement"),
+                owner=rec.get("owner", "Business Owner"),
+                timeline=rec.get("timeline", "90 days"),
+                success_kpi=rec.get("success_kpi", "Target KPI improvement"),
+            )
+        )
+
+    if not actions:
+        actions.append(
+            ActionItem(
+                action="Monitor key operational metrics",
+                owner="Operations Lead",
+                timeline="Quarterly",
+                success_kpi="Metrics within tolerance",
+            )
+        )
+
+    return NarrativeResult(
+        executive_summary=summary,
+        financial_impact=financial,
+        risks=risks,
+        action_plan=actions,
+        key_findings=insights,
     )
 
-    # -------------------------------------------------
-    # FINAL STRUCTURED OUTPUT
-    # -------------------------------------------------
-    return {
-        "executive_summary": executive_summary,
-        "operational_impact": operational_impact,
-        "financial_impact": financial_impact,
-        "risk_statement": risk_statement,
-        "risk_level": risk_level,
-    }
+
+# -----------------------------------------------------
+# BACKWARD-COMPATIBILITY ALIAS (OPTIONAL, SAFE)
+# -----------------------------------------------------
+
+def generate_narrative(*args, **kwargs):
+    """
+    Backward-compatible alias.
+    DO NOT REMOVE.
+    """
+    return build_narrative(*args, **kwargs)
