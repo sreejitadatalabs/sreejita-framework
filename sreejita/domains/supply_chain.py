@@ -1,7 +1,10 @@
 import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
-import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from sreejita.core.column_resolver import resolve_column
@@ -14,75 +17,66 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
-    """Safely divides n by d, returning None if d is 0 or NaN."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
 
-
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    """
-    Supply-chain-safe time detector.
-    Priority: order -> ship -> delivery.
-    """
-    candidates = [
-        "order date", "order_date",
-        "ship date", "shipment date",
-        "delivery date", "delivered date",
-        "date"
-    ]
-
-    cols = {c.lower(): c for c in df.columns}
-
-    for key in candidates:
-        for low, real in cols.items():
-            if key in low and not df[real].isna().all():
-                try:
-                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
-                    return real
-                except Exception:
-                    continue
+    """Supply Chain specific time detection (Order, Ship, Delivery)."""
+    candidates = ["order date", "ship date", "delivery date", "date"]
+    for c in df.columns:
+        if any(k in c.lower() for k in candidates):
+            try:
+                pd.to_datetime(df[c].dropna().iloc[0])
+                return c
+            except:
+                continue
     return None
 
 
-def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    """Ensures time column is datetime type and sorted."""
-    df_out = df.copy()
-    try:
-        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
-        df_out = df_out.dropna(subset=[time_col])
-        df_out = df_out.sort_values(time_col)
-    except Exception:
-        pass
-    return df_out
-
-
 # =====================================================
-# SUPPLY CHAIN / OPERATIONS DOMAIN (v3.0 - FULL AUTHORITY)
+# SUPPLY CHAIN DOMAIN (UNIVERSAL 10/10)
 # =====================================================
 
 class SupplyChainDomain(BaseDomain):
     name = "supply_chain"
-    description = "Operational & Supply Chain Analytics (Delivery, Inventory, Fulfillment)"
+    description = "Universal Supply Chain Intelligence (Inventory, Logistics, Fleet, Sustainability)"
 
-    # ---------------- VALIDATION ----------------
-
-    def validate_data(self, df: pd.DataFrame) -> bool:
-        # Flexible validation: Needs either Order info OR Inventory info
-        has_orders = resolve_column(df, "order_id") or resolve_column(df, "shipment")
-        has_stock = resolve_column(df, "inventory") or resolve_column(df, "stock")
-        
-        return bool(has_orders or has_stock)
-
-    # ---------------- PREPROCESS ----------------
+    # ---------------- PREPROCESS (CENTRALIZED STATE) ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.time_col = _detect_time_column(df)
-        self.has_time_series = False
+        
+        # 1. Resolve columns ONCE here.
+        self.cols = {
+            # Core
+            "order_id": resolve_column(df, "order_id") or resolve_column(df, "shipment_id"),
+            "inventory": resolve_column(df, "inventory") or resolve_column(df, "stock_level"),
+            "sku": resolve_column(df, "sku") or resolve_column(df, "item_id"),
+            "category": resolve_column(df, "category") or resolve_column(df, "product_family"),
+            "supplier": resolve_column(df, "supplier") or resolve_column(df, "vendor"),
+            "carrier": resolve_column(df, "carrier") or resolve_column(df, "logistics_provider"),
+            "cost": resolve_column(df, "cost") or resolve_column(df, "shipping_cost"),
+            
+            # Fleet & Eco
+            "distance": resolve_column(df, "distance") or resolve_column(df, "miles"),
+            "weight": resolve_column(df, "weight") or resolve_column(df, "tonnage"),
+            "co2": resolve_column(df, "co2") or resolve_column(df, "emissions"),
+            
+            # Dates
+            "order_date": resolve_column(df, "order_date"),
+            "ship_date": resolve_column(df, "ship_date"),
+            "delivery_date": resolve_column(df, "delivery_date") or resolve_column(df, "actual_delivery"),
+            "promised_date": resolve_column(df, "promised_date") or resolve_column(df, "estimated_delivery"),
+            
+            # Status
+            "status": resolve_column(df, "status")
+        }
 
-        if self.time_col:
-            df = _prepare_time_series(df, self.time_col)
-            self.has_time_series = df[self.time_col].nunique() >= 2
+        # 2. Date Cleaning
+        for dc in ["order_date", "ship_date", "delivery_date", "promised_date"]:
+            if self.cols[dc]:
+                df[self.cols[dc]] = pd.to_datetime(df[self.cols[dc]], errors="coerce")
 
         return df
 
@@ -90,410 +84,264 @@ class SupplyChainDomain(BaseDomain):
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis: Dict[str, Any] = {}
+        c = self.cols
 
-        order_id = resolve_column(df, "order_id") or resolve_column(df, "shipment")
-        inventory = resolve_column(df, "inventory") or resolve_column(df, "stock")
-        sku = resolve_column(df, "sku") or resolve_column(df, "product")
+        # 1. Volume & OTD
+        kpis["total_orders"] = df[c["order_id"]].nunique() if c["order_id"] else len(df)
 
-        order_date = resolve_column(df, "order_date")
-        delivery_date = resolve_column(df, "delivery_date") or resolve_column(df, "delivered")
-        promised_date = resolve_column(df, "promised_date") or resolve_column(df, "expected_date")
-        status_col = resolve_column(df, "status")
+        if c["delivery_date"] and c["promised_date"]:
+            mask = df[c["delivery_date"]].notna() & df[c["promised_date"]].notna()
+            if mask.sum() > 0:
+                on_time = (df.loc[mask, c["delivery_date"]] <= df.loc[mask, c["promised_date"]])
+                kpis["otd_rate"] = on_time.mean()
+        elif c["status"]:
+            late = df[c["status"]].astype(str).str.lower().str.contains("late|delay", na=False)
+            kpis["otd_rate"] = 1.0 - late.mean()
 
-        # 1. Order Volume
-        if order_id:
-            kpis["order_volume"] = df[order_id].nunique()
-        else:
-            kpis["order_volume"] = len(df) 
+        # 2. Lead Time (Numeric & Variance)
+        if c["order_date"] and c["delivery_date"]:
+            lead = (df[c["delivery_date"]] - df[c["order_date"]]).dt.days
+            valid_lead = lead[(lead >= 0) & (lead < 365)]
+            if not valid_lead.empty:
+                kpis["avg_lead_time"] = valid_lead.mean()
+                kpis["lead_time_cv"] = _safe_div(valid_lead.std(), valid_lead.mean())
 
-        # 2. Lead Time (Actual Calculation)
-        if order_date and delivery_date:
-            try:
-                start = pd.to_datetime(df[order_date], errors='coerce')
-                end = pd.to_datetime(df[delivery_date], errors='coerce')
-                lead_time = (end - start).dt.days
-                
-                # Filter out negative or crazy outliers (> 365 days)
-                valid_leads = lead_time[(lead_time >= 0) & (lead_time < 365)]
-                
-                if not valid_leads.empty:
-                    kpis["avg_lead_time_days"] = valid_leads.mean()
-            except Exception:
-                pass
+        # 3. Inventory
+        if c["inventory"]:
+            kpis["avg_stock"] = df[c["inventory"]].mean()
+            kpis["stockout_rate"] = (df[c["inventory"]] <= 0).mean()
 
-        # 3. On-Time Delivery (The Hybrid Approach)
-        kpis["target_otd_rate"] = 0.95 # Benchmark
+        # 4. Fleet & Cost
+        if c["cost"] and kpis["total_orders"]:
+            kpis["avg_cost_per_order"] = df[c["cost"]].sum() / kpis["total_orders"]
 
-        if delivery_date and promised_date:
-            try:
-                delivered = pd.to_datetime(df[delivery_date], errors='coerce')
-                promised = pd.to_datetime(df[promised_date], errors='coerce')
-                mask = delivered.notna() & promised.notna()
-                if mask.sum() > 0:
-                    on_time = (delivered[mask] <= promised[mask]).mean()
-                    kpis["on_time_delivery_rate"] = on_time
-            except Exception:
-                pass
-        
-        # Fallback: Status Text Check
-        if "on_time_delivery_rate" not in kpis and status_col:
-            is_late = df[status_col].astype(str).str.lower().str.contains("late|delay|backorder|fail", na=False)
-            kpis["on_time_delivery_rate"] = 1.0 - is_late.mean()
+        if c["cost"] and c["distance"]:
+            kpis["cost_per_mile"] = _safe_div(df[c["cost"]].sum(), df[c["distance"]].sum())
 
-        # 4. Inventory Health (Enhanced SKU Logic)
-        if inventory and pd.api.types.is_numeric_dtype(df[inventory]):
-            kpis["avg_inventory_level"] = df[inventory].mean()
-            
-            # Smart Stockout: If SKU exists, group first (Sum across warehouses)
-            if sku:
-                stock_by_sku = df.groupby(sku)[inventory].sum()
-                kpis["stockout_rate"] = (stock_by_sku <= 0).mean()
-            else:
-                kpis["stockout_rate"] = (df[inventory] <= 0).mean()
-                
-            kpis["target_stockout_rate"] = 0.05
+        # 5. Sustainability
+        if c["co2"]:
+            kpis["avg_co2_per_order"] = df[c["co2"]].mean()
+        elif c["distance"] and c["weight"]:
+            # Estimate: 0.00016 kg CO2 per kg-mile
+            est_co2 = df[c["distance"]] * df[c["weight"]] * 0.00016
+            kpis["avg_co2_per_order"] = est_co2.mean()
 
         return kpis
 
-    # ---------------- VISUALS ----------------
+    # ---------------- VISUALS (SMART SELECTION) ----------------
 
-    def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> List[Dict[str, Any]]:
-
-        visuals: List[Dict[str, Any]] = []
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Calculate KPIs once
+        c = self.cols
         kpis = self.calculate_kpis(df)
 
-        def human_fmt(x, _):
-            if abs(x) >= 1_000: return f"{x/1_000:.1f}K"
-            return str(int(x))
+        def save(fig, name, caption, imp, cat):
+            p = output_dir / name
+            fig.savefig(p, bbox_inches="tight")
+            plt.close(fig)
+            visuals.append({
+                "path": str(p),
+                "caption": caption,
+                "importance": imp,
+                "category": cat
+            })
 
-        inventory = resolve_column(df, "inventory") or resolve_column(df, "stock")
-        supplier = resolve_column(df, "supplier") or resolve_column(df, "vendor")
-        category = resolve_column(df, "category") or resolve_column(df, "product")
-        carrier = resolve_column(df, "carrier") or resolve_column(df, "shipping_carriers")
+        # 1. OTD Trend
+        if c["delivery_date"] and c["promised_date"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            temp = df.copy()
+            temp['on_time'] = temp[c["delivery_date"]] <= temp[c["promised_date"]]
+            temp.set_index(c["promised_date"]).resample('M')['on_time'].mean().plot(ax=ax, color="green")
+            ax.set_title("On-Time Delivery Trend")
+            ax.set_ylim(0, 1.1)
+            save(fig, "otd_trend.png", "Reliability", 0.95 if kpis.get("otd_rate", 1) < 0.9 else 0.8, "service")
 
-        delivery_date = resolve_column(df, "delivery_date") or resolve_column(df, "delivered")
-        promised_date = resolve_column(df, "promised_date") or resolve_column(df, "expected_date")
+        # 2. Lead Time Variance
+        if kpis.get("avg_lead_time"):
+            fig, ax = plt.subplots(figsize=(6, 4))
+            lead = (df[c["delivery_date"]] - df[c["order_date"]]).dt.days
+            lead = lead[(lead >= 0) & (lead < 60)]
+            lead.hist(ax=ax, bins=20, color="purple", alpha=0.7)
+            ax.set_title("Lead Time Distribution")
+            imp = 0.9 if kpis.get("lead_time_cv", 0) > 0.5 else 0.75
+            save(fig, "lead_time_dist.png", "Process variability", imp, "velocity")
 
-        # -------- Visual 1: Order Volume Trend --------
-        if self.has_time_series:
-            p = output_dir / "order_volume_trend.png"
-            plt.figure(figsize=(7, 4))
-
-            plot_df = df.copy()
-            # Smart Aggregation
-            if len(df) > 100:
-                plot_df = (
-                    df.set_index(self.time_col)
-                    .resample("ME")
-                    .size()
-                    .reset_index(name="count")
-                )
-                plt.plot(plot_df[self.time_col], plot_df["count"], linewidth=2, color="#9467bd")
-            else:
-                # Group by exact date for small datasets
-                dates = pd.to_datetime(df[self.time_col]).dt.date
-                dates.value_counts().sort_index().plot(linewidth=2, color="#9467bd")
-
-            plt.title("Order Fulfillment Trend")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "Order processing volume over time"})
-
-        # -------- Visual 2: Inventory by Category --------
-        if inventory and category and pd.api.types.is_numeric_dtype(df[inventory]):
-            p = output_dir / "inventory_by_cat.png"
+        # 3. Sustainability (CO2)
+        if kpis.get("avg_co2_per_order") and c["carrier"]:
+            co2_col = c["co2"] if c["co2"] else "est_co2"
+            if not c["co2"]: df["est_co2"] = df[c["distance"]] * df[c["weight"]] * 0.00016
             
-            top_inv = df.groupby(category)[inventory].sum().sort_values(ascending=False).head(7)
-            
-            plt.figure(figsize=(7, 4))
-            top_inv.plot(kind="bar", color="#17becf")
-            plt.title("Current Inventory by Category")
-            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "Stock distribution across key categories"})
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df.groupby(c["carrier"])[co2_col].mean().plot(kind="bar", ax=ax, color="green")
+            ax.set_title("Avg CO2 Emissions per Carrier")
+            save(fig, "co2_carrier.png", "Carbon footprint", 0.85, "sustainability")
 
-        # -------- Visual 3: Supplier / Carrier Performance --------
-        # Priority 1: Carrier Cost/Usage
-        if carrier:
-            p = output_dir / "carrier_usage.png"
-            c_counts = df[carrier].value_counts().head(7)
-            
-            plt.figure(figsize=(7, 4))
-            c_counts.plot(kind="barh", color="#bcbd22")
-            plt.title("Top Shipping Carriers by Volume")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "Utilization of logistics providers"})
-            
-        # Priority 2: Supplier Delay (if dates available)
-        elif supplier and delivery_date and promised_date:
-            try:
-                d_dates = pd.to_datetime(df[delivery_date], errors='coerce')
-                p_dates = pd.to_datetime(df[promised_date], errors='coerce')
-                
-                df_temp = df.copy()
-                df_temp['is_delayed'] = d_dates > p_dates
-                
-                delay_by_supp = (
-                    df_temp.groupby(supplier)['is_delayed']
-                    .mean()
-                    .sort_values(ascending=False)
-                    .head(7)
-                )
+        # 4. Fleet Efficiency
+        if kpis.get("cost_per_mile") and c["carrier"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df.groupby(c["carrier"]).apply(lambda x: x[c["cost"]].sum() / x[c["distance"]].sum()).plot(kind="bar", ax=ax, color="orange")
+            ax.set_title("Cost per Mile by Carrier")
+            save(fig, "cost_mile.png", "Fleet efficiency", 0.82, "cost")
 
-                if delay_by_supp.max() > 0:
-                    p = output_dir / "supplier_delay.png"
-                    plt.figure(figsize=(7, 4))
-                    delay_by_supp.plot(kind="bar", color="#d62728")
-                    plt.gca().yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
-                    plt.title("Worst Performing Suppliers (Delay Rate)")
-                    plt.xticks(rotation=45, ha='right')
-                    plt.tight_layout()
-                    plt.savefig(p)
-                    plt.close()
-                    visuals.append({"path": p, "caption": "Suppliers with highest delay rates"})
-            except Exception:
-                pass
+        # 5. Inventory by Category
+        if c["inventory"] and c["category"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.groupby(c["category"])[c["inventory"]].sum().nlargest(10).plot(kind="bar", ax=ax)
+            ax.set_title("Inventory Levels")
+            save(fig, "inventory.png", "Stock distribution", 0.75, "inventory")
 
+        # 6. Supplier Reliability
+        if c["supplier"] and c["promised_date"]:
+            temp = df.copy()
+            temp['late'] = temp[c["delivery_date"]] > temp[c["promised_date"]]
+            bad = temp.groupby(c["supplier"])['late'].mean().nlargest(5)
+            if bad.max() > 0:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                bad.plot(kind="bar", ax=ax, color="red")
+                ax.set_title("Highest Delay Rate by Supplier")
+                save(fig, "supplier_risk.png", "Vendor risk", 0.92, "risk")
+
+        # 7. Stockout Rate
+        if c["inventory"] and c["category"]:
+            temp = df.copy()
+            temp['oos'] = temp[c["inventory"]] <= 0
+            oos = temp.groupby(c["category"])['oos'].mean().nlargest(5)
+            if oos.max() > 0:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                oos.plot(kind="bar", ax=ax, color="orange")
+                ax.set_title("Stockout Rate by Category")
+                save(fig, "stockouts.png", "Availability risk", 0.9, "inventory")
+
+        # 8. Order Volume
+        if self.time_col:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.set_index(pd.to_datetime(df[self.time_col])).resample('M').size().plot(ax=ax)
+            ax.set_title("Order Volume")
+            save(fig, "volume.png", "Demand trend", 0.8, "planning")
+
+        visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
+    # ---------------- COMPOSITE INSIGHTS (THE SMART LAYER) ----------------
 
-    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        insights: List[Dict[str, Any]] = []
-
-        # === STEP 1: Composite FIRST (Authority Layer) ===
-        composite_insights: List[Dict[str, Any]] = []
-        if len(df) > 30:
-            composite_insights = self.generate_composite_insights(df, kpis)
-
-        dominant_titles = {
-            i["title"] for i in composite_insights
-            if i["level"] in {"RISK", "WARNING"}
-        }
-
-        # === STEP 2: Suppression Rules ===
-        # If "Fulfillment Bottleneck" exists, suppress generic "Delivery Delays"
-        suppress_delivery = "Severe Fulfillment Bottleneck" in dominant_titles
+    def generate_composite_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        insights = []
         
-        # If "Inventory Imbalance" exists, suppress generic "Stockout" warnings
-        suppress_inventory = "Inventory Imbalance Detected" in dominant_titles
+        otd = kpis.get("otd_rate", 1.0)
+        stockout = kpis.get("stockout_rate", 0.0)
+        lead = kpis.get("avg_lead_time", 0)
+        inventory_lvl = kpis.get("avg_stock", 0)
 
-        on_time = kpis.get("on_time_delivery_rate")
-        stockout = kpis.get("stockout_rate")
-
-        # === STEP 3: Guarded Atomic Insights ===
-        if on_time is not None and not suppress_delivery:
-            if on_time < 0.85:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Critical Delivery Delays",
-                    "so_what": f"Only {on_time:.1%} of orders are on time (Target: 95%)."
-                })
-            elif on_time < 0.95:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Delivery Standards Slipping",
-                    "so_what": f"On-time rate is {on_time:.1%}, slightly below target."
-                })
-
-        if stockout is not None and not suppress_inventory:
-            if stockout > 0.10:
-                insights.append({
-                    "level": "RISK",
-                    "title": "High Stockout Rate",
-                    "so_what": f"{stockout:.1%} of SKUs are out of stock. Immediate replenishment needed."
-                })
-            elif stockout > 0.05:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Inventory Gaps Detected",
-                    "so_what": f"Stockout rate is {stockout:.1%}."
-                })
-
-        # === STEP 4: Composite LAST (Authority Wins) ===
-        insights += composite_insights
-
-        if not insights:
+        # 1. Fulfillment Crisis (Slow Lead Time + Low OTD)
+        if otd < 0.85 and lead > 10:
             insights.append({
-                "level": "INFO",
-                "title": "Operations Stable",
-                "so_what": "Supply chain metrics are performing within normal parameters."
+                "level": "CRITICAL",
+                "title": "Fulfillment Crisis",
+                "so_what": f"Delivery is unreliable ({otd:.1%}) AND slow ({lead:.1f} days). Systemic logistics failure."
+            })
+
+        # 2. Inventory Imbalance (High Stock + High Stockouts)
+        # Assuming 'High Stock' is relative, checking if avg > 0
+        if inventory_lvl > 0 and stockout > 0.15:
+            insights.append({
+                "level": "RISK",
+                "title": "Inventory Imbalance",
+                "so_what": f"You have stock, but {stockout:.1%} of items are OOS. Mismatched demand/supply."
             })
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (SC v3.0) ----------------
+    # ---------------- ATOMIC INSIGHTS ----------------
 
-    def generate_composite_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Supply Chain v3 Composite Intelligence Layer.
-        Detects Inventory Imbalance, Fulfillment Bottlenecks.
-        """
-        insights: List[Dict[str, Any]] = []
+    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        # Composite First
+        insights = self.generate_composite_insights(df, kpis)
+        titles = [i["title"] for i in insights]
 
-        otd = kpis.get("on_time_delivery_rate")
-        stockout = kpis.get("stockout_rate")
-        lead_time = kpis.get("avg_lead_time_days")
-        inventory_lvl = kpis.get("avg_inventory_level")
+        # Atomic Fallbacks
+        cv = kpis.get("lead_time_cv", 0)
+        co2 = kpis.get("avg_co2_per_order")
+        cpm = kpis.get("cost_per_mile")
+        otd = kpis.get("otd_rate", 1.0)
 
-        # 1. Inventory Imbalance (High Stock + High Stockouts)
-        if inventory_lvl is not None and stockout is not None:
-            if inventory_lvl > 0 and stockout > 0.10:
-                 insights.append({
-                    "level": "WARNING",
-                    "title": "Inventory Imbalance Detected",
-                    "so_what": (
-                        f"Stockout rate is high ({stockout:.1%}) despite holding significant inventory. "
-                        f"You are likely overstocked on slow-movers and understocked on key items."
-                    )
-                })
+        # Variance
+        if cv > 0.5:
+            insights.append({
+                "level": "RISK", "title": "Unstable Lead Times",
+                "so_what": f"High variability (CV: {cv:.2f}). Planning buffers likely insufficient."
+            })
 
-        # 2. Fulfillment Bottleneck (Low OTD + Slow Lead Time)
-        if otd is not None and lead_time is not None:
-            if otd < 0.85 and lead_time > 10: # >10 days avg lead time
-                 insights.append({
-                    "level": "RISK",
-                    "title": "Severe Fulfillment Bottleneck",
-                    "so_what": (
-                        f"Delivery reliability is low ({otd:.1%}) with extended lead times "
-                        f"({lead_time:.1f} days). Logistics or carrier performance requires audit."
-                    )
-                })
+        # Sustainability
+        if co2 is not None and co2 > 50:
+            insights.append({
+                "level": "WARNING", "title": "High Carbon Footprint",
+                "so_what": f"Avg CO2 per order is {co2:.1f}kg."
+            })
+
+        # Cost
+        if cpm is not None and cpm > 3.0:
+            insights.append({
+                "level": "WARNING", "title": "High Fleet Costs",
+                "so_what": f"Cost per mile is ${cpm:.2f}."
+            })
+
+        # OTD (if not covered by Crisis)
+        if otd < 0.90 and "Fulfillment Crisis" not in titles:
+            insights.append({
+                "level": "WARNING", "title": "Delivery Delays", 
+                "so_what": f"OTD is {otd:.1%}, below target."
+            })
+
+        if not insights:
+            insights.append({"level": "INFO", "title": "Supply Chain Stable", "so_what": "Operations nominal."})
 
         return insights
 
-    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
+    # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
+        titles = [i["title"] for i in self.generate_insights(df, kpis)]
+
+        # Composite Actions
+        if "Fulfillment Crisis" in titles:
+            recs.append({"action": "Audit carrier SLAs and switch underperformers immediately.", "priority": "HIGH"})
         
-        # 1. Check Composite Context for Action Authority
-        composite = []
-        if len(df) > 30:
-            composite = self.generate_composite_insights(df, kpis)
-        
-        titles = [i["title"] for i in composite]
+        if "Inventory Imbalance" in titles:
+            recs.append({"action": "Markdown overstock and expedite OOS items.", "priority": "HIGH"})
 
-        # AUTHORITY RULES: Mandatory actions for specific risks
-        if "Severe Fulfillment Bottleneck" in titles:
-             return [{
-                "action": "Audit logistics carriers and lead times immediately",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            }]
+        # Atomic Actions
+        if kpis.get("lead_time_cv", 0) > 0.5:
+            recs.append({"action": "Increase safety stock buffers.", "priority": "MEDIUM"})
 
-        if "Inventory Imbalance Detected" in titles:
-            return [{
-                "action": "Initiate stock rebalancing: Markdown overstock and expedite OOS items",
-                "priority": "HIGH",
-                "timeline": "This Week"
-            }]
-
-        # 2. Fallback to Atomic Recs
-        stockout = kpis.get("stockout_rate")
-        on_time = kpis.get("on_time_delivery_rate")
-
-        if stockout is not None and stockout > 0.10:
-            recs.append({
-                "action": "Initiate emergency replenishment for OOS items",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            })
-        
-        if on_time is not None and on_time < 0.85:
-            recs.append({
-                "action": "Audit lowest-performing suppliers/carriers",
-                "priority": "HIGH",
-                "timeline": "This Week"
-            })
+        if kpis.get("avg_co2_per_order"):
+            recs.append({"action": "Review route optimization for carbon reduction.", "priority": "MEDIUM"})
 
         if not recs:
-            recs.append({
-                "action": "Maintain current operational processes",
-                "priority": "LOW",
-                "timeline": "Ongoing"
-            })
+            recs.append({"action": "Monitor metrics.", "priority": "LOW"})
 
         return recs
 
 
 # =====================================================
-# DOMAIN DETECTOR (COLLISION PROOF)
+# DOMAIN DETECTOR
 # =====================================================
 
 class SupplyChainDomainDetector(BaseDomainDetector):
     domain_name = "supply_chain"
-
-    # Expanded tokens including upstream keywords to distinguish from Retail
-    SUPPLY_CHAIN_TOKENS: Set[str] = {
-        # Inventory & Stock
-        "inventory", "stock", "onhand", "warehouse",
-
-        # Logistics & Fulfillment
-        "shipment", "delivery", "dispatch", "carrier",
-        "freight", "logistics", "route", "transport", "transportation",
-
-        # Performance & Timing
-        "lead_time", "cycle_time", "turnaround",
-        "delay", "on_time", "backorder",
-
-        # Operations
-        "sku", "quantity", "units", "volume",
-        "supplier", "vendor", "procurement",
-        "manufacturing", "production", "defect"
-    }
+    TOKENS = {"inventory", "stock", "shipping", "delivery", "carrier", "supplier", "freight", "logistics"}
 
     def detect(self, df) -> DomainDetectionResult:
-        cols = {str(c).lower() for c in df.columns}
+        hits = [c for c in df.columns if any(t in c.lower() for t in self.TOKENS)]
+        confidence = min(len(hits)/3, 1.0)
         
-        hits = [c for c in cols if any(t in c for t in self.SUPPLY_CHAIN_TOKENS)]
-        
-        # Base confidence calculation
-        confidence = min(len(hits) / 3, 1.0)
-
-        # 🔑 SUPPLY CHAIN DOMINANCE RULE
-        # These words strongly imply upstream/logistics operations, overruling generic "Sales" signals
-        sc_exclusive = any(
-            t in c
-            for c in cols
-            for t in {
-                "inventory", "stock", "warehouse",
-                "delivery", "shipment", "lead_time",
-                "carrier", "supplier", "freight",
-                "manufacturing", "production"
-            }
-        )
-
-        if sc_exclusive:
-            confidence = max(confidence, 0.85)
-
-        return DomainDetectionResult(
-            domain="supply_chain",
-            confidence=confidence,
-            signals={"matched_columns": hits},
-        )
-
-
-# =====================================================
-# REGISTRATION
-# =====================================================
+        # Boost if Inventory AND Delivery exist
+        cols = str(df.columns).lower()
+        if "stock" in cols and "delivery" in cols:
+            confidence = max(confidence, 0.95)
+            
+        return DomainDetectionResult("supply_chain", confidence, {"matched_columns": hits})
 
 def register(registry):
-    registry.register(
-        name="supply_chain",
-        domain_cls=SupplyChainDomain,
-        detector_cls=SupplyChainDomainDetector,
-    )
+    registry.register("supply_chain", SupplyChainDomain, SupplyChainDomainDetector)

@@ -1,8 +1,10 @@
 import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
 
 from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
@@ -14,80 +16,42 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
-    """Safely divides n by d."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
 
 
-def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    """
-    CX-safe time detector.
-    Used for customer trend / churn trend only if present.
-    """
-    candidates = [
-        "signup date", "created date", "interaction date",
-        "date", "timestamp"
-    ]
-
-    cols = {c.lower(): c for c in df.columns}
-
-    for key in candidates:
-        for low, real in cols.items():
-            if key in low and not df[real].isna().all():
-                try:
-                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
-                    return real
-                except Exception:
-                    continue
-    return None
-
-
-def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    """Ensures time column is datetime type and sorted."""
-    df_out = df.copy()
-    try:
-        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
-        df_out = df_out.dropna(subset=[time_col])
-        df_out = df_out.sort_values(time_col)
-    except Exception:
-        pass
-    return df_out
-
-
 # =====================================================
-# CUSTOMER / CX DOMAIN (v3.0 - FULL AUTHORITY)
+# CUSTOMER DOMAIN (UNIVERSAL 10/10)
 # =====================================================
 
 class CustomerDomain(BaseDomain):
     name = "customer"
-    description = "Customer Experience & Retention Analytics (Satisfaction, Churn, Support)"
+    description = "Universal Customer Intelligence (CX, Loyalty, Support, Churn)"
 
-    # ---------------- VALIDATION ----------------
-
-    def validate_data(self, df: pd.DataFrame) -> bool:
-        """
-        CX data requires customer signals, not revenue.
-        """
-        return any(
-            resolve_column(df, c) is not None
-            for c in [
-                "customer", "customer_id",
-                "satisfaction", "rating", "score",
-                "churn", "status",
-                "ticket", "complaint", "support"
-            ]
-        )
-
-    # ---------------- PREPROCESS ----------------
+    # ---------------- PREPROCESS (SAFETY LAYER) ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        self.time_col = _detect_time_column(df)
-        self.has_time_series = False
+        # 1. Resolve Columns
+        self.cols = {
+            "customer": resolve_column(df, "customer_id") or resolve_column(df, "customer"),
+            "nps": resolve_column(df, "nps") or resolve_column(df, "net_promoter_score"),
+            "csat": resolve_column(df, "csat") or resolve_column(df, "satisfaction"),
+            "ces": resolve_column(df, "ces") or resolve_column(df, "effort_score"),
+            "churn": resolve_column(df, "churn") or resolve_column(df, "churned"),
+            "ticket": resolve_column(df, "ticket_id") or resolve_column(df, "case_id"),
+            "frt": resolve_column(df, "first_response_time") or resolve_column(df, "frt"),
+            "art": resolve_column(df, "avg_resolution_time") or resolve_column(df, "resolution_time"),
+            "fcr": resolve_column(df, "fcr") or resolve_column(df, "first_contact_resolution"),
+            "sentiment": resolve_column(df, "sentiment_score") or resolve_column(df, "sentiment"),
+        }
 
-        if self.time_col:
-            df = _prepare_time_series(df, self.time_col)
-            self.has_time_series = df[self.time_col].nunique() >= 2
+        # 2. Force Numeric Types (Safety Fix)
+        numeric_cols = ["nps", "csat", "ces", "frt", "art", "sentiment", "fcr", "churn"]
+        for key in numeric_cols:
+            col_name = self.cols.get(key)
+            if col_name:
+                df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
 
         return df
 
@@ -95,360 +59,191 @@ class CustomerDomain(BaseDomain):
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis: Dict[str, Any] = {}
+        c = self.cols
 
-        customer = resolve_column(df, "customer") or resolve_column(df, "customer_id")
-        satisfaction = (
-            resolve_column(df, "satisfaction")
-            or resolve_column(df, "rating")
-            or resolve_column(df, "score")
-        )
-        churn = resolve_column(df, "churn")
-        status = resolve_column(df, "status")
-        ticket = resolve_column(df, "ticket") or resolve_column(df, "complaint")
+        if c["customer"]:
+            kpis["customer_count"] = df[c["customer"]].nunique()
 
-        # 1. Customer Base
-        if customer:
-            kpis["customer_count"] = df[customer].nunique()
+        if c["nps"]:
+            kpis["avg_nps"] = df[c["nps"]].mean()
 
-        # 2. Satisfaction Metrics (Pre-Normalization)
-        kpis["target_satisfaction_score"] = 4.0 # Benchmark (1-5 scale)
+        if c["csat"]:
+            kpis["avg_csat"] = df[c["csat"]].mean()
 
-        if satisfaction and pd.api.types.is_numeric_dtype(df[satisfaction]):
-            sat_series = df[satisfaction].copy()
-            avg_raw = sat_series.mean()
+        if c["ces"]:
+            kpis["avg_ces"] = df[c["ces"]].mean()
 
-            # Normalize 1-10 scale to 1-5 scale for consistency
-            if avg_raw > 5:
-                sat_series = sat_series / 2
+        if c["churn"]:
+            kpis["churn_rate"] = df[c["churn"]].mean()
 
-            kpis["avg_satisfaction_score"] = sat_series.mean()
-            
-            # Thresholds apply correctly regardless of original scale
-            kpis["low_satisfaction_rate"] = (sat_series < 3).mean()
-            kpis["high_satisfaction_rate"] = (sat_series > 4.5).mean()
+        if c["ticket"]:
+            kpis["ticket_volume"] = df[c["ticket"]].nunique()
 
-        # 3. Churn / Retention
-        kpis["target_churn_rate"] = 0.05
+        if c["frt"]:
+            kpis["avg_first_response_time"] = df[c["frt"]].mean()
 
-        if churn and pd.api.types.is_numeric_dtype(df[churn]):
-            kpis["churn_rate"] = df[churn].mean()
+        if c["art"]:
+            kpis["avg_resolution_time"] = df[c["art"]].mean()
 
-        elif status:
-            # Fallback: infer churn from status text
-            status_series = df[status].astype(str).str.lower()
-            churned = status_series.str.contains("churn|inactive|cancel", na=False)
-            kpis["churn_rate"] = churned.mean()
+        if c["fcr"]:
+            kpis["first_contact_resolution_rate"] = df[c["fcr"]].mean()
 
-        # 4. Support Load
-        if ticket:
-            if customer:
-                ticket_counts = df.groupby(customer)[ticket].count()
-                kpis["avg_tickets_per_customer"] = ticket_counts.mean()
-                kpis["high_ticket_customer_rate"] = (ticket_counts > 3).mean()
-            else:
-                kpis["total_tickets"] = len(df)
+        if c["sentiment"]:
+            kpis["avg_sentiment"] = df[c["sentiment"]].mean()
 
         return kpis
 
-    # ---------------- VISUALS (MAX 4) ----------------
+    # ---------------- VISUALS (8 CANDIDATES, TOP 4 SELECTED) ----------------
 
-    def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> List[Dict[str, Any]]:
-
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
-
+        c = self.cols
         kpis = self.calculate_kpis(df)
 
-        satisfaction = (
-            resolve_column(df, "satisfaction")
-            or resolve_column(df, "rating")
-            or resolve_column(df, "score")
-        )
-        status = resolve_column(df, "status")
-        customer = resolve_column(df, "customer") or resolve_column(df, "customer_id")
-        ticket = resolve_column(df, "ticket") or resolve_column(df, "complaint")
-
-        # -------- Visual 1: Satisfaction Distribution (Normalized) --------
-        if satisfaction and pd.api.types.is_numeric_dtype(df[satisfaction]):
-            p = output_dir / "satisfaction_distribution.png"
-
-            plt.figure(figsize=(7, 4))
-            
-            # Normalize data for plotting to match KPI scale (1-5)
-            plot_series = df[satisfaction].dropna()
-            if plot_series.mean() > 5:
-                plot_series = plot_series / 2
-                
-            plot_series.plot(kind="hist", bins=10, color="#1f77b4", edgecolor='white')
-            plt.title("Customer Satisfaction Distribution (Normalized 1-5)")
-            plt.xlabel("Satisfaction Score")
-            plt.xlim(0, 5) # Lock axis to standard scale
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-
+        def save(fig, name, caption, imp, cat):
+            p = output_dir / name
+            fig.savefig(p, bbox_inches="tight")
+            plt.close(fig)
             visuals.append({
-                "path": p,
-                "caption": "Distribution of customer satisfaction scores"
+                "path": str(p),
+                "caption": caption,
+                "importance": imp,
+                "category": cat
             })
 
-        # -------- Visual 2: Customer Status / Churn --------
-        if status:
-            p = output_dir / "customer_status.png"
+        # 1. NPS Distribution
+        if c["nps"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["nps"]].hist(ax=ax, bins=10, color="#1f77b4")
+            ax.set_title("NPS Distribution")
+            # Logic: Negative NPS is high priority issue
+            save(fig, "nps_dist.png", "Loyalty distribution", 
+                 0.95 if kpis.get("avg_nps", 0) < 0 else 0.8, "loyalty")
 
-            counts = df[status].value_counts().head(5)
+        # 2. CSAT Distribution
+        if c["csat"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["csat"]].hist(ax=ax, bins=5, color="green")
+            ax.set_title("CSAT Scores")
+            save(fig, "csat_dist.png", "Customer satisfaction", 0.75, "satisfaction")
 
-            plt.figure(figsize=(7, 4))
-            counts.plot(kind="bar", color="#ff7f0e")
-            plt.title("Customer Status Breakdown")
-            plt.xticks(rotation=45, ha="right")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+        # 3. Churn Rate
+        if "churn_rate" in kpis:
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.bar(["Churn Rate"], [kpis["churn_rate"] * 100], color="red")
+            ax.set_title("Churn Rate (%)")
+            save(fig, "churn.png", "Attrition level", 
+                 1.0 if kpis["churn_rate"] > 0.05 else 0.7, "retention")
 
-            visuals.append({
-                "path": p,
-                "caption": "Active vs inactive customer distribution"
-            })
+        # 4. Ticket Volume
+        if c["ticket"]:
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.bar(["Tickets"], [kpis["ticket_volume"]], color="orange")
+            ax.set_title("Total Support Tickets")
+            save(fig, "tickets.png", "Support load", 0.6, "support")
 
-        # -------- Visual 3: Customer Trend --------
-        if self.has_time_series and customer:
-            p = output_dir / "customer_trend.png"
+        # 5. First Response Time (FRT)
+        if c["frt"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["frt"]].hist(ax=ax, bins=10, color="purple")
+            ax.set_title("First Response Time (Hours)")
+            save(fig, "frt.png", "Response speed", 
+                 0.9 if kpis.get("avg_first_response_time", 0) > 24 else 0.65, "support")
 
-            plot_df = df.copy()
-            if len(df) > 100:
-                plot_df = (
-                    df.set_index(self.time_col)
-                    .resample("ME")
-                    .nunique()
-                    .reset_index()
-                )
+        # 6. Resolution Time
+        if c["art"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["art"]].hist(ax=ax, bins=10, color="teal")
+            ax.set_title("Resolution Time (Hours)")
+            save(fig, "art.png", "Resolution efficiency", 0.7, "support")
 
-            plt.figure(figsize=(7, 4))
-            plt.plot(plot_df[self.time_col], plot_df[customer], linewidth=2)
-            plt.title("Customer Growth Trend")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+        # 7. Sentiment Score
+        if c["sentiment"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["sentiment"]].hist(ax=ax, bins=10, color="gray")
+            ax.set_title("Customer Sentiment")
+            save(fig, "sentiment.png", "Sentiment tone", 
+                 0.9 if kpis.get("avg_sentiment", 0) < 0 else 0.6, "cx")
 
-            visuals.append({
-                "path": p,
-                "caption": "Customer base trend over time"
-            })
+        # 8. FCR Rate (FIX 2: Safety Check Applied)
+        if c["fcr"] and kpis.get("first_contact_resolution_rate") is not None:
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.bar(["FCR"], [kpis["first_contact_resolution_rate"] * 100], color="gold")
+            ax.set_title("First Contact Resolution (%)")
+            save(fig, "fcr.png", "Resolution quality", 
+                 0.85 if kpis["first_contact_resolution_rate"] < 0.7 else 0.6, "support")
 
-        # -------- Visual 4: Support Load --------
-        if ticket and customer:
-            p = output_dir / "support_load.png"
-
-            top_customers = (
-                df.groupby(customer)[ticket]
-                .count()
-                .sort_values(ascending=False)
-                .head(7)
-            )
-
-            plt.figure(figsize=(7, 4))
-            top_customers.plot(kind="barh", color="#d62728")
-            plt.title("Customers with Highest Support Load")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-
-            visuals.append({
-                "path": p,
-                "caption": "Support pressure concentration"
-            })
-
+        visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
+    # ---------------- INSIGHTS (COMPOSITE + ATOMIC) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
 
-        # === STEP 1: Composite FIRST (Authority Layer) ===
-        composite: List[Dict[str, Any]] = []
-        # Only run deep analysis if we have enough customers (or rows)
-        base_size = kpis.get("customer_count", len(df))
-        if base_size > 30:
-            composite = self.generate_composite_insights(df, kpis)
+        churn = kpis.get("churn_rate", 0)
+        nps = kpis.get("avg_nps", 10)
+        frt = kpis.get("avg_first_response_time", 0)
+        sentiment = kpis.get("avg_sentiment", 1)
 
-        dominant_titles = {
-            i["title"] for i in composite
-            if i["level"] in {"RISK", "WARNING"}
-        }
-
-        # === STEP 2: Suppression Rules ===
-        # If "Service-Driven Churn" is found, suppress generic "High Churn"
-        suppress_churn = "Service-Driven Churn Risk" in dominant_titles
-        
-        # If "Silent Attrition" is found, suppress atomic "Low Satisfaction" or "Churn"
-        suppress_sat = "Silent Attrition Detected" in dominant_titles
-        if suppress_sat:
-            suppress_churn = True # Silent attrition IS the churn story
-
-        churn = kpis.get("churn_rate")
-        sat = kpis.get("avg_satisfaction_score")
-        low_sat = kpis.get("low_satisfaction_rate")
-
-        # === STEP 3: Guarded Atomic Insights ===
-        
-        # Churn Insight
-        if churn is not None and not suppress_churn:
-            if churn > 0.10:
-                insights.append({
-                    "level": "RISK",
-                    "title": "High Customer Churn",
-                    "so_what": f"Churn rate is {churn:.1%}, well above the 5% target."
-                })
-            elif churn > 0.05:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Rising Customer Attrition",
-                    "so_what": f"Churn rate is {churn:.1%}, exceeding the acceptable threshold."
-                })
-
-        # Satisfaction Insight
-        if sat is not None and sat < 3.5 and not suppress_sat:
+        # Composite Insights
+        if churn > 0.05 and frt > 24:
             insights.append({
-                "level": "WARNING",
-                "title": "Low Customer Satisfaction",
-                "so_what": f"Average satisfaction is {sat:.2f}/5."
+                "level": "CRITICAL",
+                "title": "Service-Driven Churn",
+                "so_what": "High churn coincides with slow support response times (>24h)."
             })
 
-        if low_sat is not None and low_sat > 0.20 and not suppress_sat:
+        if churn > 0.05 and nps < 0:
             insights.append({
-                "level": "WARNING",
-                "title": "Large Dissatisfied Segment",
-                "so_what": f"{low_sat:.1%} of customers report low satisfaction."
+                "level": "CRITICAL",
+                "title": "Loyalty Crisis",
+                "so_what": "Negative NPS and rising churn indicate systemic dissatisfaction."
             })
 
-        # === STEP 4: Composite LAST (Authority Wins) ===
-        insights += composite
+        # Atomic Insights
+        if sentiment < -0.1:
+            insights.append({
+                "level": "WARNING",
+                "title": "Negative Sentiment",
+                "so_what": "Customer feedback is predominantly negative."
+            })
+
+        if kpis.get("first_contact_resolution_rate", 1) < 0.70:
+            insights.append({
+                "level": "WARNING",
+                "title": "Low Resolution Quality",
+                "so_what": "FCR is below 70%, meaning customers have to follow up repeatedly."
+            })
 
         if not insights:
             insights.append({
                 "level": "INFO",
-                "title": "Customer Experience Stable",
-                "so_what": "Satisfaction and retention metrics are within healthy ranges."
+                "title": "Customer Health Stable",
+                "so_what": "CX metrics are healthy."
             })
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (CX v3.0) ----------------
-
-    def generate_composite_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Customer v3 Composite Intelligence Layer.
-        Detects Service-Driven Churn, Price Sensitivity, etc.
-        """
-        insights: List[Dict[str, Any]] = []
-
-        churn = kpis.get("churn_rate")
-        high_ticket_rate = kpis.get("high_ticket_customer_rate")
-        high_sat_rate = kpis.get("high_satisfaction_rate")
-
-        # 1. Service-Driven Churn: High Support Volume + High Churn
-        if high_ticket_rate is not None and churn is not None:
-            if high_ticket_rate > 0.15 and churn > 0.08:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Service-Driven Churn Risk",
-                    "so_what": (
-                        f"15%+ of customers have high support ticket volume, and churn "
-                        f"is elevated ({churn:.1%}). Support issues may be driving attrition."
-                    )
-                })
-
-        # 2. Price/Value Mismatch: High Satisfaction but High Churn
-        if high_sat_rate is not None and churn is not None:
-            if high_sat_rate > 0.40 and churn > 0.10:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Potential Price/Value Mismatch",
-                    "so_what": (
-                        f"Customer satisfaction is high ({high_sat_rate:.1%} happy customers), "
-                        f"yet churn is also high ({churn:.1%}). Competitors may be undercutting on price."
-                    )
-                })
-
-        # 3. Silent Attrition: Low Support Volume + High Churn
-        if high_ticket_rate is not None and churn is not None:
-            if high_ticket_rate < 0.05 and churn > 0.10:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Silent Attrition Detected",
-                    "so_what": (
-                        f"Churn is high ({churn:.1%}) but support volume is low. "
-                        f"Customers are leaving without complaining (Silent Churn)."
-                    )
-                })
-
-        return insights
-
-    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
+    # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
+        titles = [i["title"] for i in self.generate_insights(df, kpis)]
 
-        # 1. Check Composite Context
-        composite = []
-        base_size = kpis.get("customer_count", len(df))
-        if base_size > 30:
-            composite = self.generate_composite_insights(df, kpis)
-        
-        titles = [i["title"] for i in composite]
+        if "Service-Driven Churn" in titles:
+            recs.append({"action": "Staff up support team or deploy automation immediately.", "priority": "HIGH"})
 
-        # AUTHORITY RULES: Mandatory Actions
-        if "Service-Driven Churn Risk" in titles:
-            return [{
-                "action": "Improve support SLAs, reduce repeat tickets, and audit support workflows",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            }]
+        if "Loyalty Crisis" in titles:
+            recs.append({"action": "Launch emergency win-back campaign for detractors.", "priority": "HIGH"})
 
-        if "Silent Attrition Detected" in titles:
-            return [{
-                "action": "Launch proactive outreach campaign (NPS/Feedback) to at-risk silent customers",
-                "priority": "HIGH",
-                "timeline": "This Week"
-            }]
-
-        if "Potential Price/Value Mismatch" in titles:
-            return [{
-                "action": "Review pricing tiers and conduct competitive feature benchmarking",
-                "priority": "MEDIUM",
-                "timeline": "Next Quarter"
-            }]
-
-        # 2. Fallback to Atomic Recs
-        churn = kpis.get("churn_rate")
-        low_sat = kpis.get("low_satisfaction_rate")
-
-        if churn is not None and churn > 0.10:
-            recs.append({
-                "action": "Launch customer retention and win-back initiatives",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            })
-
-        if low_sat is not None and low_sat > 0.20:
-            recs.append({
-                "action": "Investigate root causes of low satisfaction and support issues",
-                "priority": "MEDIUM",
-                "timeline": "This Quarter"
-            })
+        # FIX 1: NPS Threshold aligned (Negative NPS = Problem)
+        if kpis.get("avg_nps", 0) < 0:
+            recs.append({"action": "Analyze detractor feedback for root causes.", "priority": "MEDIUM"})
 
         if not recs:
-            recs.append({
-                "action": "Continue monitoring customer experience metrics",
-                "priority": "LOW",
-                "timeline": "Ongoing"
-            })
+            recs.append({"action": "Maintain current CX initiatives.", "priority": "LOW"})
 
         return recs
 
@@ -459,29 +254,25 @@ class CustomerDomain(BaseDomain):
 
 class CustomerDomainDetector(BaseDomainDetector):
     domain_name = "customer"
-
-    CUSTOMER_TOKENS: Set[str] = {
-        "customer", "client", "user",
-        "satisfaction", "rating", "score",
-        "churn", "status",
-        "ticket", "complaint", "support"
+    TOKENS: Set[str] = {
+        "customer", "nps", "csat", "churn",
+        "ticket", "support", "sentiment", "resolution"
     }
 
     def detect(self, df) -> DomainDetectionResult:
-        cols = {str(c).lower() for c in df.columns}
-        hits = [c for c in cols if any(t in c for t in self.CUSTOMER_TOKENS)]
+        cols = {c.lower() for c in df.columns}
+        hits = [c for c in cols if any(t in c for t in self.TOKENS)]
         confidence = min(len(hits) / 3, 1.0)
+
+        if any("nps" in c for c in cols) or any("churn" in c for c in cols):
+            confidence = max(confidence, 0.95)
 
         return DomainDetectionResult(
             domain="customer",
             confidence=confidence,
-            signals={"matched_columns": hits},
+            signals={"matched_columns": hits}
         )
 
-
-# =====================================================
-# REGISTRATION
-# =====================================================
 
 def register(registry):
     registry.register(

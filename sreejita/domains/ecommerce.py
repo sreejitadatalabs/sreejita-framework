@@ -1,7 +1,10 @@
 import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
-import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from sreejita.core.column_resolver import resolve_column
@@ -14,80 +17,62 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 
 def _safe_div(n, d):
-    """Safely divides n by d, returning None if d is 0 or NaN."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
 
-
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    """
-    E-com-safe time detector:
-    Prioritizes session/event times over generic dates.
-    """
-    candidates = [
-        "session_date", "visit_date", "event_time", "timestamp",
-        "order_date", "transaction_date", "date"
-    ]
-
-    cols = {c.lower(): c for c in df.columns}
-
-    for key in candidates:
-        for low, real in cols.items():
-            if key in low and not df[real].isna().all():
-                try:
-                    pd.to_datetime(df[real].dropna().iloc[:10], errors="raise")
-                    return real
-                except Exception:
-                    continue
+    """E-com specific time detector."""
+    candidates = ["session_date", "visit_date", "timestamp", "order_date", "date"]
+    for c in df.columns:
+        if any(k in c.lower() for k in candidates):
+            try:
+                pd.to_datetime(df[c].dropna().iloc[:5], errors="raise")
+                return c
+            except:
+                continue
     return None
 
 
-def _prepare_time_series(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    """Ensures time column is datetime type and sorted."""
-    df_out = df.copy()
-    try:
-        df_out[time_col] = pd.to_datetime(df_out[time_col], errors="coerce")
-        df_out = df_out.dropna(subset=[time_col])
-        df_out = df_out.sort_values(time_col)
-    except Exception:
-        pass
-    return df_out
-
-
 # =====================================================
-# E-COMMERCE DOMAIN (v3.0 - FULL AUTHORITY)
+# E-COMMERCE DOMAIN (UNIVERSAL 10/10)
 # =====================================================
 
 class EcommerceDomain(BaseDomain):
     name = "ecommerce"
-    description = "E-Commerce Analytics (Traffic, Conversion, Cart Abandonment)"
+    description = "Universal E-Commerce Analytics (Traffic, Conversion, Funnel, Retention)"
 
-    # ---------------- VALIDATION ----------------
-
-    def validate_data(self, df: pd.DataFrame) -> bool:
-        """
-        E-com data needs web metrics (Sessions, Pageviews) OR sales funnel data.
-        """
-        return any(
-            resolve_column(df, c) is not None
-            for c in [
-                "session_id", "visit_id", "visitor", "user_id",
-                "pageviews", "bounce_rate", "traffic_source",
-                "add_to_cart", "checkout", "conversion",
-                "order_id", "transaction_id" 
-            ]
-        )
-
-    # ---------------- PREPROCESS ----------------
+    # ---------------- PREPROCESS (CENTRALIZED STATE) ----------------
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.time_col = _detect_time_column(df)
-        self.has_time_series = False
+        
+        # 1. Resolve columns ONCE.
+        self.cols = {
+            # Traffic
+            "sessions": resolve_column(df, "sessions") or resolve_column(df, "visits"),
+            "users": resolve_column(df, "users") or resolve_column(df, "visitors"),
+            "pageviews": resolve_column(df, "pageviews") or resolve_column(df, "screen_views"),
+            "bounce": resolve_column(df, "bounce_rate"),
+            
+            # Funnel
+            "add_to_cart": resolve_column(df, "add_to_cart") or resolve_column(df, "atc"),
+            "checkout": resolve_column(df, "checkout") or resolve_column(df, "begin_checkout"),
+            "orders": resolve_column(df, "orders") or resolve_column(df, "transactions"),
+            "revenue": resolve_column(df, "revenue") or resolve_column(df, "sales"),
+            "returns": resolve_column(df, "returns") or resolve_column(df, "refunds"),
+            
+            # Dimensions
+            "source": resolve_column(df, "source") or resolve_column(df, "channel"),
+            "device": resolve_column(df, "device") or resolve_column(df, "platform"),
+            "product": resolve_column(df, "product_name") or resolve_column(df, "sku"),
+            "category": resolve_column(df, "category")
+        }
 
+        # 2. Date Cleaning
         if self.time_col:
-            df = _prepare_time_series(df, self.time_col)
-            self.has_time_series = df[self.time_col].nunique() >= 2
+            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
+            df = df.sort_values(self.time_col)
 
         return df
 
@@ -95,416 +80,254 @@ class EcommerceDomain(BaseDomain):
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         kpis: Dict[str, Any] = {}
+        c = self.cols
 
-        # Traffic Metrics
-        sessions = resolve_column(df, "sessions") or resolve_column(df, "visits")
-        users = resolve_column(df, "users") or resolve_column(df, "visitors")
-        
-        # Funnel Metrics
-        orders = resolve_column(df, "orders") or resolve_column(df, "transactions")
-        revenue = resolve_column(df, "revenue") or resolve_column(df, "sales")
-        add_to_cart = resolve_column(df, "add_to_cart") or resolve_column(df, "atc")
-        checkout = resolve_column(df, "checkout") or resolve_column(df, "begin_checkout")
-        
-        # 1. Traffic Volume
-        if sessions and pd.api.types.is_numeric_dtype(df[sessions]):
-            kpis["total_sessions"] = df[sessions].sum()
-        elif users:
-            if pd.api.types.is_numeric_dtype(df[users]):
-                kpis["total_users"] = df[users].sum()
-            else:
-                kpis["total_users"] = df[users].nunique()
+        # 1. Traffic
+        if c["sessions"]: kpis["total_sessions"] = df[c["sessions"]].sum()
+        if c["users"]: kpis["total_users"] = df[c["users"]].sum()
+        if c["bounce"]: kpis["avg_bounce_rate"] = df[c["bounce"]].mean()
 
-        # 2. Conversion Rate (CR)
-        if orders and sessions and pd.api.types.is_numeric_dtype(df[orders]) and pd.api.types.is_numeric_dtype(df[sessions]):
-            total_orders = df[orders].sum()
-            total_sessions = df[sessions].sum()
-            kpis["conversion_rate"] = _safe_div(total_orders, total_sessions)
-            kpis["target_conversion_rate"] = 0.025 # 2.5% Benchmark
+        # 2. Conversion & Funnel
+        if c["orders"] and c["sessions"]:
+            kpis["conversion_rate"] = _safe_div(df[c["orders"]].sum(), df[c["sessions"]].sum())
 
-        # 3. Cart Abandonment Rate (Guarded)
-        if orders and add_to_cart and pd.api.types.is_numeric_dtype(df[orders]) and pd.api.types.is_numeric_dtype(df[add_to_cart]):
-            total_orders = df[orders].sum()
-            total_atc = df[add_to_cart].sum()
-            
-            if total_atc > 0:
-                raw_rate = 1.0 - (total_orders / total_atc)
-                kpis["cart_abandonment_rate"] = max(0.0, min(1.0, raw_rate))
-                kpis["target_abandonment_rate"] = 0.70 # < 70% is good target
+        if c["add_to_cart"] and c["orders"]:
+            atc = df[c["add_to_cart"]].sum()
+            orders = df[c["orders"]].sum()
+            if atc > 0:
+                kpis["cart_abandonment_rate"] = max(0.0, 1.0 - (orders / atc))
 
-        # 4. Checkout Drop-off
-        kpis["target_checkout_dropoff_rate"] = 0.40 # < 40% is good target
+        if c["checkout"] and c["orders"]:
+            checkouts = df[c["checkout"]].sum()
+            orders = df[c["orders"]].sum()
+            if checkouts > 0:
+                kpis["checkout_dropoff_rate"] = max(0.0, 1.0 - (orders / checkouts))
 
-        if checkout and orders and pd.api.types.is_numeric_dtype(df[checkout]) and pd.api.types.is_numeric_dtype(df[orders]):
-            total_checkouts = df[checkout].sum()
-            total_orders = df[orders].sum()
-            if total_checkouts > 0:
-                raw_drop = 1.0 - (total_orders / total_checkouts)
-                kpis["checkout_dropoff_rate"] = max(0.0, min(1.0, raw_drop))
+        # 3. Economics
+        if c["revenue"] and c["orders"]:
+            kpis["aov"] = _safe_div(df[c["revenue"]].sum(), df[c["orders"]].sum())
 
-        # 5. Average Order Value (AOV)
-        if revenue and orders and pd.api.types.is_numeric_dtype(df[revenue]) and pd.api.types.is_numeric_dtype(df[orders]):
-            kpis["aov"] = _safe_div(df[revenue].sum(), df[orders].sum())
+        if c["returns"] and c["orders"]:
+            kpis["return_rate"] = _safe_div(df[c["returns"]].sum(), df[c["orders"]].sum())
 
         return kpis
 
-    # ---------------- VISUALS (MAX 4) ----------------
+    # ---------------- VISUALS (8 CANDIDATES) ----------------
 
-    def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> List[Dict[str, Any]]:
-
-        visuals: List[Dict[str, Any]] = []
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Calculate KPIs once
+        c = self.cols
         kpis = self.calculate_kpis(df)
 
-        sessions = resolve_column(df, "sessions") or resolve_column(df, "visits")
-        orders = resolve_column(df, "orders") or resolve_column(df, "transactions")
-        add_to_cart = resolve_column(df, "add_to_cart") or resolve_column(df, "atc")
-        source = resolve_column(df, "source") or resolve_column(df, "channel") or resolve_column(df, "medium")
-        device = resolve_column(df, "device") or resolve_column(df, "platform")
+        def save(fig, name, caption, imp, cat):
+            p = output_dir / name
+            fig.savefig(p, bbox_inches="tight")
+            plt.close(fig)
+            visuals.append({
+                "path": str(p),
+                "caption": caption,
+                "importance": imp,
+                "category": cat
+            })
 
         def human_fmt(x, _):
             if abs(x) >= 1_000_000: return f"{x/1_000_000:.1f}M"
             if abs(x) >= 1_000: return f"{x/1_000:.0f}K"
             return str(int(x))
 
-        # -------- Visual 1: Traffic Trend --------
-        if self.has_time_series and sessions and pd.api.types.is_numeric_dtype(df[sessions]):
-            p = output_dir / "traffic_trend.png"
-            plt.figure(figsize=(7, 4))
+        # 1. Traffic Trend (Sessions)
+        if self.time_col and c["sessions"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.set_index(self.time_col).resample('M')[c["sessions"]].sum().plot(ax=ax, color="#17becf")
+            ax.set_title("Traffic Trend (Sessions)")
+            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            save(fig, "traffic_trend.png", "Visitor volume", 0.9, "traffic")
 
-            plot_df = df.copy()
-            if len(df) > 100:
-                plot_df = (
-                    df.set_index(self.time_col)
-                    .resample("ME")
-                    .sum()
-                    .reset_index()
-                )
+        # 2. Conversion Funnel (Critical)
+        if c["sessions"] and c["add_to_cart"] and c["orders"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            funnel = [df[c["sessions"]].sum(), df[c["add_to_cart"]].sum(), df[c["orders"]].sum()]
+            labels = ["Sessions", "Add to Cart", "Purchases"]
+            ax.bar(labels, funnel, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
+            ax.set_title("Conversion Funnel")
+            
+            imp = 0.95 if kpis.get("cart_abandonment_rate", 0) > 0.75 else 0.85
+            save(fig, "funnel.png", "User journey drop-off", imp, "conversion")
 
-            plt.plot(plot_df[self.time_col], plot_df[sessions], linewidth=2, color="#17becf")
-            plt.title("Web Traffic Trend (Sessions)")
-            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "Visitor traffic over time"})
+        # 3. Traffic Source Performance
+        if c["source"] and (c["orders"] or c["sessions"]):
+            metric = c["orders"] if c["orders"] else c["sessions"]
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.groupby(c["source"])[metric].sum().nlargest(7).sort_values().plot(kind="barh", ax=ax, color="#9467bd")
+            ax.set_title(f"Top Sources by {metric.replace('_',' ').title()}")
+            save(fig, "sources.png", "Channel performance", 0.8, "acquisition")
 
-        # -------- Visual 2: Conversion Funnel (Bar) --------
-        if sessions and add_to_cart and orders:
-            # Check numeric types safety
-            cols = [sessions, add_to_cart, orders]
-            if all(pd.api.types.is_numeric_dtype(df[c]) for c in cols):
-                p = output_dir / "conversion_funnel.png"
+        # 4. Device Mix (FIXED: Added axis('equal'))
+        if c["device"] and c["sessions"]:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df.groupby(c["device"])[c["sessions"]].sum().head(5).plot(kind="pie", ax=ax, autopct='%1.1f%%')
+            ax.axis('equal') # Ensures pie is round
+            ax.set_ylabel("")
+            ax.set_title("Traffic by Device")
+            save(fig, "device_mix.png", "User platform", 0.7, "tech")
+
+        # 5. AOV Distribution (FIXED: Safe filtering)
+        if c["revenue"] and c["orders"]:
+            # Filter for actual orders to avoid skew
+            mask = df[c["orders"]] > 0
+            if mask.sum() > 10:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                # Calculate per-order value safely
+                (df.loc[mask, c["revenue"]] / df.loc[mask, c["orders"]]).hist(ax=ax, bins=20, color="green")
+                ax.set_title("Order Value Distribution")
+                save(fig, "aov_dist.png", "Spending habits", 0.75, "economics")
+
+        # 6. Bounce Rate Trend
+        if self.time_col and c["bounce"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.set_index(self.time_col).resample('M')[c["bounce"]].mean().plot(ax=ax, color="red")
+            ax.set_title("Bounce Rate Trend")
+            ax.set_ylim(0, 1)
+            imp = 0.9 if kpis.get("avg_bounce_rate", 0) > 0.6 else 0.65
+            save(fig, "bounce_trend.png", "Traffic quality", imp, "engagement")
+
+        # 7. Return Rate by Category
+        if c["returns"] and c["category"]:
+            fig, ax = plt.subplots(figsize=(7, 4))
+            df.groupby(c["category"])[c["returns"]].sum().nlargest(5).plot(kind="bar", ax=ax, color="maroon")
+            ax.set_title("Returns by Category")
+            save(fig, "returns_cat.png", "Product quality issues", 0.88, "product")
+
+        # 8. Conversion vs AOV (FIXED: Zero guards)
+        if c["source"] and c["revenue"] and c["sessions"]:
+            # Aggregate first
+            agg = df.groupby(c["source"]).agg({c["revenue"]: "sum", c["orders"]: "sum", c["sessions"]: "sum"})
+            
+            # Filter valid orders
+            agg = agg[agg[c["orders"]] > 0]
+            
+            if not agg.empty:
+                agg["cr"] = agg[c["orders"]] / agg[c["sessions"]]
+                agg["aov"] = agg[c["revenue"]] / agg[c["orders"]]
                 
-                funnel_data = {
-                    "Sessions": df[sessions].sum(),
-                    "Add to Cart": df[add_to_cart].sum(),
-                    "Purchases": df[orders].sum()
-                }
-                
-                plt.figure(figsize=(7, 4))
-                plt.bar(funnel_data.keys(), funnel_data.values(), color=["#1f77b4", "#ff7f0e", "#2ca02c"])
-                plt.title("Conversion Funnel")
-                plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                
-                # Add text labels on bars
-                for i, v in enumerate(funnel_data.values()):
-                    plt.text(i, v, human_fmt(v, None), ha='center', va='bottom')
+                fig, ax = plt.subplots(figsize=(6, 4))
+                ax.scatter(agg["cr"], agg["aov"], alpha=0.6)
+                ax.set_xlabel("Conversion Rate")
+                ax.set_ylabel("AOV")
+                ax.set_title("Source Quality: CR vs AOV")
+                save(fig, "cr_vs_aov.png", "Channel quality matrix", 0.82, "marketing")
 
-                plt.tight_layout()
-                plt.savefig(p)
-                plt.close()
-                visuals.append({"path": p, "caption": "User journey drop-off points"})
-
-        # -------- Visual 3: Traffic Source Breakdown --------
-        # Use Sessions for volume, or Orders if Sessions missing
-        metric = sessions or orders 
-        if source and metric and pd.api.types.is_numeric_dtype(df[metric]):
-            p = output_dir / "traffic_source.png"
-            
-            top_sources = df.groupby(source)[metric].sum().sort_values(ascending=False).head(7)
-            
-            plt.figure(figsize=(7, 4))
-            top_sources.plot(kind="barh", color="#9467bd")
-            plt.title(f"Top Traffic Sources by {metric.title()}")
-            plt.gca().xaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "Best performing marketing channels"})
-
-        # -------- Visual 4: Device/Platform Mix --------
-        if device and metric and pd.api.types.is_numeric_dtype(df[metric]):
-            p = output_dir / "device_split.png"
-            
-            # Cap at top 5 to keep pie chart clean
-            dev_counts = df.groupby(device)[metric].sum().sort_values(ascending=False).head(5)
-            
-            plt.figure(figsize=(6, 4))
-            dev_counts.plot(kind="pie", autopct='%1.1f%%')
-            plt.ylabel("")
-            plt.title(f"Device Breakdown ({metric.title()})")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            visuals.append({"path": p, "caption": "User device preference"})
-
+        visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals[:4]
 
-    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
+    # ---------------- INSIGHTS (COMPOSITE + ATOMIC) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
-
-        # === STEP 1: Composite FIRST (Authority Layer) ===
-        composite: List[Dict[str, Any]] = []
-        # Guard: Only run deep analysis if dataset is sufficient
-        if len(df) > 30:
-            composite = self.generate_composite_insights(df, kpis)
-
-        dominant_titles = {
-            i["title"] for i in composite
-            if i["level"] in {"RISK", "WARNING"}
-        }
-
-        # === STEP 2: Suppression Rules ===
-        # If "Bot Traffic" is suspected, suppress generic "Low Conversion" alerts
-        suppress_cr = "Empty Calorie Traffic (Possible Bots)" in dominant_titles
         
-        # If "Payment Gateway Friction" is suspected, suppress generic "Cart Abandonment"
-        suppress_abandonment = "Payment Gateway Friction" in dominant_titles
-
-        cr = kpis.get("conversion_rate")
-        abandonment = kpis.get("cart_abandonment_rate")
-        aov = kpis.get("aov")
-
-        # === STEP 3: Guarded Atomic Insights ===
-        
-        # Conversion Rate
-        if cr is not None and not suppress_cr:
-            if cr < 0.01:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Low Conversion Rate",
-                    "so_what": f"CR is {cr:.2%}, below the 1% critical threshold. Traffic is not buying."
-                })
-            elif cr < 0.025:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Suboptimal Conversion",
-                    "so_what": f"CR is {cr:.2%}, slightly below the 2.5% e-commerce benchmark."
-                })
-
-        # Cart Abandonment
-        if abandonment is not None and not suppress_abandonment:
-            if abandonment > 0.80:
-                insights.append({
-                    "level": "RISK",
-                    "title": "High Cart Abandonment",
-                    "so_what": f"{abandonment:.1%} of carts are abandoned. Checkout friction likely exists."
-                })
-            elif abandonment > 0.70:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Cart Abandonment Alert",
-                    "so_what": f"Abandonment rate is {abandonment:.1%}, monitor checkout flow."
-                })
-
-        # AOV
-        if aov is not None:
-             insights.append({
-                "level": "INFO",
-                "title": "Order Value Healthy",
-                "so_what": f"Average Order Value (AOV) is holding at {aov:,.0f}."
-            })
-
-        # === STEP 4: Composite LAST (Authority Wins) ===
+        # 1. Composite Insights (The Smart Layer)
+        composite = self.generate_composite_insights(df, kpis)
         insights += composite
+        
+        titles = [i["title"] for i in composite]
+        
+        # 2. Atomic Fallbacks
+        cr = kpis.get("conversion_rate")
+        bounce = kpis.get("avg_bounce_rate")
+        abandonment = kpis.get("cart_abandonment_rate")
+        
+        # CR Alert
+        if cr is not None and cr < 0.015:
+            if not any("Empty Calorie" in t for t in titles):
+                insights.append({
+                    "level": "RISK", "title": "Low Conversion",
+                    "so_what": f"Conversion Rate is {cr:.2%}, below 1.5% benchmark."
+                })
+
+        # Abandonment Alert
+        if abandonment is not None and abandonment > 0.75:
+            if not any("Payment Gateway" in t for t in titles):
+                insights.append({
+                    "level": "WARNING", "title": "High Cart Abandonment",
+                    "so_what": f"{abandonment:.1%} of carts are abandoned."
+                })
+
+        # Bounce Alert
+        if bounce is not None and bounce > 0.70:
+            insights.append({
+                "level": "WARNING", "title": "High Bounce Rate",
+                "so_what": f"Bounce rate is {bounce:.1%}. Landing pages may be irrelevant."
+            })
 
         if not insights:
-            insights.append({
-                "level": "INFO",
-                "title": "Store Performance Stable",
-                "so_what": "Traffic and conversion metrics are within expected ranges."
-            })
+            insights.append({"level": "INFO", "title": "Performance Stable", "so_what": "Metrics are healthy."})
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (E-COM v3.0) ----------------
+    # ---------------- COMPOSITE INSIGHTS ----------------
 
-    def generate_composite_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        E-Commerce v3 Composite Intelligence Layer.
-        Detects Bot Traffic, Checkout Leaks, and Traffic Quality issues.
-        """
-        insights: List[Dict[str, Any]] = []
-
+    def generate_composite_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        insights = []
+        
         sessions = kpis.get("total_sessions", 0)
         cr = kpis.get("conversion_rate")
-        checkout_drop = kpis.get("checkout_dropoff_rate")
         abandonment = kpis.get("cart_abandonment_rate")
+        checkout_drop = kpis.get("checkout_dropoff_rate")
 
-        # 1. High Traffic, Zero/Low Conversion (Bot Traffic or Bad Landing Page)
-        if sessions > 1000 and cr is not None:
-            if cr < 0.005: # < 0.5%
-                insights.append({
-                    "level": "RISK",
-                    "title": "Empty Calorie Traffic (Possible Bots)",
-                    "so_what": (
-                        f"High traffic ({sessions:,.0f}) but near-zero conversion ({cr:.2%}). "
-                        f"Investigate bot traffic or landing page relevance immediately."
-                    )
-                })
+        # 1. Empty Calorie Traffic (Bot/Fraud Logic Tweak)
+        if sessions > 500 and cr is not None and cr < 0.005:
+            insights.append({
+                "level": "CRITICAL", "title": "Empty Calorie Traffic (Possible Bots)",
+                "so_what": f"High traffic ({sessions:,.0f}) but near-zero conversion ({cr:.2%})."
+            })
 
-        # 2. Checkout Funnel Leak (High ATC, but High Dropoff at Checkout)
+        # 2. Payment Friction (Low Abandonment + High Checkout Drop)
         if abandonment is not None and checkout_drop is not None:
             if abandonment < 0.60 and checkout_drop > 0.70:
                 insights.append({
-                    "level": "RISK",
-                    "title": "Payment Gateway Friction",
-                    "so_what": (
-                        f"Users are adding to cart (low abandonment), but 70%+ drop off "
-                        f"during checkout. Payment gateway or shipping cost surprise likely."
-                    )
-                })
-
-        # 3. High Intent, Low Closure
-        if abandonment is not None and cr is not None:
-            if abandonment > 0.85 and cr < 0.01:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Window Shopper Behavior",
-                    "so_what": (
-                        f"Extreme cart abandonment ({abandonment:.1%}) suggests pricing "
-                        f"or shipping costs are deterring high-intent visitors."
-                    )
+                    "level": "CRITICAL", "title": "Payment Gateway Friction",
+                    "so_what": "Users add to cart, but 70%+ drop off at payment step."
                 })
 
         return insights
 
-    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
+    # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         recs = []
-        
-        # 1. Check Composite Context
-        composite = []
-        if len(df) > 30:
-            composite = self.generate_composite_insights(df, kpis)
-        
-        titles = [i["title"] for i in composite]
+        titles = [i["title"] for i in self.generate_insights(df, kpis)]
 
-        # AUTHORITY RULES: Mandatory Actions
         if "Payment Gateway Friction" in titles:
-            return [{
-                "action": "Audit payment gateway errors, latency, and hidden charges",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            }]
+            recs.append({"action": "Audit payment gateway for technical errors immediately.", "priority": "HIGH"})
 
-        if "Empty Calorie Traffic (Possible Bots)" in titles:
-            return [{
-                "action": "Block bot traffic and audit traffic sources for fraud",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            }]
+        if "Empty Calorie Traffic" in titles:
+            recs.append({"action": "Review ad targeting and block bot IPs.", "priority": "HIGH"})
 
-        # 2. Fallback to Atomic Recs
-        cr = kpis.get("conversion_rate")
-        abandonment = kpis.get("cart_abandonment_rate")
-        checkout_drop = kpis.get("checkout_dropoff_rate")
+        if kpis.get("cart_abandonment_rate", 0) > 0.75:
+            recs.append({"action": "Enable abandoned cart recovery emails.", "priority": "MEDIUM"})
 
-        if abandonment is not None and abandonment > 0.75:
-            recs.append({
-                "action": "Implement abandoned cart recovery emails",
-                "priority": "HIGH",
-                "timeline": "Immediate"
-            })
-        
-        if checkout_drop is not None and checkout_drop > 0.60:
-            recs.append({
-                "action": "Audit checkout flow for technical errors or hidden costs",
-                "priority": "HIGH",
-                "timeline": "This Week"
-            })
-        
-        if cr is not None and cr < 0.02:
-            recs.append({
-                "action": "Audit landing pages for relevance and speed",
-                "priority": "MEDIUM",
-                "timeline": "Next Sprint"
-            })
-
-        if not recs:
-            recs.append({
-                "action": "Continue optimizing traffic sources",
-                "priority": "LOW",
-                "timeline": "Ongoing"
-            })
-
-        return recs
+        return recs or [{"action": "Optimize landing pages.", "priority": "LOW"}]
 
 
 # =====================================================
-# DOMAIN DETECTOR (COLLISION PROOF)
+# DOMAIN DETECTOR
 # =====================================================
 
 class EcommerceDomainDetector(BaseDomainDetector):
     domain_name = "ecommerce"
-
-    ECOM_TOKENS: Set[str] = {
-        # Web Metrics
-        "session", "visit", "pageview", "bounce_rate",
-        "traffic_source", "medium", "campaign", "referrer",
-        
-        # Funnel
-        "add_to_cart", "checkout", "cart_abandonment",
-        "conversion_rate", "transaction", "aov",
-        
-        # Tech
-        "device", "browser", "os", "platform"
-    }
+    TOKENS = {"session", "pageview", "bounce", "cart", "checkout", "conversion", "traffic", "referrer"}
 
     def detect(self, df) -> DomainDetectionResult:
-        cols = {str(c).lower() for c in df.columns}
+        hits = [c for c in df.columns if any(t in c.lower() for t in self.TOKENS)]
+        confidence = min(len(hits)/3, 1.0)
         
-        hits = [c for c in cols if any(t in c for t in self.ECOM_TOKENS)]
-        
-        # Base confidence
-        confidence = min(len(hits) / 3, 1.0)
-
-        # 🔑 E-COM DOMINANCE RULE
-        # Distinguish from Retail: Retail focuses on "Store/Product", E-com focuses on "Session/Web"
-        # Distinguish from Marketing: Marketing focuses on "Ad Spend/Impressions", E-com focuses on "On-Site Behavior"
-        ecom_exclusive = any(
-            t in c 
-            for c in cols 
-            for t in {"session", "pageview", "bounce", "traffic", "browser", "device", "cart"}
-        )
-        
-        if ecom_exclusive:
-            confidence = max(confidence, 0.85)
-
-        return DomainDetectionResult(
-            domain="ecommerce",
-            confidence=confidence,
-            signals={"matched_columns": hits},
-        )
-
-
-# =====================================================
-# REGISTRATION
-# =====================================================
+        # Boost if Session + Cart exist (Classic E-com signature)
+        cols = str(df.columns).lower()
+        if "session" in cols and "cart" in cols:
+            confidence = max(confidence, 0.95)
+            
+        return DomainDetectionResult("ecommerce", confidence, {"matched_columns": hits})
 
 def register(registry):
-    registry.register(
-        name="ecommerce",
-        domain_cls=EcommerceDomain,
-        detector_cls=EcommerceDomainDetector,
-    )
+    registry.register("ecommerce", EcommerceDomain, EcommerceDomainDetector)
