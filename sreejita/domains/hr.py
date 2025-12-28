@@ -150,144 +150,165 @@ class HRDomain(BaseDomain):
 
     # ---------------- VISUALS (MAX 4) ----------------
 
-    def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> List[Dict[str, Any]]:
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+    visuals: List[Dict[str, Any]] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        visuals: List[Dict[str, Any]] = []
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Calculate KPIs once at start
-        kpis = self.calculate_kpis(df)
+    # Resolve columns safely
+    emp_id = resolve_column(df, "employee_id")
+    dept = resolve_column(df, "department")
+    hire_date = resolve_column(df, "hire_date")
+    exit_date = resolve_column(df, "exit_date")
+    salary = resolve_column(df, "salary")
+    gender = resolve_column(df, "gender")
+    performance = resolve_column(df, "performance")
+    revenue = resolve_column(df, "revenue")
 
-        employee = (
-            resolve_column(df, "employee")
-            or resolve_column(df, "employee_id")
-            or resolve_column(df, "staff")
-        )
-        department = resolve_column(df, "department")
-        salary = resolve_column(df, "salary") or resolve_column(df, "compensation")
-        performance = resolve_column(df, "performance") or resolve_column(df, "rating")
-        absence = resolve_column(df, "absence") or resolve_column(df, "leave")
-        status = resolve_column(df, "status")
+    today = pd.Timestamp.today()
 
-        def human_fmt(x, _):
-            if abs(x) >= 1_000_000:
-                return f"{x/1_000_000:.1f}M"
-            if abs(x) >= 1_000:
-                return f"{x/1_000:.0f}K"
-            return str(int(x))
+    # ---------------- 1. HEADCOUNT BY DEPARTMENT ----------------
+    if dept:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        df[dept].value_counts().plot(kind="bar", ax=ax, color="#1f77b4")
+        ax.set_title("Headcount by Department")
+        ax.set_ylabel("Employees")
 
-        # -------- Visual 1: Headcount by Department --------
-        if employee and department:
-            p = output_dir / "headcount_by_department.png"
+        p = output_dir / "headcount_by_department.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
 
-            counts = df.groupby(department)[employee].nunique().sort_values(ascending=False).head(10)
+        visuals.append({
+            "path": str(p),
+            "caption": "Distribution of employees across departments",
+            "category": "workforce",
+            "importance": 0.85,
+        })
 
-            plt.figure(figsize=(7, 4))
-            counts.plot(kind="bar", color="#1f77b4")
-            plt.title("Headcount by Department")
-            plt.xticks(rotation=45, ha="right")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+    # ---------------- 2. TURNOVER RATE ----------------
+    if hire_date and exit_date:
+        df_dates = df.copy()
+        df_dates[hire_date] = pd.to_datetime(df_dates[hire_date], errors="coerce")
+        df_dates[exit_date] = pd.to_datetime(df_dates[exit_date], errors="coerce")
 
-            visuals.append({
-                "path": p,
-                "caption": "Employee distribution across departments"
-            })
+        leavers = df_dates[exit_date].notna().sum()
+        headcount = len(df_dates)
+        turnover = leavers / headcount if headcount else 0
 
-        # -------- Visual 2: Salary Distribution --------
-        if salary and pd.api.types.is_numeric_dtype(df[salary]):
-            p = output_dir / "salary_distribution.png"
+        fig, ax = plt.subplots(figsize=(5, 3))
+        ax.bar(["Turnover"], [turnover * 100], color="#d62728")
+        ax.set_title("Employee Turnover Rate")
+        ax.set_ylabel("%")
 
-            plt.figure(figsize=(7, 4))
-            df[salary].dropna().plot(kind="hist", bins=15, color="#ff7f0e", edgecolor='white')
-            plt.title("Salary Distribution")
-            plt.gca().xaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+        p = output_dir / "turnover_rate.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
 
-            visuals.append({
-                "path": p,
-                "caption": "Distribution of employee compensation"
-            })
+        visuals.append({
+            "path": str(p),
+            "caption": f"Turnover rate: {turnover:.1%}",
+            "category": "retention",
+            "importance": 0.95 if turnover > 0.15 else 0.70,
+        })
 
-        # -------- Visual 3: Performance Distribution OR Status Pie --------
-        if performance and pd.api.types.is_numeric_dtype(df[performance]):
-            p = output_dir / "performance_distribution.png"
+    # ---------------- 3. AVERAGE TENURE DISTRIBUTION ----------------
+    if hire_date:
+        df_tenure = df.copy()
+        df_tenure[hire_date] = pd.to_datetime(df_tenure[hire_date], errors="coerce")
+        df_tenure["tenure_years"] = (today - df_tenure[hire_date]).dt.days / 365
 
-            plt.figure(figsize=(7, 4))
-            df[performance].dropna().plot(kind="hist", bins=10, color="#2ca02c", edgecolor='white')
-            plt.title("Performance Score Distribution")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+        fig, ax = plt.subplots(figsize=(6, 4))
+        df_tenure["tenure_years"].dropna().plot(kind="hist", bins=10, ax=ax, color="#2ca02c")
+        ax.set_title("Employee Tenure Distribution")
+        ax.set_xlabel("Years")
 
-            visuals.append({
-                "path": p,
-                "caption": "Employee performance score spread"
-            })
-        elif status:
-            p = output_dir / "status_breakdown.png"
-            counts = df[status].value_counts().head(5)
-            
-            plt.figure(figsize=(6, 4))
-            counts.plot(kind="pie", autopct='%1.1f%%')
-            plt.ylabel("")
-            plt.title("Employment Status Breakdown")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            
-            visuals.append({
-                "path": p,
-                "caption": "Ratio of active vs terminated employees"
-            })
+        p = output_dir / "tenure_distribution.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
 
-        # -------- Visual 4: Absence Analysis OR Perf vs Salary --------
-        if (
-            performance and salary 
-            and pd.api.types.is_numeric_dtype(df[performance]) 
-            and pd.api.types.is_numeric_dtype(df[salary])
-        ):
-            p = output_dir / "perf_vs_salary.png"
-            
-            plt.figure(figsize=(7, 4))
-            plt.scatter(df[performance], df[salary], alpha=0.5, color="#9467bd")
-            plt.title("Performance vs. Salary")
-            plt.xlabel("Performance")
-            plt.ylabel("Salary")
-            plt.gca().yaxis.set_major_formatter(FuncFormatter(human_fmt))
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
-            
-            visuals.append({
-                "path": p,
-                "caption": "Relationship between pay and performance"
-            })
-            
-        elif absence and department and pd.api.types.is_numeric_dtype(df[absence]):
-            p = output_dir / "absence_by_department.png"
+        visuals.append({
+            "path": str(p),
+            "caption": "Distribution of employee tenure",
+            "category": "retention",
+            "importance": 0.75,
+        })
 
-            abs_by_dept = df.groupby(department)[absence].mean().sort_values(ascending=False).head(10)
+    # ---------------- 4. SALARY DISTRIBUTION ----------------
+    if salary:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        df[salary].dropna().plot(kind="hist", bins=15, ax=ax, color="#9467bd")
+        ax.set_title("Salary Distribution")
+        ax.set_xlabel("Salary")
 
-            plt.figure(figsize=(7, 4))
-            abs_by_dept.plot(kind="bar", color="#d62728")
-            plt.title("Avg Absence Days by Department")
-            plt.xticks(rotation=45, ha="right")
-            plt.tight_layout()
-            plt.savefig(p)
-            plt.close()
+        p = output_dir / "salary_distribution.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
 
-            visuals.append({
-                "path": p,
-                "caption": "Departments with higher absenteeism"
-            })
+        visuals.append({
+            "path": str(p),
+            "caption": "Employee compensation distribution",
+            "category": "compensation",
+            "importance": 0.70,
+        })
 
-        return visuals[:4]
+    # ---------------- 5. GENDER PAY GAP ----------------
+    if salary and gender:
+        pay_gap = df.groupby(gender)[salary].mean()
+
+        fig, ax = plt.subplots(figsize=(5, 3))
+        pay_gap.plot(kind="bar", ax=ax, color=["#1f77b4", "#ff7f0e"])
+        ax.set_title("Average Pay by Gender")
+        ax.set_ylabel("Average Salary")
+
+        p = output_dir / "gender_pay_gap.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
+
+        visuals.append({
+            "path": str(p),
+            "caption": "Gender pay comparison",
+            "category": "diversity",
+            "importance": 0.90,
+        })
+
+    # ---------------- 6. PERFORMANCE DISTRIBUTION ----------------
+    if performance:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        df[performance].value_counts().plot(kind="bar", ax=ax, color="#8c564b")
+        ax.set_title("Performance Rating Distribution")
+
+        p = output_dir / "performance_distribution.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
+
+        visuals.append({
+            "path": str(p),
+            "caption": "Employee performance spread",
+            "category": "performance",
+            "importance": 0.80,
+        })
+
+    # ---------------- 7. REVENUE PER EMPLOYEE ----------------
+    if revenue and emp_id:
+        rev_per_emp = df[revenue].sum() / df[emp_id].nunique()
+
+        fig, ax = plt.subplots(figsize=(5, 3))
+        ax.bar(["Revenue / Employee"], [rev_per_emp], color="#17becf")
+        ax.set_title("Revenue per Employee")
+
+        p = output_dir / "revenue_per_employee.png"
+        fig.savefig(p, bbox_inches="tight")
+        plt.close(fig)
+
+        visuals.append({
+            "path": str(p),
+            "caption": "Workforce productivity indicator",
+            "category": "productivity",
+            "importance": 0.88,
+        })
+
+    # ---------------- FINAL RANKING ----------------
+    visuals.sort(key=lambda v: v.get("importance", 0), reverse=True)
+    return visuals
 
     # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
 
