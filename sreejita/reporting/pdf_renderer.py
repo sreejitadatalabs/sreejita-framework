@@ -1,7 +1,6 @@
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
-import os
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -20,7 +19,7 @@ from reportlab.lib.units import inch
 
 
 # =====================================================
-# KPI FORMATTERS
+# KPI FORMATTERS (EXECUTIVE SAFE)
 # =====================================================
 
 def format_number(x):
@@ -51,11 +50,14 @@ def format_percent(x):
 
 class ExecutivePDFRenderer:
     """
+    FINAL, STABLE, CLIENT-READY PDF RENDERER
+
     ✔ Streamlit-safe
     ✔ GitHub-safe
     ✔ No matplotlib
-    ✔ No browser
-    ✔ Uses domain-generated visuals
+    ✔ No temp files
+    ✔ Uses domain-generated visuals ONLY
+    ✔ Deterministic output
     ✔ Guaranteed PDF
     """
 
@@ -67,6 +69,9 @@ class ExecutivePDFRenderer:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # -------------------------------------------------
+        # DOCUMENT
+        # -------------------------------------------------
         doc = SimpleDocTemplate(
             str(output_path),
             pagesize=A4,
@@ -79,17 +84,29 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # ---------- STYLES ----------
+        # -------------------------------------------------
+        # UNIQUE STYLES (NO COLLISIONS)
+        # -------------------------------------------------
         styles.add(ParagraphStyle(
-            name="ExecTitle", fontSize=22, alignment=TA_CENTER,
-            spaceAfter=24, textColor=self.PRIMARY
+            name="ExecTitle",
+            fontSize=22,
+            alignment=TA_CENTER,
+            spaceAfter=24,
+            textColor=self.PRIMARY,
         ))
+
         styles.add(ParagraphStyle(
-            name="ExecSection", fontSize=16,
-            spaceBefore=20, spaceAfter=12, textColor=self.PRIMARY
+            name="ExecSection",
+            fontSize=16,
+            spaceBefore=20,
+            spaceAfter=12,
+            textColor=self.PRIMARY,
         ))
+
         styles.add(ParagraphStyle(
-            name="ExecBody", fontSize=11, leading=14
+            name="ExecBody",
+            fontSize=11,
+            leading=14,
         ))
 
         # =====================================================
@@ -99,11 +116,12 @@ class ExecutivePDFRenderer:
 
         meta = payload.get("meta", {})
         story.append(Paragraph(
-            f"<b>Domain:</b> {meta.get('domain','Unknown')}", styles["ExecBody"]
+            f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
+            styles["ExecBody"],
         ))
         story.append(Paragraph(
             f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}",
-            styles["ExecBody"]
+            styles["ExecBody"],
         ))
 
         story.append(Spacer(1, 16))
@@ -117,16 +135,18 @@ class ExecutivePDFRenderer:
 
         table_data = [["Metric", "Value"]]
         for k, v in payload.get("kpis", {}).items():
-            val = format_percent(v) if any(
-                x in k.lower() for x in ["rate", "ratio", "margin", "conversion"]
-            ) else format_number(v)
-            table_data.append([k.replace("_"," ").title(), val])
+            value = (
+                format_percent(v)
+                if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"])
+                else format_number(v)
+            )
+            table_data.append([k.replace("_", " ").title(), value])
 
-        table = Table(table_data, colWidths=[3.5*inch, 2*inch])
+        table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
         table.setStyle(TableStyle([
-            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
-            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+            ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ]))
         story.append(table)
 
@@ -138,34 +158,65 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
-            for vis in visuals[:4]:
-                img_path = Path(vis.get("path", ""))
-                if img_path.exists():
-                    story.append(Image(str(img_path), width=5.5*inch, height=3.2*inch))
-                    story.append(Paragraph(vis.get("caption",""), styles["ExecBody"]))
-                    story.append(Spacer(1, 12))
+            for idx, vis in enumerate(visuals[:4], start=1):
+                path = Path(vis.get("path", ""))
+                if not path.exists():
+                    continue
+
+                story.append(Image(
+                    str(path),
+                    width=5.5 * inch,
+                    height=3.2 * inch,
+                    kind="proportional",
+                ))
+                story.append(
+                    Paragraph(
+                        vis.get("caption", f"Figure {idx}"),
+                        styles["ExecBody"],
+                    )
+                )
+                story.append(Spacer(1, 12))
 
         # =====================================================
         # PAGE 4 — INSIGHTS, RECOMMENDATIONS, RISKS
         # =====================================================
         story.append(PageBreak())
+
+        # ---- INSIGHTS ----
         story.append(Paragraph("Key Insights", styles["ExecSection"]))
         for ins in payload.get("insights", []):
-            story.append(Paragraph(
-                f"<b>{ins.get('level','INFO')}:</b> "
-                f"{ins.get('title','')} — {ins.get('so_what','')}",
-                styles["ExecBody"]
-            ))
+            story.append(
+                Paragraph(
+                    f"<b>{ins.get('level', 'INFO')}:</b> "
+                    f"{ins.get('title', '')} — {ins.get('so_what', '')}",
+                    styles["ExecBody"],
+                )
+            )
 
+        # ---- RECOMMENDATIONS ----
         story.append(Spacer(1, 12))
         story.append(Paragraph("Recommendations", styles["ExecSection"]))
         for rec in payload.get("recommendations", []):
-            story.append(Paragraph(
-                f"<b>{rec.get('priority','HIGH')}:</b> "
-                f"{rec.get('action','')} ({rec.get('timeline','Immediate')})",
-                styles["ExecBody"]
-            ))
+            story.append(
+                Paragraph(
+                    f"<b>{rec.get('priority', 'HIGH')}:</b> "
+                    f"{rec.get('action', '')} "
+                    f"({rec.get('timeline', 'Immediate')})",
+                    styles["ExecBody"],
+                )
+            )
 
+        # ---- RISKS ----
+        risks = payload.get("risks", [])
+        if risks:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph("Key Risks", styles["ExecSection"]))
+            for r in risks:
+                story.append(Paragraph(f"• {r}", styles["ExecBody"]))
+
+        # =====================================================
+        # BUILD PDF (GUARANTEED)
+        # =====================================================
         doc.build(story)
 
         if not output_path.exists():
