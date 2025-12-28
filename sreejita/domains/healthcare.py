@@ -89,9 +89,12 @@ class HealthcareDomain(BaseDomain):
             df["derived_los"] = _derive_length_of_stay(df, self.cols["admit_date"], self.cols["discharge_date"])
             self.cols["los"] = "derived_los"
 
-        # 3. Clean Binary Columns (Readmission)
+        # 3. Clean Binary Columns (Readmission) [FIX 5: Expanded Map]
         if self.cols["readmitted"]:
-            val_map = {"yes": 1, "no": 0, "true": 1, "false": 0}
+            val_map = {
+                "yes": 1, "no": 0, "true": 1, "false": 0,
+                "1": 1, "0": 0, "y": 1, "n": 0
+            }
             if df[self.cols["readmitted"]].dtype == object:
                 df[self.cols["readmitted"]] = df[self.cols["readmitted"]].astype(str).str.lower().map(val_map).fillna(0)
 
@@ -103,7 +106,7 @@ class HealthcareDomain(BaseDomain):
         kpis: Dict[str, Any] = {}
         c = self.cols
 
-        # 1. Volume (FIX: Handle Aggregated Data)
+        # 1. Volume (Handle Aggregated Data)
         if c["volume"]:
             kpis["total_patients"] = df[c["volume"]].sum()
             kpis["is_aggregated"] = True
@@ -173,10 +176,11 @@ class HealthcareDomain(BaseDomain):
             if x >= 1e3: return f"{x/1e3:.0f}K"
             return str(int(x))
 
-        # 1. Length of Stay Distribution
+        # 1. Length of Stay Distribution [FIX 4: Adaptive Bins]
         if c["los"]:
             fig, ax = plt.subplots(figsize=(6, 4))
-            df[c["los"]].dropna().hist(ax=ax, bins=15, color="teal")
+            dynamic_bins = min(15, max(5, int(len(df) ** 0.5)))
+            df[c["los"]].dropna().hist(ax=ax, bins=dynamic_bins, color="teal")
             ax.set_title("Length of Stay (Days)")
             save(fig, "los_dist.png", "Stay duration spread", 
                  0.9 if kpis.get("avg_los", 0) > kpis.get("benchmark_los", 7) else 0.75, "operational")
@@ -242,11 +246,11 @@ class HealthcareDomain(BaseDomain):
             plot_df = df.sample(1000) if len(df) > 1000 else df
             ax.scatter(plot_df[c["los"]], plot_df[c["cost"]], alpha=0.5, color="gray")
             ax.set_title("Cost vs Length of Stay")
-            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt)) # FIX: Format axis
+            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
             save(fig, "cost_los.png", "Efficiency correlation", 0.82, "efficiency")
 
-        # 9. Provider Performance
-        if c["doctor"] and c["los"]:
+        # 9. Provider Performance [FIX 3: Safe Aggregation Check]
+        if c["doctor"] and c["los"] and not kpis.get("is_aggregated"):
             fig, ax = plt.subplots(figsize=(7, 4))
             df.groupby(c["doctor"])[c["los"]].mean().nlargest(10).plot(kind="bar", ax=ax, color="brown")
             ax.set_title("Avg LOS by Provider (Longest)")
@@ -293,13 +297,19 @@ class HealthcareDomain(BaseDomain):
                 "so_what": f"High costs (${cost:,.0f}) are not yielding stable outcomes (High Readmissions)."
             })
 
-        # DYNAMIC "PROBLEM CHILD" DETECTION (FIXED)
+        # DYNAMIC "PROBLEM CHILD" DETECTION [FIX 1: Aggregation Safe]
         if c["diagnosis"] and c["cost"] and c["readmitted"]:
+            # Fallback count col
+            count_col = c["pid"] if c["pid"] else c["diagnosis"]
+            
             stats = df.groupby(c["diagnosis"]).agg({
-                c["cost"]: "mean", c["readmitted"]: "mean", c["pid"]: "count"
+                c["cost"]: "mean", 
+                c["readmitted"]: "mean", 
+                count_col: "count"
             })
-            # Filter significant volume (>5%)
-            significant = stats[stats[c["pid"]] > len(df) * 0.05]
+            
+            # Use 'count_col' for volume filtering
+            significant = stats[stats[count_col] > len(df) * 0.05]
             
             if not significant.empty:
                 significant["impact"] = significant[c["cost"]] * significant[c["readmitted"]]
@@ -341,11 +351,16 @@ class HealthcareDomain(BaseDomain):
 
         return insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS [FIX 6: Optimization] ----------------
 
-    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any], insights: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         recs = []
-        titles = [i["title"] for i in self.generate_insights(df, kpis)]
+        
+        # Use cached insights if provided, else regenerate
+        if insights is None:
+            insights = self.generate_insights(df, kpis)
+            
+        titles = [i["title"] for i in insights]
 
         if "Operational Strain" in titles:
             recs.append({"action": "Audit discharge planning workflows immediately.", "priority": "HIGH"})
