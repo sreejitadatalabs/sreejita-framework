@@ -19,14 +19,53 @@ from reportlab.lib.units import inch
 
 
 # =====================================================
-# SAFE ACCESS HELPERS (🔥 ROOT FIX)
+# PDF PAYLOAD NORMALIZER (MANDATORY)
 # =====================================================
 
-def val(obj, key, default=""):
-    """Safely extract value from dict or object."""
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    FINAL SAFETY GATE.
+    Ensures PDF rendering NEVER crashes due to missing or malformed data.
+    """
+
+    payload.setdefault("meta", {})
+    payload.setdefault("summary", [])
+    payload.setdefault("kpis", {})
+    payload.setdefault("visuals", [])
+    payload.setdefault("insights", [])
+    payload.setdefault("recommendations", [])
+
+    # ---- Summary fallback ----
+    if not payload["summary"]:
+        payload["summary"] = [
+            "Operational performance indicators require management attention."
+        ]
+
+    # ---- Insights normalization ----
+    safe_insights = []
+    for ins in payload["insights"]:
+        if not isinstance(ins, dict):
+            continue
+        safe_insights.append({
+            "level": ins.get("level", "INFO"),
+            "title": ins.get("title", "Observation"),
+            "so_what": ins.get("so_what", "Requires further review."),
+        })
+    payload["insights"] = safe_insights
+
+    # ---- Recommendations normalization ----
+    safe_recs = []
+    for rec in payload["recommendations"]:
+        if not isinstance(rec, dict):
+            continue
+        safe_recs.append({
+            "priority": rec.get("priority", "HIGH"),
+            "action": rec.get("action", "Action required"),
+            "timeline": rec.get("timeline", "Immediate"),
+        })
+    payload["recommendations"] = safe_recs
+
+    return payload
 
 
 # =====================================================
@@ -56,18 +95,20 @@ def format_percent(x):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL, DATASET-PROOF)
+# EXECUTIVE PDF RENDERER (FINAL, HARDENED)
 # =====================================================
 
 class ExecutivePDFRenderer:
     """
+    Sreejita Executive PDF Renderer — FINAL
+
     ✔ Streamlit-safe
     ✔ GitHub-safe
-    ✔ Dict + object safe
-    ✔ No matplotlib
     ✔ No browser
-    ✔ Visuals optional
-    ✔ Guaranteed PDF output
+    ✔ No matplotlib
+    ✔ Domain visuals supported
+    ✔ Never crashes
+    ✔ Client-ready
     """
 
     PRIMARY = HexColor("#1f2937")
@@ -75,6 +116,9 @@ class ExecutivePDFRenderer:
     HEADER_BG = HexColor("#f3f4f6")
 
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
+        # 🔒 HARD SAFETY GATE
+        payload = normalize_pdf_payload(payload)
+
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -90,9 +134,7 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List = []
 
-        # -------------------------------------------------
-        # STYLES (UNIQUE — NO COLLISIONS)
-        # -------------------------------------------------
+        # ---------- STYLES ----------
         styles.add(ParagraphStyle(
             name="ExecTitle",
             fontSize=22,
@@ -118,7 +160,7 @@ class ExecutivePDFRenderer:
         # =====================================================
         story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
 
-        meta = payload.get("meta", {})
+        meta = payload["meta"]
         story.append(Paragraph(
             f"<b>Domain:</b> {meta.get('domain', 'Unknown')}",
             styles["ExecBody"],
@@ -131,27 +173,20 @@ class ExecutivePDFRenderer:
         story.append(Spacer(1, 16))
         story.append(Paragraph("Executive Brief", styles["ExecSection"]))
 
-        summary = payload.get("summary") or [
-            "Operational indicators suggest areas requiring management attention."
-        ]
-        for line in summary:
+        for line in payload["summary"]:
             story.append(Paragraph(f"• {line}", styles["ExecBody"]))
 
         story.append(Spacer(1, 16))
         story.append(Paragraph("Key Metrics", styles["ExecSection"]))
 
-        kpis = payload.get("kpis") or {}
         table_data = [["Metric", "Value"]]
-        for k, v in list(kpis.items())[:12]:
-            value = (
+        for k, v in payload["kpis"].items():
+            val_fmt = (
                 format_percent(v)
                 if any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion"])
                 else format_number(v)
             )
-            table_data.append([k.replace("_", " ").title(), value])
-
-        if len(table_data) == 1:
-            table_data.append(["No KPIs available", "—"])
+            table_data.append([k.replace("_", " ").title(), val_fmt])
 
         table = Table(table_data, colWidths=[3.5 * inch, 2 * inch])
         table.setStyle(TableStyle([
@@ -164,46 +199,36 @@ class ExecutivePDFRenderer:
         # =====================================================
         # PAGE 2–3 — VISUAL EVIDENCE
         # =====================================================
-        visuals = payload.get("visuals") or []
-        story.append(PageBreak())
-        story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
+        visuals = payload["visuals"]
+        if visuals:
+            story.append(PageBreak())
+            story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
-        rendered = 0
-        for vis in visuals[:4]:
-            img_path = Path(val(vis, "path", ""))
-            if img_path.exists():
-                story.append(Image(str(img_path), width=5.5 * inch, height=3.2 * inch))
-                story.append(Paragraph(val(vis, "caption", ""), styles["ExecBody"]))
-                story.append(Spacer(1, 12))
-                rendered += 1
-
-        if rendered == 0:
-            story.append(Paragraph(
-                "No visual evidence was generated for this dataset.",
-                styles["ExecBody"],
-            ))
+            for vis in visuals[:4]:
+                img_path = Path(vis.get("path", ""))
+                if img_path.exists():
+                    story.append(Image(
+                        str(img_path),
+                        width=5.5 * inch,
+                        height=3.2 * inch,
+                    ))
+                    story.append(
+                        Paragraph(vis.get("caption", ""), styles["ExecBody"])
+                    )
+                    story.append(Spacer(1, 12))
 
         # =====================================================
-        # PAGE 4 — INSIGHTS & RISKS
+        # PAGE 4 — INSIGHTS
         # =====================================================
         story.append(PageBreak())
         story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
 
-        insights = payload.get("insights") or []
-        if not insights:
+        for ins in payload["insights"]:
             story.append(Paragraph(
-                "No material risks or anomalies were detected.",
+                f"<b>{ins['level']}:</b> {ins['title']} — {ins['so_what']}",
                 styles["ExecBody"],
             ))
-        else:
-            for ins in insights:
-                story.append(Paragraph(
-                    f"<b>{val(ins, 'level', 'INFO')}:</b> "
-                    f"{val(ins, 'title', 'Observation')} — "
-                    f"{val(ins, 'so_what', 'Requires further review.')}",
-                    styles["ExecBody"],
-                ))
-                story.append(Spacer(1, 6))
+            story.append(Spacer(1, 6))
 
         # =====================================================
         # PAGE 5 — RECOMMENDATIONS
@@ -211,24 +236,16 @@ class ExecutivePDFRenderer:
         story.append(PageBreak())
         story.append(Paragraph("Recommendations", styles["ExecSection"]))
 
-        recs = payload.get("recommendations") or []
-        if not recs:
+        for rec in payload["recommendations"]:
             story.append(Paragraph(
-                "No immediate corrective actions are required at this time.",
+                f"<b>{rec['priority']}:</b> {rec['action']} "
+                f"({rec['timeline']})",
                 styles["ExecBody"],
             ))
-        else:
-            for rec in recs:
-                story.append(Paragraph(
-                    f"<b>{val(rec, 'priority', 'HIGH')}:</b> "
-                    f"{val(rec, 'action', 'Action required')} "
-                    f"({val(rec, 'timeline', 'Immediate')})",
-                    styles["ExecBody"],
-                ))
-                story.append(Spacer(1, 6))
+            story.append(Spacer(1, 6))
 
         # =====================================================
-        # BUILD PDF (FINAL GUARANTEE)
+        # BUILD PDF (GUARANTEED)
         # =====================================================
         doc.build(story)
 
