@@ -239,6 +239,7 @@ class HealthcareDomain(BaseDomain):
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights = []
+        c = self.cols
         
         los = kpis.get("avg_los", 0)
         readm = kpis.get("readmission_rate", 0)
