@@ -64,7 +64,7 @@ class HybridReport(BaseReport):
             self._write_header(f, run_id, metadata)
 
             # =================================================
-            # EXECUTIVE NARRATIVE
+            # EXECUTIVE NARRATIVE (PAGE-1 EQUIVALENT)
             # =================================================
             f.write("## 🧭 Executive Narrative\n\n")
             for line in narrative.executive_summary:
@@ -81,7 +81,7 @@ class HybridReport(BaseReport):
                 f.write("\n")
 
             # =================================================
-            # DOMAIN SECTIONS (DETAILED)
+            # DOMAIN SECTIONS
             # =================================================
             for d in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
@@ -265,7 +265,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         config,
     )
 
-    # 3️⃣ Narrative payload (AUTHORITATIVE)
+    # 3️⃣ PDF payload (AUTHORITATIVE)
     primary_domain = engine._sort_domains(domain_results.keys())[0]
     result = domain_results.get(primary_domain, {})
 
