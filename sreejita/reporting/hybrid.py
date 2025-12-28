@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
+from dataclasses import asdict
 
 from sreejita.reporting.base import BaseReport
 from sreejita.narrative.engine import build_narrative
@@ -225,7 +226,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "kpis": result.get("kpis", {}),
         "visuals": result.get("visuals", []),
         "insights": narrative.key_findings,
-        "recommendations": narrative.action_plan,
+        "recommendations": [asdict(r) for r in narrative.action_plan],
         "risks": narrative.risks,
         "financial_impact": narrative.financial_impact,
     }
