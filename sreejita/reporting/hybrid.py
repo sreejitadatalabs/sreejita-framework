@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 
 from sreejita.reporting.base import BaseReport
-from sreejita.narrative.engine import generate_narrative
+from sreejita.narrative.engine import build_narrative
 
 
 # =====================================================
@@ -34,7 +34,6 @@ class HybridReport(BaseReport):
         config: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
-        config = config or {}
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -44,12 +43,10 @@ class HybridReport(BaseReport):
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
 
-            # ✅ DETERMINISTIC NARRATIVE (ALWAYS RUNS)
-            self._write_optional_narrative(
+            # ✅ DETERMINISTIC NARRATIVE
+            self._write_narrative(
                 f,
-                run_id,
                 domain_results,
-                config,
             )
 
             # DOMAIN SECTIONS
@@ -65,56 +62,46 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # DETERMINISTIC NARRATIVE (REPLACED METHOD)
+    # DETERMINISTIC NARRATIVE (SAFE)
     # -------------------------------------------------
-    def _write_optional_narrative(
+    def _write_narrative(
         self,
         f,
-        run_id: str,
         domain_results: Dict[str, Dict[str, Any]],
-        config: Dict[str, Any],
     ):
-        """
-        Deterministic executive narrative (v3.5.1)
-        LLM narrative can be layered later.
-        """
-
         domain = self._sort_domains(domain_results.keys())[0]
         result = domain_results.get(domain, {})
 
-        # -----------------------------
-        # 1️⃣ Deterministic Narrative
-        # -----------------------------
-        narrative = generate_narrative(result, config)
+        narrative = build_narrative(
+            domain=domain,
+            kpis=result.get("kpis", {}),
+            insights=result.get("insights", []),
+            recommendations=result.get("recommendations", []),
+        )
 
         f.write("\n## 🧭 Executive Narrative\n\n")
 
-        f.write("**Executive Summary**  \n")
-        f.write(f"{narrative['executive_summary']}\n\n")
+        for line in narrative.executive_summary:
+            f.write(f"- {line}\n")
+        f.write("\n")
 
-        f.write("**Operational Impact**  \n")
-        f.write(f"{narrative['operational_impact']}\n\n")
+        if narrative.financial_impact:
+            f.write("### 💰 Financial Impact\n")
+            for line in narrative.financial_impact:
+                f.write(f"- {line}\n")
+            f.write("\n")
 
-        f.write("**Financial Impact**  \n")
-        f.write(f"{narrative['financial_impact']}\n\n")
-
-        f.write("**Risk Assessment**  \n")
-        f.write(
-            f"**Risk Level:** {narrative['risk_level']}  \n"
-            f"{narrative['risk_statement']}\n\n"
-        )
-
-        # -----------------------------
-        # 2️⃣ OPTIONAL LLM (LATER)
-        # -----------------------------
-        # Intentionally skipped
+        if narrative.risks:
+            f.write("### ⚠️ Key Risks\n")
+            for r in narrative.risks:
+                f.write(f"- {r}\n")
+            f.write("\n")
 
     # -------------------------------------------------
     # HEADER
     # -------------------------------------------------
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
         f.write("# 📊 Executive Decision Report\n\n")
-
         f.write("## Executive Summary\n\n")
         f.write(f"- **Run ID:** {run_id}\n")
         f.write(f"- **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n")
@@ -125,8 +112,8 @@ class HybridReport(BaseReport):
                 f.write(f"- **{k.replace('_', ' ').title()}**: {v}\n")
 
         f.write(
-            "\n> This report presents decision-grade insights generated using "
-            "**Sreejita Composite Intelligence**, designed for executive action.\n\n"
+            "\n> Decision-grade insights generated using "
+            "**Sreejita Composite Intelligence**.\n\n"
         )
 
     # -------------------------------------------------
@@ -231,18 +218,13 @@ class HybridReport(BaseReport):
 # STABLE ENTRY POINT (v3.5.1)
 # =====================================================
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    v3.5.1 FINAL CONTRACT
-    """
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1️⃣ Domain results
     domain_results = generate_report_payload(input_path, config)
 
-    # 2️⃣ Markdown
     engine = HybridReport()
     md_path = engine.build(
         domain_results,
@@ -251,26 +233,32 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         config,
     )
 
-    # 3️⃣ Narrative for PDF (DETERMINISTIC)
     primary_domain = engine._sort_domains(domain_results.keys())[0]
     result = domain_results.get(primary_domain, {})
 
-    narrative = generate_narrative(result, config)
+    narrative = build_narrative(
+        domain=primary_domain,
+        kpis=result.get("kpis", {}),
+        insights=result.get("insights", []),
+        recommendations=result.get("recommendations", []),
+    )
 
     payload = {
         "meta": {
             "domain": primary_domain.replace("_", " ").title(),
         },
-        "summary": [narrative["executive_summary"]],
-        "narrative": narrative,  # 🔥 FUTURE-PROOF
+        "summary": narrative.executive_summary,
+        "narrative": narrative,
         "kpis": result.get("kpis", {}),
         "visuals": result.get("visuals", []),
-        "insights": result.get("insights", []),
-        "recommendations": result.get("recommendations", []),
+        "insights": narrative.key_findings,
+        "recommendations": narrative.action_plan,
+        "risks": narrative.risks,
+        "financial_impact": narrative.financial_impact,
     }
 
     return {
         "markdown": str(md_path),
         "payload": payload,
         "run_dir": str(run_dir),
-    }
+                }
