@@ -1,7 +1,8 @@
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional
+from typing import Dict, Any, List, Set
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
@@ -12,7 +13,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# CONSTANTS & HELPERS
+# CONSTANTS & HELPERS (DOMAIN-SPECIFIC)
 # =====================================================
 
 NEGATIVE_KEYWORDS = {
@@ -24,14 +25,19 @@ OUTCOME_HINTS = {
     "result", "outcome", "test", "finding", "status", "evaluation"
 }
 
+
 def _safe_div(n, d):
     """Safely divides n by d."""
     if d in (0, None) or pd.isna(d):
         return None
     return n / d
 
+
 def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Standardizes Yes/No columns to 1/0 for easier analysis."""
+    """
+    Normalize Yes/No-like categorical columns to 1/0.
+    Keeps preprocessing deterministic and reversible.
+    """
     df_out = df.copy()
     for col in df_out.columns:
         if df_out[col].dtype == object:
@@ -42,11 +48,14 @@ def _normalize_binary_columns(df: pd.DataFrame) -> pd.DataFrame:
                 )
     return df_out
 
+
 def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
-    """Derives Length of Stay (LOS) from admission/discharge dates if missing."""
+    """
+    Derive Length of Stay (LOS) if not explicitly provided.
+    Negative or invalid date ranges are discarded safely.
+    """
     df_out = df.copy()
 
-    # Trust explicit LOS if provided
     if resolve_column(df_out, "length_of_stay"):
         return df_out
 
@@ -58,7 +67,7 @@ def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
             a = pd.to_datetime(df_out[admit], errors="coerce")
             d = pd.to_datetime(df_out[discharge], errors="coerce")
             los = (d - a).dt.days
-            los = los.where(los >= 0) # Remove negative dates
+            los = los.where(los >= 0)
             if los.notna().any():
                 df_out["derived_length_of_stay"] = los
         except Exception:
@@ -66,8 +75,12 @@ def _derive_length_of_stay(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_out
 
+
 def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Scans text columns for medical keywords indicating negative outcomes."""
+    """
+    Scan outcome-related text columns for adverse clinical signals.
+    Heuristic only — not a diagnostic system.
+    """
     insights: List[Dict[str, Any]] = []
 
     for col in df.columns:
@@ -89,7 +102,7 @@ def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
                 "title": f"High Adverse Outcomes in '{col}'",
                 "so_what": (
                     f"{rate:.0%} of records show adverse values "
-                    f"(e.g., {', '.join(negatives.unique()[:2])})."
+                    f"(e.g., {', '.join(list(negatives.unique())[:2])})."
                 ),
             })
 
@@ -97,16 +110,26 @@ def _scan_categorical_risks(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 # =====================================================
-# HEALTHCARE DOMAIN (v3.5 – UNIVERSAL)
+# HEALTHCARE DOMAIN
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
+    """
+    Healthcare analytics covering:
+    - Clinical outcomes
+    - Operational efficiency
+    - Financial exposure
+    """
+
     name = "healthcare"
     description = "Defensible healthcare analytics (clinical, financial, operational)"
 
     # ---------------- VALIDATION ----------------
 
     def validate_data(self, df: pd.DataFrame) -> bool:
+        """
+        Minimal validation to activate healthcare domain.
+        """
         return (
             resolve_column(df, "patient_id") is not None
             or resolve_column(df, "billing_amount") is not None
@@ -123,6 +146,10 @@ class HealthcareDomain(BaseDomain):
     # ---------------- KPIs ----------------
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        KPI calculation with safe guards.
+        Benchmarks are illustrative defaults, not regulatory thresholds.
+        """
         kpis: Dict[str, Any] = {}
 
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
@@ -130,57 +157,52 @@ class HealthcareDomain(BaseDomain):
         bill = resolve_column(df, "billing_amount") or resolve_column(df, "cost")
         pid = resolve_column(df, "patient_id")
 
-        # 1. Operational: Length of Stay
+        # Operational
         if los and pd.api.types.is_numeric_dtype(df[los]) and df[los].notna().any():
             kpis["avg_length_of_stay"] = df[los].mean()
-            kpis["target_avg_los"] = 5.0 # Benchmark target
+            kpis["target_avg_los"] = 5.0  # default benchmark
 
-        # 2. Clinical: Readmission Rate
+        # Clinical
         if readm and pd.api.types.is_numeric_dtype(df[readm]):
             kpis["readmission_rate"] = df[readm].mean()
-            kpis["target_readmission_rate"] = 0.10 # Benchmark target
+            kpis["target_readmission_rate"] = 0.10
 
-        # 3. Financial: Billing/Cost
+        # Financial
         if bill and pd.api.types.is_numeric_dtype(df[bill]):
             kpis["total_billing"] = df[bill].sum()
-            # Map to standardized key for insights
             kpis["avg_treatment_cost"] = df[bill].mean()
-            
-            if pid:
-                kpis["avg_billing_per_patient"] = df.groupby(pid)[bill].sum().mean()
 
-        # 4. Volume
-        if pid:
-            kpis["patient_volume"] = df[pid].nunique()
-        else:
-            kpis["patient_volume"] = len(df)
+            if pid:
+                kpis["avg_billing_per_patient"] = (
+                    df.groupby(pid)[bill].sum().mean()
+                )
+
+        # Volume
+        kpis["patient_volume"] = (
+            df[pid].nunique() if pid else len(df)
+        )
 
         return kpis
 
     # ---------------- VISUALS ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        import matplotlib
-        matplotlib.use("Agg")  # REQUIRED for headless environments
-
         visuals: List[Dict[str, Any]] = []
         output_dir = Path(output_dir).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         def human_fmt(x, _):
             if x >= 1_000_000:
-                return f"{x/1_000_000:.1f}M"
+                return f"{x / 1_000_000:.1f}M"
             if x >= 1_000:
-                return f"{x/1_000:.0f}K"
+                return f"{x / 1_000:.0f}K"
             return str(int(x))
-    
-        # =================================================
-        # 1️⃣ Length of Stay Distribution (Operational)
-        # =================================================
+
+        # 1️⃣ Length of Stay Distribution
         los = resolve_column(df, "length_of_stay") or resolve_column(df, "derived_length_of_stay")
         if los and pd.api.types.is_numeric_dtype(df[los]) and df[los].notna().any():
             fig, ax = plt.subplots(figsize=(7, 4))
-            df[los].dropna().hist(ax=ax, bins=15, color="#1f77b4", edgecolor="white")
+            df[los].dropna().hist(ax=ax, bins=15, edgecolor="white")
             ax.set_title("Length of Stay Distribution")
             ax.set_xlabel("Days")
 
@@ -188,14 +210,9 @@ class HealthcareDomain(BaseDomain):
             fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
 
-            visuals.append({
-                "path": str(p),
-                "caption": "Patient stay duration distribution",
-            })
+            visuals.append({"path": str(p), "caption": "Patient stay duration distribution"})
 
-        # =================================================
-        # 2️⃣ Patient Volume Over Time (Universal)
-        # =================================================
+        # 2️⃣ Patient Volume Trend
         date_col = (
             resolve_column(df, "admission_date")
             or resolve_column(df, "visit_date")
@@ -218,20 +235,15 @@ class HealthcareDomain(BaseDomain):
                     fig.savefig(p, bbox_inches="tight")
                     plt.close(fig)
 
-                    visuals.append({
-                        "path": str(p),
-                        "caption": "Monthly patient volume trend",
-                    })
+                    visuals.append({"path": str(p), "caption": "Monthly patient volume trend"})
             except Exception:
                 pass
 
-        # =================================================
-        # 3️⃣ Billing / Cost Distribution (Financial)
-        # =================================================
+        # 3️⃣ Cost Distribution
         bill = resolve_column(df, "billing_amount") or resolve_column(df, "cost")
         if bill and pd.api.types.is_numeric_dtype(df[bill]):
             fig, ax = plt.subplots(figsize=(7, 4))
-            df[bill].dropna().hist(ax=ax, bins=20, color="#2ca02c", edgecolor="white")
+            df[bill].dropna().hist(ax=ax, bins=20, edgecolor="white")
             ax.set_title("Treatment Cost Distribution")
             ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
 
@@ -239,14 +251,9 @@ class HealthcareDomain(BaseDomain):
             fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
 
-            visuals.append({
-                "path": str(p),
-                "caption": "Distribution of treatment costs",
-            })
+            visuals.append({"path": str(p), "caption": "Distribution of treatment costs"})
 
-        # =================================================
-        # 4️⃣ Avg Cost by Condition (Clinical + Financial)
-        # =================================================
+        # 4️⃣ Cost by Condition
         diag = resolve_column(df, "diagnosis") or resolve_column(df, "medical_condition")
         if diag and bill and pd.api.types.is_numeric_dtype(df[bill]):
             fig, ax = plt.subplots(figsize=(7, 4))
@@ -255,7 +262,7 @@ class HealthcareDomain(BaseDomain):
                 .mean()
                 .sort_values(ascending=False)
                 .head(7)
-                .plot(kind="barh", ax=ax, color="#d62728")
+                .plot(kind="barh", ax=ax)
             )
             ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
             ax.set_title("Avg Cost by Condition (Top 7)")
@@ -264,14 +271,9 @@ class HealthcareDomain(BaseDomain):
             fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
 
-            visuals.append({
-                "path": str(p),
-                "caption": "Average treatment cost by condition",
-            })
+            visuals.append({"path": str(p), "caption": "Average treatment cost by condition"})
 
-        # =================================================
-        # 5️⃣ Readmission Rate by Condition (Quality)
-        # =================================================
+        # 5️⃣ Readmission by Condition
         readm = resolve_column(df, "readmitted")
         if readm and diag and pd.api.types.is_numeric_dtype(df[readm]):
             fig, ax = plt.subplots(figsize=(7, 4))
@@ -280,7 +282,7 @@ class HealthcareDomain(BaseDomain):
                 .mean()
                 .sort_values(ascending=False)
                 .head(7)
-                .plot(kind="bar", ax=ax, color="#ff7f0e")
+                .plot(kind="bar", ax=ax)
             )
             ax.set_title("Readmission Rate by Condition")
             ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:.0%}"))
@@ -290,77 +292,49 @@ class HealthcareDomain(BaseDomain):
             fig.savefig(p, bbox_inches="tight")
             plt.close(fig)
 
-            visuals.append({
-                "path": str(p),
-                "caption": "Readmission rate by condition",
-            })
+            visuals.append({"path": str(p), "caption": "Readmission rate by condition"})
 
-        return visuals[:6]  # executive-safe cap
+        return visuals[:6]
 
-    # ---------------- ATOMIC INSIGHTS (WITH DOMINANCE RULE) ----------------
+    # ---------------- INSIGHTS ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
-        # 1. Text Scanning (Categorical Risks)
         insights.extend(_scan_categorical_risks(df))
 
-        # === STEP 1: Composite FIRST (Authority Layer) ===
-        composite_insights = []
-        if len(df) > 30:
-            composite_insights = self.generate_composite_insights(df, kpis)
+        composite = self.generate_composite_insights(df, kpis) if len(df) > 30 else []
+        dominant_titles = {i["title"] for i in composite if i["level"] in {"RISK", "WARNING"}}
 
-        dominant_titles = {
-            i["title"] for i in composite_insights
-            if i["level"] in {"RISK", "WARNING"}
-        }
-
-        # === STEP 2: Suppression Rules ===
-        # If "Operational Strain" is found, suppress atomic "High LOS" and "Readmission"
         suppress_los = "Operational Strain Detected" in dominant_titles
-        suppress_readmission = "Operational Strain Detected" in dominant_titles
-        
-        # If "Financial Toxicity" is found, suppress atomic "High Cost"
         suppress_cost = "Financial Toxicity Risk" in dominant_titles
 
-        # === STEP 3: Guarded Atomic Insights ===
         los = kpis.get("avg_length_of_stay")
         readm = kpis.get("readmission_rate")
         cost = kpis.get("avg_treatment_cost")
 
-        if los is not None and not suppress_los:
-            if los > 7:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Extended Length of Stay",
-                    "so_what": f"Average LOS is {los:.1f} days, increasing bed occupancy pressure."
-                })
+        if los is not None and not suppress_los and los > 7:
+            insights.append({
+                "level": "WARNING",
+                "title": "Extended Length of Stay",
+                "so_what": f"Average LOS is {los:.1f} days."
+            })
 
-        if readm is not None and not suppress_readmission:
-            if readm > 0.15:
-                insights.append({
-                    "level": "RISK",
-                    "title": "High Readmission Rate",
-                    "so_what": f"Readmission rate is {readm:.1%}, indicating post-discharge gaps."
-                })
-            elif readm > 0.10:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Elevated Readmissions",
-                    "so_what": f"Rate is {readm:.1%}."
-                })
+        if readm is not None and readm > 0.15:
+            insights.append({
+                "level": "RISK",
+                "title": "High Readmission Rate",
+                "so_what": f"Readmission rate is {readm:.1%}."
+            })
 
-        if cost is not None and not suppress_cost:
-            # Simple threshold for demo; ideally benchmarked
-            if cost > 50000: 
-                insights.append({
-                    "level": "WARNING",
-                    "title": "High Treatment Cost",
-                    "so_what": f"Average treatment cost is elevated at {cost:,.0f}."
-                })
+        if cost is not None and not suppress_cost and cost > 50000:
+            insights.append({
+                "level": "WARNING",
+                "title": "High Treatment Cost",
+                "so_what": f"Average treatment cost is {cost:,.0f}."
+            })
 
-        # === STEP 4: Composite Insights LAST (Authority Wins) ===
-        insights += composite_insights
+        insights += composite
 
         if not insights:
             insights.append({
@@ -371,129 +345,93 @@ class HealthcareDomain(BaseDomain):
 
         return insights
 
-    # ---------------- COMPOSITE INSIGHTS (HEALTHCARE v3.0) ----------------
+    # ---------------- COMPOSITE INSIGHTS ----------------
 
-    def generate_composite_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Healthcare v3 Composite Intelligence Layer.
-        Connects Clinical outcomes with Financial data.
-        """
+    def generate_composite_insights(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
 
         los = kpis.get("avg_length_of_stay")
         readm = kpis.get("readmission_rate")
         cost = kpis.get("avg_treatment_cost")
 
-        # 1. Operational Strain (High LOS + High Readmission)
-        if los is not None and readm is not None:
-            if los > 7 and readm > 0.15:
-                insights.append({
-                    "level": "RISK",
-                    "title": "Operational Strain Detected",
-                    "so_what": (
-                        f"Extended LOS ({los:.1f} days) combined with high readmissions "
-                        f"({readm:.1%}) suggests discharge workflow and capacity strain."
-                    )
-                })
+        if los and readm and los > 7 and readm > 0.15:
+            insights.append({
+                "level": "RISK",
+                "title": "Operational Strain Detected",
+                "so_what": (
+                    f"Extended LOS ({los:.1f} days) with high readmissions "
+                    f"({readm:.1%}) indicates capacity strain."
+                )
+            })
 
-        # 2. Financial Toxicity (High Cost + Poor Outcome)
-        if cost is not None and readm is not None:
-            if cost > 50000 and readm > 0.15:
-                insights.append({
-                    "level": "WARNING",
-                    "title": "Financial Toxicity Risk",
-                    "so_what": (
-                        f"High treatment costs ({cost:,.0f}) with poor outcomes "
-                        f"(readmissions {readm:.1%}) indicate inefficiencies."
-                    )
-                })
-                
-        # 3. Provider Variance (Doctor Specific)
+        if cost and readm and cost > 50000 and readm > 0.15:
+            insights.append({
+                "level": "WARNING",
+                "title": "Financial Toxicity Risk",
+                "so_what": (
+                    f"High costs ({cost:,.0f}) with poor outcomes "
+                    f"(readmissions {readm:.1%})."
+                )
+            })
+
         doc = resolve_column(df, "doctor")
         readm_col = resolve_column(df, "readmitted")
-        
+
         if doc and readm_col and pd.api.types.is_numeric_dtype(df[readm_col]):
             if df[doc].nunique() > 2:
                 overall = df[readm_col].mean()
                 grp = df.groupby(doc)[readm_col].mean()
                 worst_doc = grp.idxmax()
                 worst_val = grp.max()
-                
-                if worst_val > (overall * 1.30) and overall > 0:
-                     insights.append({
+
+                if worst_val > overall * 1.3 and overall > 0:
+                    insights.append({
                         "level": "RISK",
                         "title": "Provider Performance Variance",
                         "so_what": (
                             f"Dr. {worst_doc} has a readmission rate of {worst_val:.1%}, "
-                            f"significantly higher than the facility average ({overall:.1%})."
+                            f"higher than average ({overall:.1%})."
                         )
                     })
 
         return insights
 
-    # ---------------- RECOMMENDATIONS (AUTHORITY BASED) ----------------
+    # ---------------- RECOMMENDATIONS ----------------
 
     def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-        recs: List[Dict[str, Any]] = []
-
-        # 1. Check Composite Context
-        composite = []
-        if len(df) > 30:
-            composite = self.generate_composite_insights(df, kpis)
-
+        composite = self.generate_composite_insights(df, kpis) if len(df) > 30 else []
         titles = [i["title"] for i in composite]
 
-        # === AUTHORITY RULES (Mandatory Actions) ===
         if "Operational Strain Detected" in titles:
             return [{
-                "action": "Audit discharge planning, bed management, and care coordination workflows",
+                "action": "Audit discharge planning and bed management workflows",
                 "priority": "HIGH",
                 "timeline": "Immediate"
             }]
 
         if "Financial Toxicity Risk" in titles:
             return [{
-                "action": "Review treatment protocols and cost-efficiency for high-risk cases",
+                "action": "Review cost-efficiency of treatment protocols",
                 "priority": "HIGH",
                 "timeline": "This Month"
             }]
 
         if "Provider Performance Variance" in titles:
-             return [{
-                "action": "Initiate peer review and clinical standardization for outlier providers",
+            return [{
+                "action": "Initiate peer review for outlier providers",
                 "priority": "HIGH",
                 "timeline": "This Quarter"
             }]
 
-        # === FALLBACK (Atomic Recs) ===
-        if kpis.get("readmission_rate", 0) > 0.15:
-            recs.append({
-                "action": "Strengthen post-discharge follow-up programs",
-                "priority": "MEDIUM",
-                "timeline": "This Quarter"
-            })
-            
-        if kpis.get("avg_length_of_stay", 0) > 8.0:
-            recs.append({
-                "action": "Investigate patient flow bottlenecks",
-                "priority": "MEDIUM",
-                "timeline": "Next Month"
-            })
-
-        if not recs:
-            recs.append({
-                "action": "Continue monitoring healthcare performance indicators",
-                "priority": "LOW",
-                "timeline": "Ongoing"
-            })
-
-        return recs
+        return [{
+            "action": "Continue monitoring healthcare performance indicators",
+            "priority": "LOW",
+            "timeline": "Ongoing"
+        }]
 
 
 # =====================================================
-# DOMAIN DETECTOR (SMART / DOMINANCE BASED)
+# DOMAIN DETECTOR
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
@@ -509,8 +447,7 @@ class HealthcareDomainDetector(BaseDomainDetector):
         cols = {str(c).lower() for c in df.columns}
         hits = [c for c in cols if any(t in c for t in self.HEALTHCARE_TOKENS)]
         confidence = min(len(hits) / 3, 1.0)
-        
-        # 🔑 HEALTHCARE DOMINANCE RULE
+
         STRONG_SIGNALS = {"diagnosis", "clinical", "patient", "readmitted", "physician"}
         if any(t in c for c in cols for t in STRONG_SIGNALS):
             confidence = max(confidence, 0.9)

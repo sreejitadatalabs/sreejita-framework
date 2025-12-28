@@ -1,7 +1,7 @@
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
-from sreejita.domains.ops import OpsDomain, OpsDomainDetector
+from sreejita.domains.ecommerce import EcommerceDomain, EcommerceDomainDetector
 from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
 from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
@@ -16,63 +16,92 @@ from sreejita.domains.intelligence.detector_v2 import (
     select_best_domain,
 )
 
-# ------------------------
-# Phase 1: Rule Detectors
-# ------------------------
+# =====================================================
+# DOMAIN DETECTORS (RULE-BASED)
+# =====================================================
+# NOTE:
+# Domains are explicitly registered here for clarity and auditability.
+# Dynamic discovery is intentionally avoided in v3.6 for determinism.
 
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
     CustomerDomainDetector(),
     FinanceDomainDetector(),
-    OpsDomainDetector(),
+    EcommerceDomainDetector(),
     HealthcareDomainDetector(),
     MarketingDomainDetector(),
     HRDomainDetector(),
     SupplyChainDomainDetector(),
 ]
 
-# ------------------------
-# Domain Engines
-# ------------------------
+# =====================================================
+# DOMAIN IMPLEMENTATIONS
+# =====================================================
 
 DOMAIN_IMPLEMENTATIONS = {
     "retail": RetailDomain(),
     "customer": CustomerDomain(),
     "finance": FinanceDomain(),
-    "ops": OpsDomain(),
+    "ecommerce": EcommerceDomain(),
     "healthcare": HealthcareDomain(),
     "marketing": MarketingDomain(),
     "hr": HRDomain(),
     "supply_chain": SupplyChainDomain(),
 }
 
-# ------------------------
-# Observability
-# ------------------------
+# =====================================================
+# OBSERVABILITY
+# =====================================================
 
 _OBSERVERS: list[DecisionObserver] = []
 
 
 def register_observer(observer: DecisionObserver):
+    """
+    Register an observer for domain-decision events.
+    Observers must be non-blocking and side-effect safe.
+    """
     _OBSERVERS.append(observer)
 
 
-# ------------------------
-# Domain Decision
-# ------------------------
+# =====================================================
+# DOMAIN DECISION ENGINE
+# =====================================================
 
 def decide_domain(df) -> DecisionExplanation:
+    """
+    Determine the most appropriate domain for a dataset.
+
+    This function:
+    1. Runs rule-based detectors
+    2. Computes weighted domain scores
+    3. Selects the highest-confidence domain
+    4. Produces a fully explainable decision object
+    """
+
     rule_results = {}
 
+    # ------------------------
+    # Phase 1: Rule Detection
+    # ------------------------
     for detector in DOMAIN_DETECTORS:
-        result = detector.detect(df)
-        rule_results[result.domain] = {
-            "confidence": result.confidence,
-            "signals": result.signals,
-        }
+        try:
+            result = detector.detect(df)
+            if not result or not result.domain:
+                continue
 
+            rule_results[result.domain] = {
+                "confidence": result.confidence,
+                "signals": result.signals,
+            }
+        except Exception:
+            # Detector failure should not break domain resolution
+            continue
+
+    # ------------------------
+    # Phase 2: Score & Select
+    # ------------------------
     domain_scores = compute_domain_scores(df, rule_results)
-
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
     alternatives = [
@@ -102,23 +131,41 @@ def decide_domain(df) -> DecisionExplanation:
         domain_scores=domain_scores,
     )
 
-    # ✅ THIS IS THE MISSING LINE (CRITICAL)
+    # Attach executable domain engine (critical for orchestration)
     decision.engine = DOMAIN_IMPLEMENTATIONS.get(selected_domain)
 
+    # Attach dataset fingerprint for traceability
     decision.fingerprint = dataframe_fingerprint(df)
 
+    # ------------------------
+    # Observability (Non-Blocking)
+    # ------------------------
     for observer in _OBSERVERS:
-        observer.record(decision)
+        try:
+            observer.record(decision)
+        except Exception:
+            # Observers must never break core execution
+            pass
 
     return decision
 
 
-# ------------------------
-# Apply Domain
-# ------------------------
+# =====================================================
+# DOMAIN PREPROCESSING
+# =====================================================
 
 def apply_domain(df, domain_name: str):
+    """
+    Apply domain-specific preprocessing ONLY.
+
+    This does NOT:
+    - calculate KPIs
+    - generate insights
+    - run recommendations
+
+    It exists as a convenience hook for pipelines.
+    """
     domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
     if domain:
         return domain.preprocess(df)
-    return df 
+    return df
