@@ -12,6 +12,11 @@ from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 # =====================================================
+# CONSTANTS & STANDARDS
+# =====================================================
+VISUAL_BENCHMARK_LOS = 5.0  # Used for visual reference lines
+
+# =====================================================
 # SHAPE DETECTION (UNIVERSAL)
 # =====================================================
 class DatasetShape(str, Enum):
@@ -124,6 +129,9 @@ class HealthcareDomain(BaseDomain):
             raw_kpis["total_billing"] = df[c["cost"]].sum()
             raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
             raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 2.0 
+            # Critical for Financial Translation in Engine
+            if raw_kpis["avg_los"]:
+                raw_kpis["avg_cost_per_day"] = raw_kpis["avg_cost_per_patient"] / raw_kpis["avg_los"]
 
         if c["readmitted"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
             raw_kpis["readmission_rate"] = df[c["readmitted"]].mean()
@@ -140,7 +148,7 @@ class HealthcareDomain(BaseDomain):
         ordered_keys = ["total_patients", "avg_cost_per_patient", "avg_los", "readmission_rate", "long_stay_rate", "data_completeness", "provider_variance_score", "avg_patient_age", "total_billing"]
         final_kpis = {k: raw_kpis[k] for k in ordered_keys if k in raw_kpis and not (isinstance(raw_kpis[k], float) and (np.isnan(raw_kpis[k]) or np.isinf(raw_kpis[k])))}
         
-        # Add any remaining keys
+        # Add any remaining keys (like avg_cost_per_day)
         for k, v in raw_kpis.items():
             if k not in final_kpis and not (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
                 final_kpis[k] = v
@@ -173,13 +181,16 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "vol.png", "Demand stability", 0.99)
             except: pass
 
-        # 2. LOS Distribution
+        # 2. LOS Distribution (WITH BENCHMARK LINE) - 10/10 Requirement
         if c["los"] and not df[c["los"]].dropna().empty:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["los"]].hist(ax=ax, bins=15, color="teal")
-                ax.set_title("LOS Distribution")
-                save(fig, "los.png", "Stay duration", 0.95)
+                df[c["los"]].hist(ax=ax, bins=15, color="teal", alpha=0.7)
+                # Benchmark Line
+                ax.axvline(VISUAL_BENCHMARK_LOS, color='red', linestyle='--', linewidth=1.5, label=f'Goal ({VISUAL_BENCHMARK_LOS}d)')
+                ax.legend()
+                ax.set_title("LOS Distribution vs Goal")
+                save(fig, "los.png", "Stay duration & adherence", 0.95)
             except: pass
 
         # 3. Cost by Condition
@@ -284,7 +295,7 @@ class HealthcareDomain(BaseDomain):
         insights = []
         c = self.cols
         
-        # Need 7 potential insights for robust reporting
+        # 7 Composite Insights
         
         # 1. Limited Visibility (Shape)
         if self.shape == DatasetShape.UNKNOWN:
@@ -324,7 +335,7 @@ class HealthcareDomain(BaseDomain):
         recs = []
         titles = [i["title"] for i in (insights or [])]
 
-        # 7 Potential Recommendations
+        # 7 Recommendations Logic
         
         # 1. Data Integrity
         if kpis.get("data_completeness", 1) < 0.9:
