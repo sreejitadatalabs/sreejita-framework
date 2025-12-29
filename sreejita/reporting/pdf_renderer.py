@@ -81,7 +81,7 @@ def format_number(x):
     """
     Safely formats numbers. Handles NaN, None, and Strings gracefully.
     """
-    if x is None:
+    if x is None or x == "":
         return "-"
     
     # Check for NaN (Standard numpy/pandas way)
@@ -228,10 +228,17 @@ class ExecutivePDFRenderer:
 
         table_data = [["Metric", "Value"]]
         
+        # 🛡️ HARD FILTER: Filter KPIs to remove objects/dicts
+        # Only keep primitives to prevent "nape. FINANCIAL_..." dictionary leaks
+        safe_kpis = {}
+        for k, v in payload["kpis"].items():
+            if isinstance(v, (str, int, float, type(None))):
+                safe_kpis[k] = v
+
         # Limit KPIs to fit on page (max 12)
-        safe_kpis = list(payload["kpis"].items())[:12]
+        safe_kpis_list = list(safe_kpis.items())[:12]
         
-        for k, v in safe_kpis:
+        for k, v in safe_kpis_list:
             # Heuristic for Percentage vs Number
             is_rate = any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion", "yield"])
             val_fmt = format_percent(v) if is_rate else format_number(v)
@@ -326,10 +333,21 @@ class ExecutivePDFRenderer:
                 styles["ExecBody"],
             ))
             if rec.get("timeline"):
+                # Clean up timeline line
                 story.append(Paragraph(
                     f"<i>Timeline: {rec['timeline']}</i>",
                     styles["ExecBody"],
                 ))
+            
+            # 🛡️ FIX 5: Explicitly print Owner & Outcome if present
+            owner = rec.get("owner")
+            outcome = rec.get("expected_outcome", rec.get("success_kpi"))
+            
+            if owner:
+                story.append(Paragraph(f"<i>Owner: {owner}</i>", styles["ExecBody"]))
+            if outcome:
+                story.append(Paragraph(f"<i>Goal: {outcome}</i>", styles["ExecBody"]))
+
             story.append(Spacer(1, 10))
 
         # =====================================================
@@ -341,4 +359,3 @@ class ExecutivePDFRenderer:
             raise RuntimeError("PDF build completed but file not found")
 
         return output_path
-
