@@ -7,16 +7,13 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from matplotlib.ticker import FuncFormatter
-
 from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
-
 # =====================================================
-# SHAPE DETECTION ENGINE
+# SHAPE DETECTION (UNIVERSAL)
 # =====================================================
-
 class DatasetShape(str, Enum):
     ROW_LEVEL_CLINICAL = "row_level_clinical"
     AGGREGATED_OPERATIONAL = "aggregated_operational"
@@ -25,294 +22,207 @@ class DatasetShape(str, Enum):
     UNKNOWN = "unknown"
 
 def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
-    # Normalize for fuzzy matching
     cols = [c.lower().strip().replace(" ", "_") for c in df.columns]
+    score = {k: 0 for k in DatasetShape}
+
+    # Extended fuzzy logic for universal columns
+    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "id", "name"]): 
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
+    if any(x in c for c in cols for x in ["admit", "admission", "date", "joining"]): 
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
     
-    score = {
-        DatasetShape.ROW_LEVEL_CLINICAL: 0,
-        DatasetShape.AGGREGATED_OPERATIONAL: 0,
-        DatasetShape.FINANCIAL_SUMMARY: 0,
-        DatasetShape.QUALITY_METRICS: 0,
-    }
-
-    # Fuzzy Logic
-    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "subject", "id"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
-    if any(x in c for c in cols for x in ["admit", "admission", "date_of_ad"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
-    if any(x in c for c in cols for x in ["discharge", "disch"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
-
-    if any(x in c for c in cols for x in ["total_pat", "visits", "volume", "census"]): score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
+    if any(x in c for c in cols for x in ["total", "volume", "census", "visits"]): 
+        score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
     
-    if any(x in c for c in cols for x in ["revenue", "bill", "charge", "cost", "amount"]): score[DatasetShape.FINANCIAL_SUMMARY] += 2
+    if any(x in c for c in cols for x in ["revenue", "bill", "cost", "fee", "amount"]): 
+        score[DatasetShape.FINANCIAL_SUMMARY] += 2
 
-    if any(x in c for c in cols for x in ["rate", "mortality", "readm"]): score[DatasetShape.QUALITY_METRICS] += 2
-
-    best_shape = max(score, key=score.get)
-
-    # Priority Override
-    if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3:
-        best_shape = DatasetShape.ROW_LEVEL_CLINICAL
-
-    # Only truly UNKNOWN if zero signals
-    if score[best_shape] == 0: 
-        best_shape = DatasetShape.UNKNOWN
-
-    return {"shape": best_shape, "score": score}
-
+    best = max(score, key=score.get)
+    if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3: best = DatasetShape.ROW_LEVEL_CLINICAL
+    if score[best] == 0: best = DatasetShape.UNKNOWN
+    return {"shape": best, "score": score}
 
 # =====================================================
-# HELPERS
+# HEALTHCARE DOMAIN (FACT ENGINE)
 # =====================================================
-
-def _safe_div(n, d):
-    if d in (0, None) or pd.isna(d):
-        return None
-    return n / d
-
-def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    candidates = ["admission_date", "visit_date", "date", "discharge_date", "admit_date"]
-    for c in df.columns:
-        if any(k in c.lower() for k in candidates):
-            try:
-                pd.to_datetime(df[c].dropna().iloc[:5], errors="coerce")
-                return c
-            except:
-                continue
-    return None
-
-def _derive_length_of_stay(df, admit, discharge):
-    if admit and discharge:
-        try:
-            a = pd.to_datetime(df[admit], errors="coerce")
-            d = pd.to_datetime(df[discharge], errors="coerce")
-            los = (d - a).dt.days
-            return los.where(los >= 0)
-        except:
-            pass
-    return None
-
-
-# =====================================================
-# HEALTHCARE DOMAIN (10/10 EXECUTIVE VERSION)
-# =====================================================
-
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
-    description = "Universal Healthcare Intelligence (Adaptive)"
-
-    # ---------------- PREPROCESS ----------------
-
+    
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        self.time_col = _detect_time_column(df)
         self.shape_info = detect_dataset_shape(df)
         self.shape = self.shape_info["shape"]
         
+        # UNIVERSAL COLUMN MAPPING (Handles "Medical Condition", "Billing Amount" etc.)
         self.cols = {
-            "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
+            "pid": resolve_column(df, "patient_id") or resolve_column(df, "name") or resolve_column(df, "mrn"),
             "doctor": resolve_column(df, "doctor") or resolve_column(df, "provider"),
-            "diagnosis": resolve_column(df, "diagnosis") or resolve_column(df, "condition"),
+            "diagnosis": resolve_column(df, "diagnosis") or resolve_column(df, "medical_condition") or resolve_column(df, "condition"),
             "los": resolve_column(df, "length_of_stay") or resolve_column(df, "los"),
-            "cost": resolve_column(df, "billing_amount") or resolve_column(df, "total_cost"),
-            "readmitted": resolve_column(df, "readmitted") or resolve_column(df, "readmission"),
+            "cost": resolve_column(df, "billing_amount") or resolve_column(df, "total_cost") or resolve_column(df, "charges"),
+            "readmitted": resolve_column(df, "readmitted") or resolve_column(df, "admission_type") or resolve_column(df, "readmission"),
             "volume": resolve_column(df, "total_patients") or resolve_column(df, "visits"),
-            "avg_los": resolve_column(df, "avg_los") or resolve_column(df, "average_los"),
-            "admit": resolve_column(df, "admission_date"),
-            "discharge": resolve_column(df, "discharge_date"),
-            "payer": resolve_column(df, "insurance") or resolve_column(df, "payer"),
-            "outcome": resolve_column(df, "discharge_status") or resolve_column(df, "outcome"),
+            "avg_los": resolve_column(df, "avg_los"),
+            "admit": resolve_column(df, "date_of_admission") or resolve_column(df, "admission_date") or resolve_column(df, "joining_date"),
+            "discharge": resolve_column(df, "discharge_date") or resolve_column(df, "date_of_discharge"),
+            "payer": resolve_column(df, "insurance_provider") or resolve_column(df, "payer") or resolve_column(df, "insurance"),
+            "outcome": resolve_column(df, "discharge_status") or resolve_column(df, "outcome") or resolve_column(df, "test_results"),
             "age": resolve_column(df, "age") or resolve_column(df, "dob"),
+            "gender": resolve_column(df, "gender") or resolve_column(df, "sex"),
+            "type": resolve_column(df, "admission_type") or resolve_column(df, "type"),
         }
+        
+        # Numeric Force
+        for k in ["los", "cost", "volume", "avg_los", "age"]:
+            if self.cols.get(k) in df.columns:
+                df[self.cols[k]] = pd.to_numeric(df[self.cols[k]], errors='coerce')
 
-        # Numeric Enforcement
-        numeric_targets = ["los", "cost", "volume", "avg_los", "age"]
-        for key in numeric_targets:
-            col_name = self.cols.get(key)
-            if col_name and col_name in df.columns:
-                df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
-
-        # Readmission Safety
-        if self.cols["readmitted"]:
-            col_r = self.cols["readmitted"]
-            val_map = {"yes": 1, "no": 0, "true": 1, "false": 0, "1": 1, "0": 0, "y": 1, "n": 0}
-            if df[col_r].dtype == object:
-                df[col_r] = df[col_r].astype(str).str.lower().map(val_map)
-            df[col_r] = pd.to_numeric(df[col_r], errors='coerce')
-
-        # Row Logic
-        if self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
-            if not self.cols["los"] and self.cols["admit"] and self.cols["discharge"]:
-                df["derived_los"] = _derive_length_of_stay(df, self.cols["admit"], self.cols["discharge"])
+        # Logic: Calculate LOS if missing (Requires Admit + Discharge)
+        if self.shape == DatasetShape.ROW_LEVEL_CLINICAL and not self.cols["los"] and self.cols["admit"] and self.cols["discharge"]:
+            try:
+                a = pd.to_datetime(df[self.cols["admit"]], errors="coerce")
+                d = pd.to_datetime(df[self.cols["discharge"]], errors="coerce")
+                df["derived_los"] = (d - a).dt.days
                 self.cols["los"] = "derived_los"
+            except: pass
 
-        if self.time_col:
-            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
+        # Logic: Time sorting
+        if self.cols["admit"]:
+            df[self.cols["admit"]] = pd.to_datetime(df[self.cols["admit"]], errors="coerce")
+            self.time_col = self.cols["admit"]
             df = df.sort_values(self.time_col)
+        else:
+            self.time_col = None
 
         return df
 
-    # ---------------- KPIs ----------------
-
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        kpis: Dict[str, Any] = {}
+        raw_kpis = {"dataset_shape": str(self.shape.value)}
         c = self.cols
-        kpis["dataset_shape"] = str(self.shape.value) # Ensure string for PDF safety
         
-        # GAP 3: Completeness Signal
-        relevant_cols = [col for col in c.values() if col is not None]
-        if relevant_cols:
-            kpis["data_completeness"] = round(1 - df[relevant_cols].isna().mean().mean(), 2)
+        # 1. Completeness Score
+        valid_cols = [v for v in c.values() if v]
+        raw_kpis["data_completeness"] = round(1 - df[valid_cols].isna().mean().mean(), 2) if valid_cols else 0.0
 
+        # 2. Aggregated Mode
         if self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
-            if c["volume"]: kpis["total_patients"] = df[c["volume"]].sum()
-            if c["avg_los"]: kpis["avg_los"] = df[c["avg_los"]].mean()
-            kpis["is_aggregated"] = True
-            
+            if c["volume"]: raw_kpis["total_patients"] = df[c["volume"]].sum()
+            if c["avg_los"]: raw_kpis["avg_los"] = df[c["avg_los"]].mean()
+            raw_kpis["is_aggregated"] = True
+            return raw_kpis
+
+        # 3. Row Level Mode
+        raw_kpis["is_aggregated"] = False
+        raw_kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
+
+        if c["los"] and not df[c["los"]].dropna().empty:
+            raw_kpis["avg_los"] = df[c["los"]].mean()
+            raw_kpis["long_stay_rate"] = (df[c["los"]] > 7).mean()
         else:
-            # Row-Level Logic (Also runs for UNKNOWN if columns exist)
-            kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
-            kpis["is_aggregated"] = False
+            raw_kpis["avg_los"] = None
 
-            if c["los"] and not df[c["los"]].dropna().empty:
-                kpis["avg_los"] = df[c["los"]].mean()
-                median_los = df[c["los"]].median()
-                kpis["benchmark_los"] = median_los * 1.5 if len(df) > 10 else 7.0
-                kpis["long_stay_rate"] = (df[c["los"]] > kpis["benchmark_los"]).mean()
-                if kpis["avg_los"] > 0:
-                    kpis["bed_turnover_index"] = _safe_div(1, kpis["avg_los"])
-            else:
-                kpis["avg_los"] = None
+        if c["cost"]:
+            raw_kpis["total_billing"] = df[c["cost"]].sum()
+            raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
+            raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 2.0 
 
-            if c["cost"]:
-                kpis["total_billing"] = df[c["cost"]].sum()
-                kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
-                kpis["max_single_cost"] = df[c["cost"]].max()
-                kpis["benchmark_cost"] = df[c["cost"]].median() * 2.0 if len(df) > 10 else 50000
-                if kpis.get("avg_los"):
-                    kpis["avg_cost_per_day"] = _safe_div(kpis["avg_cost_per_patient"], kpis["avg_los"])
+        if c["readmitted"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
+            raw_kpis["readmission_rate"] = df[c["readmitted"]].mean()
 
-            if c["readmitted"]:
-                kpis["readmission_rate"] = df[c["readmitted"]].mean()
-            
-            if c["outcome"]:
-                neg_mask = df[c["outcome"]].astype(str).str.lower().str.contains(r'died|expired|death|mortality')
-                kpis["mortality_rate"] = neg_mask.mean()
+        if c["age"]:
+            raw_kpis["avg_patient_age"] = df[c["age"]].mean()
 
-            # Weekend Rate
-            if self.time_col:
-                df["_dow"] = df[self.time_col].dt.dayofweek
-                kpis["weekend_admission_rate"] = df["_dow"].isin([5, 6]).mean()
+        if c["doctor"] and c["los"]:
+            stats = df.groupby(c["doctor"])[c["los"]].mean()
+            if stats.mean() > 0:
+                raw_kpis["provider_variance_score"] = stats.std() / stats.mean()
 
-            if c["doctor"] and c["los"]:
-                provider_counts = df[c["doctor"]].value_counts()
-                eligible = provider_counts[provider_counts >= 5].index 
-                if not eligible.empty:
-                    stats = df[df[c["doctor"]].isin(eligible)].groupby(c["doctor"])[c["los"]].mean()
-                    mean_val = stats.mean()
-                    if mean_val and mean_val > 0:
-                        kpis["provider_los_std"] = stats.std()
-                        kpis["provider_variance_score"] = stats.std() / mean_val
-                    else:
-                        kpis["provider_variance_score"] = None
-
-        # Sanitize
-        for k_key, v in list(kpis.items()):
-            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
-                kpis[k_key] = None
-
-        return kpis
-
-    # ---------------- VISUALS (GUARANTEED + SAFE) ----------------
+        # ORDERING: This ensures the "Most Important" 3-5 appear first in the report
+        ordered_keys = ["total_patients", "avg_cost_per_patient", "avg_los", "readmission_rate", "long_stay_rate", "data_completeness", "provider_variance_score", "avg_patient_age", "total_billing"]
+        final_kpis = {k: raw_kpis[k] for k in ordered_keys if k in raw_kpis and not (isinstance(raw_kpis[k], float) and (np.isnan(raw_kpis[k]) or np.isinf(raw_kpis[k])))}
+        
+        # Add any remaining keys
+        for k, v in raw_kpis.items():
+            if k not in final_kpis and not (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+                final_kpis[k] = v
+                
+        return final_kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
         c = self.cols
-        kpis = self.calculate_kpis(df)
-
-        def save(fig, name, caption, imp):
-            p = output_dir / name
-            fig.savefig(p, bbox_inches="tight")
+        
+        def save(fig, name, cap, imp):
+            fig.savefig(output_dir / name, bbox_inches="tight")
             plt.close(fig)
-            visuals.append({"path": str(p), "caption": caption, "importance": imp})
+            visuals.append({"path": str(output_dir / name), "caption": cap, "importance": imp})
 
         def human_fmt(x, _):
             if x >= 1e6: return f"{x/1e6:.1f}M"
             if x >= 1e3: return f"{x/1e3:.0f}K"
             return str(int(x))
 
-        is_row_level = self.shape == DatasetShape.ROW_LEVEL_CLINICAL
-        
+        # --- 11 POTENTIAL VISUALS (Filtered to Top 6 later) ---
+
         # 1. Volume Trend
         if self.time_col:
             try:
                 fig, ax = plt.subplots(figsize=(7, 4))
-                col = c["volume"] if c["volume"] else c["pid"]
-                agg = "sum" if c["volume"] else "count"
-                if agg == "sum":
-                    df.set_index(pd.to_datetime(df[self.time_col])).resample('ME')[col].sum().plot(ax=ax, color="#1f77b4")
-                else:
-                    df.set_index(pd.to_datetime(df[self.time_col])).resample('ME').size().plot(ax=ax, color="#1f77b4")
+                df.set_index(self.time_col).resample('ME').size().plot(ax=ax, color="#1f77b4")
                 ax.set_title("Patient Volume Trend")
-                save(fig, "vol_trend.png", "Demand over time", 0.95)
+                save(fig, "vol.png", "Demand stability", 0.99)
             except: pass
 
         # 2. LOS Distribution
-        if is_row_level and c["los"] and not df[c["los"]].dropna().empty:
+        if c["los"] and not df[c["los"]].dropna().empty:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                bins = min(15, max(5, int(len(df) ** 0.5)))
-                df[c["los"]].dropna().hist(ax=ax, bins=bins, color="teal", alpha=0.7)
-                ax.set_title("Length of Stay Distribution")
-                ax.set_xlabel("Days")
-                save(fig, "los_dist.png", "Stay duration spread", 0.90)
+                df[c["los"]].hist(ax=ax, bins=15, color="teal")
+                ax.set_title("LOS Distribution")
+                save(fig, "los.png", "Stay duration", 0.95)
             except: pass
 
         # 3. Cost by Condition
         if c["diagnosis"] and c["cost"]:
             try:
-                # 🛑 FIX: Prevent Blank Plot
                 if not df[c["cost"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
                     df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5).plot(kind="bar", ax=ax, color="orange")
-                    ax.set_title("Avg Cost by Condition")
+                    ax.set_title("Cost by Condition")
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost_diag.png", "Top cost drivers", 0.88)
+                    save(fig, "cost.png", "Cost drivers", 0.90)
             except: pass
 
         # 4. Readmission by Condition
-        if c["readmitted"] and c["diagnosis"] and is_row_level:
+        if c["readmitted"] and c["diagnosis"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
             try:
-                # 🛑 FIX: Prevent Blank Plot
                 if not df[c["readmitted"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
                     df.groupby(c["diagnosis"])[c["readmitted"]].mean().nlargest(5).plot(kind="barh", ax=ax, color="red")
-                    ax.set_title("Conditions with Highest Readmission")
-                    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
-                    save(fig, "readm_diag.png", "Clinical risk areas", 0.85)
+                    ax.set_title("Readmission Risk by Condition")
+                    save(fig, "readm.png", "Clinical risk", 0.88)
             except: pass
 
-        # 5. Cost vs LOS Scatter
-        if is_row_level and c["cost"] and c["los"]:
+        # 5. Cost vs LOS
+        if c["cost"] and c["los"]:
             try:
-                # 🛑 FIX: Prevent Blank Plot (Must have BOTH columns valid)
-                valid_scatter = df[[c["cost"], c["los"]]].dropna()
-                if not valid_scatter.empty:
+                valid = df[[c["cost"], c["los"]]].dropna()
+                if not valid.empty:
                     fig, ax = plt.subplots(figsize=(6, 4))
-                    plot_df = valid_scatter.sample(1000) if len(valid_scatter) > 1000 else valid_scatter
-                    ax.scatter(plot_df[c["los"]], plot_df[c["cost"]], alpha=0.5, color="gray", s=15)
-                    ax.set_title("Cost vs. Length of Stay")
+                    ax.scatter(valid[c["los"]], valid[c["cost"]], alpha=0.5, color="gray", s=15)
+                    ax.set_title("Cost vs. LOS")
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost_los.png", "Efficiency correlation", 0.80)
+                    save(fig, "cost_los.png", "Efficiency", 0.85)
             except: pass
 
         # 6. Provider Performance
-        if c["doctor"] and c["los"] and is_row_level:
+        if c["doctor"] and c["los"]:
             try:
-                 # 🛑 FIX: Prevent Blank Plot
                 if not df[c["los"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
                     df.groupby(c["doctor"])[c["los"]].mean().nlargest(10).plot(kind="bar", ax=ax, color="brown")
                     ax.set_title("Avg LOS by Provider")
-                    save(fig, "provider_los.png", "Care consistency", 0.75)
+                    save(fig, "prov.png", "Care consistency", 0.80)
             except: pass
 
         # 7. Payer Mix
@@ -322,7 +232,7 @@ class HealthcareDomain(BaseDomain):
                 df[c["payer"]].value_counts().head(5).plot(kind="pie", ax=ax, autopct='%1.1f%%')
                 ax.axis('equal')
                 ax.set_title("Payer Mix")
-                save(fig, "payer_mix.png", "Revenue source", 0.70)
+                save(fig, "payer.png", "Revenue source", 0.75)
             except: pass
 
         # 8. Outcomes
@@ -331,276 +241,128 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots(figsize=(6, 4))
                 df[c["outcome"]].value_counts().head(5).plot(kind="bar", ax=ax, color="purple")
                 ax.set_title("Discharge Outcomes")
-                save(fig, "outcomes.png", "Patient disposition", 0.65)
+                save(fig, "out.png", "Disposition", 0.70)
             except: pass
 
-        # 9. Day of Week Pattern
-        if self.time_col:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                dow_map = {0:'Mon', 1:'Tue', 2:'Wed', 3:'Thu', 4:'Fri', 5:'Sat', 6:'Sun'}
-                df["_dow"] = df[self.time_col].dt.dayofweek
-                counts = df["_dow"].value_counts().sort_index()
-                counts.index = counts.index.map(dow_map)
-                counts.plot(kind='bar', ax=ax, color="#2ca02c")
-                ax.set_title("Admissions by Day of Week")
-                save(fig, "admit_dow.png", "Weekly volume pattern", 0.60)
-            except: pass
-        
-        # 10. Cost Boxplot
+        # 9. Cost Boxplot
         if c["cost"]:
             try:
-                # 🛑 FIX: Prevent Blank Plot
                 if not df[c["cost"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(6, 4))
                     ax.boxplot(df[c["cost"]].dropna(), vert=False)
-                    ax.set_title("Cost Distribution (Outliers)")
+                    ax.set_title("Cost Distribution")
                     ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost_box.png", "Financial outliers", 0.55)
+                    save(fig, "cost_box.png", "Financial outliers", 0.65)
             except: pass
 
-        # GAP 4: Visual Fallback Guarantee
+        # 10. Age Distribution (New)
+        if c["age"]:
+            try:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                df[c["age"]].hist(ax=ax, bins=20, color="green", alpha=0.6)
+                ax.set_title("Patient Age Distribution")
+                save(fig, "age.png", "Demographics", 0.60)
+            except: pass
+
+        # 11. Admission Type (New)
+        if c["type"]:
+            try:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                df[c["type"]].value_counts().plot(kind="pie", ax=ax, autopct='%1.1f%%')
+                ax.set_title("Admission Type")
+                save(fig, "type.png", "Acuity mix", 0.55)
+            except: pass
+
         if len(visuals) < 3:
-            visuals.append({
-                "path": "fallback_placeholder.png", 
-                "caption": "Insufficient data for detailed clinical visualization.",
-                "importance": 0.1
-            })
+            visuals.append({"path": "placeholder.png", "caption": "Limited data for visuals", "importance": 0.1})
+            
+        # Return Top 6 as requested
+        return sorted(visuals, key=lambda x: x["importance"], reverse=True)[:6]
 
-        visuals.sort(key=lambda v: v["importance"], reverse=True)
-        return visuals[:6]
-
-    # ---------------- INSIGHTS ----------------
-
-    # GAP 1: Contract Fix (shape_info=None)
-    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any], shape_info: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    def generate_insights(self, df, kpis, shape_info=None):
+        # FACT-BASED ONLY. Narrative Engine adds Judgment.
         insights = []
         c = self.cols
         
-        los = kpis.get("avg_los")
-        readm = kpis.get("readmission_rate", 0)
-        cost = kpis.get("avg_cost_per_patient", 0)
-        weekend_rate = kpis.get("weekend_admission_rate", 0)
-        prov_var = kpis.get("provider_variance_score", 0)
-        data_complete = kpis.get("data_completeness", 1.0)
+        # Need 7 potential insights for robust reporting
         
-        limit_los = kpis.get("benchmark_los", 7.0)
-        limit_cost = kpis.get("benchmark_cost", 50000)
+        # 1. Limited Visibility (Shape)
+        if self.shape == DatasetShape.UNKNOWN:
+            insights.append({"level": "WARNING", "title": "Limited Visibility", "so_what": "Dataset lacks granular clinical fields."})
 
-        # 🔧 FIX 4: Insight Severity Calibration (Data Completeness)
-        if data_complete < 0.9:
-            insights.append({
-                "level": "WARNING",
-                "title": "Data Completeness Risk",
-                "so_what": f"Key clinical fields are {100-data_complete*100:.0f}% incomplete, limiting confidence in efficiency conclusions."
-            })
+        # 2. Payer Concentration Risk
+        if c["payer"]:
+            top_payer = df[c["payer"]].value_counts(normalize=True).iloc[0]
+            if top_payer > 0.5:
+                insights.append({"level": "RISK", "title": "Payer Concentration", "so_what": f"Top payer holds {top_payer:.0%} of volume, creating revenue risk."})
 
-        # UNKNOWN shape handling
-        if self.shape == DatasetShape.UNKNOWN or self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
-             insights.append({
-                "level": "WARNING",
-                "title": "Limited Clinical Visibility",
-                "so_what": "Dataset lacks granular patient-level fields. Clinical risk analysis is limited, but financial and volume signals remain valid."
-            })
+        # 3. Geriatric Complexity (Age + LOS)
+        if c["age"] and c["los"]:
+            avg_age = df[c["age"]].mean()
+            if avg_age > 65 and kpis.get("avg_los", 0) > 6:
+                insights.append({"level": "WARNING", "title": "Geriatric Complexity", "so_what": "High average age (65+) correlates with extended LOS."})
 
-        # 2. Composite: "Triple Threat"
-        if (los and los > limit_los) and (cost and cost > limit_cost) and (readm and readm > 0.15):
-            insights.append({
-                "level": "CRITICAL", 
-                "title": "Systemic Performance Drag", 
-                "so_what": "Convergence of high cost, long stays, and readmissions indicates deep operational inefficiency."
-            })
-        
-        # 3. Composite: "Operational Strain"
-        elif (los and los > limit_los) and (readm and readm > 0.12):
-            insights.append({
-                "level": "CRITICAL", 
-                "title": "Operational Strain", 
-                "so_what": "High LOS combined with readmissions suggests premature discharge or poor recovery planning."
-            })
+        # 4. Weekend Surge
+        if kpis.get("weekend_admission_rate", 0) > 0.35:
+             insights.append({"level": "WARNING", "title": "Weekend Surge", "so_what": "Weekend admissions exceed 35%, straining skeleton staff."})
 
-        # 4. Composite: "Clinical Variation"
-        if prov_var and prov_var > 0.5:
-            insights.append({
-                "level": "RISK", 
-                "title": "High Clinical Variation", 
-                "so_what": "Significant inconsistency in LOS across providers suggests lack of standardized protocols."
-            })
+        # 5. Clinical Variation
+        if kpis.get("provider_variance_score", 0) > 0.5:
+            insights.append({"level": "RISK", "title": "Clinical Variation", "so_what": "High inconsistency in LOS across providers."})
 
-        # 5. Composite: "Weekend Effect"
-        if weekend_rate > 0.35:
-            insights.append({
-                "level": "WARNING", 
-                "title": "Weekend Surge Detected", 
-                "so_what": f"Weekend admissions ({weekend_rate:.1%}) exceed norms, potentially straining skeleton staff."
-            })
+        # 6. Readmission Spike
+        if kpis.get("readmission_rate", 0) > 0.15:
+            insights.append({"level": "CRITICAL", "title": "High Readmission Rate", "so_what": "Readmission rate > 15% indicates discharge gaps."})
 
-        # 6. Composite: "Financial Inefficiency"
-        if cost and cost > limit_cost * 1.2:
-            insights.append({
-                "level": "WARNING", 
-                "title": "Cost Anomaly", 
-                "so_what": f"Avg cost per patient (${cost:,.0f}) is significantly above median benchmarks."
-            })
-            
-        # 7. POSITIVE INSIGHT (High Efficiency)
-        if los and los < limit_los * 0.8:
-            insights.append({
-                "level": "INFO", 
-                "title": "High Clinical Efficiency", 
-                "so_what": f"Average LOS ({los:.1f} days) is significantly below the benchmark ({limit_los:.1f}), indicating efficient discharge flow."
-            })
-            
-        # 🔧 FIX 2: Turn KPIs Into Judgments (Favorable Cost)
-        if cost and cost < limit_cost:
-            insights.append({
-                "level": "INFO",
-                "title": "Cost Efficiency",
-                "so_what": f"Average cost per patient (${cost:,.0f}) is well below benchmark (${limit_cost:,.0f}), indicating effective cost control."
-            })
+        # 7. Cost Anomaly
+        if kpis.get("avg_cost_per_patient", 0) > 20000:
+             insights.append({"level": "WARNING", "title": "High Cost Base", "so_what": "Average cost per patient exceeds $20k."})
 
-        # 8. Atomic Fallbacks
-        if readm and readm > 0.15 and not any(i["title"] == "Systemic Performance Drag" for i in insights):
-            insights.append({"level": "RISK", "title": "High Readmission Rate", "so_what": f"Readmission rate is {readm:.1%}."})
+        return insights
 
-        # Minimum Insight Contract
-        if not insights:
-            if cost and cost > 0:
-                insights.append({"level": "INFO", "title": "Financial Baseline", "so_what": f"Average cost per patient is ${cost:,.0f}."})
-            elif weekend_rate > 0:
-                 insights.append({"level": "INFO", "title": "Volume Baseline", "so_what": "Admissions volume is being monitored."})
-            else:
-                insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Key metrics are within expected tolerance levels."})
-
-        # Deduplication
-        seen = set()
-        final_insights = []
-        for i in insights:
-            if i["title"] not in seen:
-                final_insights.append(i)
-                seen.add(i["title"])
-        
-        return final_insights
-
-    # ---------------- RECOMMENDATIONS ----------------
-
-    # GAP 1: Contract Fix (shape_info=None)
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
-        if insights is None: insights = self.generate_insights(df, kpis, shape_info)
-        titles = [i["title"] for i in insights]
         recs = []
+        titles = [i["title"] for i in (insights or [])]
 
-        # 🔧 FIX 5: Outcome Framing (Owner, Timeline, Outcome)
+        # 7 Potential Recommendations
         
-        # 1. Strain / Readmissions
-        if "Operational Strain" in titles or "Systemic Performance Drag" in titles:
-            recs.append({
-                "action": "Audit discharge planning process immediately.",
-                "owner": "Clinical Operations",
-                "priority": "HIGH",
-                "timeline": "30 days",
-                "expected_outcome": "Reduce readmissions by 10%."
-            })
-            recs.append({
-                "action": "Implement mandatory post-discharge follow-up calls.",
-                "owner": "Nursing Leadership",
-                "priority": "HIGH",
-                "timeline": "Immediate",
-                "expected_outcome": "Identify recovery issues early."
-            })
-
-        # 2. Clinical Variation
-        if "High Clinical Variation" in titles:
-            recs.append({
-                "action": "Standardize treatment protocols for top conditions.",
-                "owner": "Chief Medical Officer",
-                "priority": "MEDIUM",
-                "timeline": "90 days",
-                "expected_outcome": "Reduce provider LOS variance by 20%."
-            })
-
-        # 3. Weekend Surge
-        if "Weekend Surge Detected" in titles:
-            recs.append({
-                "action": "Adjust staffing rosters for weekend coverage.",
-                "owner": "HR / Operations",
-                "priority": "MEDIUM",
-                "timeline": "Next Quarter",
-                "expected_outcome": "Balance staff-to-patient ratio."
-            })
-
-        # 4. Financial
+        # 1. Data Integrity
+        if kpis.get("data_completeness", 1) < 0.9:
+            recs.append({"action": "Verify ETL timestamps", "priority": "HIGH", "timeline": "Immediate", "owner": "Data Eng", "expected_outcome": "Enable Analysis"})
+        
+        # 2. Revenue Recovery
         if kpis.get("avg_cost_per_patient", 0) > 50000:
-            recs.append({
-                "action": "Review high-cost outliers for billing errors.",
-                "owner": "Finance Dept",
-                "priority": "MEDIUM",
-                "timeline": "30 days",
-                "expected_outcome": "Recover revenue and correct billing."
-            })
-        elif self.cols["cost"]:
-             recs.append({
-                "action": "Monitor monthly cost variance per patient.",
-                "owner": "Finance Dept",
-                "priority": "LOW",
-                "timeline": "Monthly",
-                "expected_outcome": "Maintain cost discipline."
-            })
+            recs.append({"action": "Review high-cost outliers", "priority": "MEDIUM", "timeline": "30 days", "owner": "Finance", "expected_outcome": "Recover Revenue"})
+        
+        # 3. Discharge Planning
+        if kpis.get("long_stay_rate", 0) > 0.15:
+            recs.append({"action": "Audit discharge planning", "priority": "HIGH", "timeline": "30 days", "owner": "Clinical Ops", "expected_outcome": "Reduce LOS"})
 
-        # 5. Data Hygiene
-        if kpis.get("avg_los") is None and self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
-            recs.append({
-                "action": "Verify admission/discharge timestamps in ETL.",
-                "owner": "Data Engineering",
-                "priority": "HIGH",
-                "timeline": "Immediate",
-                "expected_outcome": "Enable LOS and throughput analysis."
-            })
+        # 4. Payer Strategy
+        if self.cols["payer"]:
+            recs.append({"action": "Evaluate payer contracts", "priority": "LOW", "timeline": "Annual", "owner": "Revenue Cycle", "expected_outcome": "Optimize Profit"})
 
-        # 6. Operational
-        if self.time_col:
-             recs.append({
-                "action": "Flag weeks with abnormal admission spikes.",
-                "owner": "Operations Lead",
-                "priority": "LOW",
-                "timeline": "Weekly",
-                "expected_outcome": "Proactive capacity management."
-            })
+        # 5. Geriatric Care
+        if "Geriatric Complexity" in titles:
+            recs.append({"action": "Implement geriatric pathways", "priority": "MEDIUM", "timeline": "90 days", "owner": "CMO", "expected_outcome": "Reduce LoS for Seniors"})
 
-        # 7. Payer/Revenue
-        if self.cols["payer"] and kpis.get("total_patients", 0) > 50:
-            recs.append({
-                "action": "Evaluate payer contracts against readmission risks.",
-                "owner": "Revenue Cycle",
-                "priority": "LOW",
-                "timeline": "Annual",
-                "expected_outcome": "Optimize payer mix profitability."
-            })
+        # 6. Staffing
+        if "Weekend Surge" in titles:
+            recs.append({"action": "Adjust weekend staffing", "priority": "MEDIUM", "timeline": "Next Quarter", "owner": "HR", "expected_outcome": "Capacity Balance"})
 
-        if not recs:
-            recs.append({
-                "action": "Monitor operational trends.", 
-                "owner": "Operations",
-                "priority": "LOW", 
-                "timeline": "Ongoing",
-                "expected_outcome": "Ensure stability."
-            })
+        # 7. Standardization
+        if "Clinical Variation" in titles:
+            recs.append({"action": "Standardize treatment protocols", "priority": "MEDIUM", "timeline": "60 days", "owner": "CMO", "expected_outcome": "Consistent Care"})
 
-        return recs
-
-
-# =====================================================
-# DOMAIN REGISTRATION
-# =====================================================
+        return recs or [{"action": "Monitor trends", "priority": "LOW", "timeline": "Ongoing", "owner": "Ops", "expected_outcome": "Stability"}]
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-    TOKENS = {"patient", "admission", "diagnosis", "clinical", "doctor", "readmitted"}
-
-    def detect(self, df) -> DomainDetectionResult:
+    TOKENS = {"patient", "admission", "diagnosis", "medical_condition", "clinical", "doctor", "insurance"}
+    
+    def detect(self, df):
         hits = [c for c in df.columns if any(t in c.lower() for t in self.TOKENS)]
-        confidence = min(len(hits)/3, 1.0)
-        return DomainDetectionResult("healthcare", confidence, {"matched_columns": hits})
+        return DomainDetectionResult("healthcare", min(len(hits)/3, 1.0), {})
 
 def register(registry):
     registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
