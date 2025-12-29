@@ -58,6 +58,16 @@ def build_narrative(
     # =================================================
     summary: List[str] = []
 
+    # 🔧 FIX 4: Executive Brief Enrichment Rule (UNKNOWN Shape)
+    # Check if we have the specific "Limited Visibility" warning
+    limited_visibility = any(i.get("title") == "Limited Clinical Visibility" for i in insights)
+
+    if limited_visibility:
+        summary.append(
+            "While patient-level outcomes cannot be evaluated due to dataset structure, "
+            "financial exposure and demand trends remain clearly visible and actionable."
+        )
+
     # ---- Domain truth enforcement (Healthcare) ----
     if domain == "healthcare":
         long_stay_rate = kpis.get("long_stay_rate") or 0
@@ -76,10 +86,11 @@ def build_narrative(
             )
 
     # ---- Insight reinforcement (secondary signal) ----
+    # (Skip "Limited Clinical Visibility" here since we handled it above)
     for ins in insights[:2]:
         title = ins.get("title")
         so_what = ins.get("so_what")
-        if title and so_what:
+        if title and so_what and title != "Limited Clinical Visibility":
             summary.append(f"{title}: {so_what}")
 
     # ---- De-duplicate executive summary ----
@@ -119,7 +130,7 @@ def build_narrative(
     # Generic KPI-driven fallback
     if not financial:
         for k, v in kpis.items():
-            if isinstance(v, (int, float)) and abs(v) > 0:
+            if isinstance(v, (int, float)) and abs(v) > 0 and "debug" not in k:
                 financial.append(
                     f"{k.replace('_', ' ').title()} levels may have downstream financial implications."
                 )
@@ -146,7 +157,7 @@ def build_narrative(
     actions: List[ActionItem] = []
 
     # Prefer domain-generated recommendations
-    for rec in recommendations[:2]:
+    for rec in recommendations[:3]: # Allow up to 3 to show variety
         if isinstance(rec, dict):
             actions.append(
                 ActionItem(
