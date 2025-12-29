@@ -4,7 +4,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional
+from typing import Dict, Any, List, Optional
 from enum import Enum
 from matplotlib.ticker import FuncFormatter
 
@@ -14,7 +14,7 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# SHAPE DETECTION ENGINE
+# SHAPE DETECTION ENGINE (ROBUST + FUZZY)
 # =====================================================
 
 class DatasetShape(str, Enum):
@@ -25,7 +25,7 @@ class DatasetShape(str, Enum):
     UNKNOWN = "unknown"
 
 def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
-    # 1. Normalize columns (lowercase, strip spaces) for easier matching
+    # Normalize for fuzzy matching
     cols = [c.lower().strip().replace(" ", "_") for c in df.columns]
     
     score = {
@@ -35,34 +35,24 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
         DatasetShape.QUALITY_METRICS: 0,
     }
 
-    # 2. Fuzzy Matching Logic (Substrings)
-    # ROW LEVEL SIGNALS
-    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "subject"]): 
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
-    if any(x in c for c in cols for x in ["admit", "admission", "date_of_ad"]): 
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
-    if any(x in c for c in cols for x in ["discharge", "disch"]): 
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+    # Fuzzy Logic
+    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "subject", "id"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
+    if any(x in c for c in cols for x in ["admit", "admission", "date_of_ad"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+    if any(x in c for c in cols for x in ["discharge", "disch"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
 
-    # AGGREGATED SIGNALS
-    if any(x in c for c in cols for x in ["total_pat", "visits", "volume", "census"]): 
-        score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
+    if any(x in c for c in cols for x in ["total_pat", "visits", "volume", "census"]): score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
     
-    # FINANCIAL SIGNALS
-    if any(x in c for c in cols for x in ["revenue", "bill", "charge", "cost", "amount"]): 
-        score[DatasetShape.FINANCIAL_SUMMARY] += 2
+    if any(x in c for c in cols for x in ["revenue", "bill", "charge", "cost", "amount"]): score[DatasetShape.FINANCIAL_SUMMARY] += 2
 
-    # QUALITY SIGNALS
-    if any(x in c for c in cols for x in ["rate", "mortality", "readm"]): 
-        score[DatasetShape.QUALITY_METRICS] += 2
+    if any(x in c for c in cols for x in ["rate", "mortality", "readm"]): score[DatasetShape.QUALITY_METRICS] += 2
 
     best_shape = max(score, key=score.get)
 
-    # 3. Priority Override (Row-level beats everything)
+    # Priority Override
     if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3:
         best_shape = DatasetShape.ROW_LEVEL_CLINICAL
 
-    # Only default to UNKNOWN if absolutely zero signals found
+    # Only truly UNKNOWN if zero signals
     if score[best_shape] == 0: 
         best_shape = DatasetShape.UNKNOWN
 
@@ -79,7 +69,7 @@ def _safe_div(n, d):
     return n / d
 
 def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
-    candidates = ["admission_date", "visit_date", "date", "discharge_date"]
+    candidates = ["admission_date", "visit_date", "date", "discharge_date", "admit_date"]
     for c in df.columns:
         if any(k in c.lower() for k in candidates):
             try:
@@ -102,7 +92,7 @@ def _derive_length_of_stay(df, admit, discharge):
 
 
 # =====================================================
-# HEALTHCARE DOMAIN (FINAL POLISHED)
+# HEALTHCARE DOMAIN (INTELLIGENCE UPGRADED)
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -113,8 +103,6 @@ class HealthcareDomain(BaseDomain):
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.time_col = _detect_time_column(df)
-        
-        # ✅ Store full result for debugging
         self.shape_info = detect_dataset_shape(df)
         self.shape = self.shape_info["shape"]
         
@@ -134,14 +122,14 @@ class HealthcareDomain(BaseDomain):
             "age": resolve_column(df, "age") or resolve_column(df, "dob"),
         }
 
-        # Strict Numeric Enforcement
+        # Numeric Enforcement
         numeric_targets = ["los", "cost", "volume", "avg_los", "age"]
         for key in numeric_targets:
             col_name = self.cols.get(key)
             if col_name and col_name in df.columns:
                 df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
 
-        # Readmission Coercion Safety
+        # Readmission Safety
         if self.cols["readmitted"]:
             col_r = self.cols["readmitted"]
             val_map = {"yes": 1, "no": 0, "true": 1, "false": 0, "1": 1, "0": 0, "y": 1, "n": 0}
@@ -149,7 +137,7 @@ class HealthcareDomain(BaseDomain):
                 df[col_r] = df[col_r].astype(str).str.lower().map(val_map)
             df[col_r] = pd.to_numeric(df[col_r], errors='coerce')
 
-        # Row Level Logic
+        # Row Logic
         if self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
             if not self.cols["los"] and self.cols["admit"] and self.cols["discharge"]:
                 df["derived_los"] = _derive_length_of_stay(df, self.cols["admit"], self.cols["discharge"])
@@ -167,8 +155,6 @@ class HealthcareDomain(BaseDomain):
         kpis: Dict[str, Any] = {}
         c = self.cols
         kpis["dataset_shape"] = self.shape.value
-        
-        # ✅ OPTIONAL 1: Expose scoring debug info
         kpis["debug_shape_score"] = self.shape_info.get("score")
 
         if self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
@@ -177,11 +163,10 @@ class HealthcareDomain(BaseDomain):
             kpis["is_aggregated"] = True
             
         else:
-            # --- Row-Level Logic ---
+            # Row-Level Logic (Also runs for UNKNOWN if columns exist)
             kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
             kpis["is_aggregated"] = False
 
-            # LOS Metrics
             if c["los"] and not df[c["los"]].dropna().empty:
                 kpis["avg_los"] = df[c["los"]].mean()
                 median_los = df[c["los"]].median()
@@ -192,7 +177,6 @@ class HealthcareDomain(BaseDomain):
             else:
                 kpis["avg_los"] = None
 
-            # Financial Metrics
             if c["cost"]:
                 kpis["total_billing"] = df[c["cost"]].sum()
                 kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
@@ -201,7 +185,6 @@ class HealthcareDomain(BaseDomain):
                 if kpis.get("avg_los"):
                     kpis["avg_cost_per_day"] = _safe_div(kpis["avg_cost_per_patient"], kpis["avg_los"])
 
-            # Quality Metrics
             if c["readmitted"]:
                 kpis["readmission_rate"] = df[c["readmitted"]].mean()
             
@@ -209,12 +192,11 @@ class HealthcareDomain(BaseDomain):
                 neg_mask = df[c["outcome"]].astype(str).str.lower().str.contains(r'died|expired|death|mortality')
                 kpis["mortality_rate"] = neg_mask.mean()
 
-            # Weekend Rate
-            if self.time_col and self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
+            # Weekend Rate (Valid for any dataset with time)
+            if self.time_col:
                 df["_dow"] = df[self.time_col].dt.dayofweek
                 kpis["weekend_admission_rate"] = df["_dow"].isin([5, 6]).mean()
 
-            # Provider Variance
             if c["doctor"] and c["los"]:
                 provider_counts = df[c["doctor"]].value_counts()
                 eligible = provider_counts[provider_counts >= 5].index 
@@ -227,14 +209,14 @@ class HealthcareDomain(BaseDomain):
                     else:
                         kpis["provider_variance_score"] = None
 
-        # Sanitize NaNs
+        # Sanitize
         for k_key, v in list(kpis.items()):
             if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
                 kpis[k_key] = None
 
         return kpis
 
-    # ---------------- VISUALS ----------------
+    # ---------------- VISUALS (SHAPE-AWARE GUARANTEES) ----------------
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
         visuals = []
@@ -255,7 +237,7 @@ class HealthcareDomain(BaseDomain):
 
         is_row_level = self.shape == DatasetShape.ROW_LEVEL_CLINICAL
         
-        # 1. Volume Trend
+        # 1. Volume Trend (Always try)
         if self.time_col:
             try:
                 fig, ax = plt.subplots(figsize=(7, 4))
@@ -269,7 +251,7 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "vol_trend.png", "Demand over time", 0.95)
             except: pass
 
-        # 2. LOS Distribution
+        # 2. LOS Distribution (Row Level Only)
         if is_row_level and c["los"] and not df[c["los"]].dropna().empty:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
@@ -280,8 +262,8 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "los_dist.png", "Stay duration spread", 0.90)
             except: pass
 
-        # 3. Cost by Condition
-        if c["diagnosis"] and c["cost"] and not kpis.get("is_aggregated"):
+        # 3. Cost by Condition (If diagnosis exists, even if aggregated)
+        if c["diagnosis"] and c["cost"]:
             try:
                 fig, ax = plt.subplots(figsize=(7, 4))
                 df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5).plot(kind="bar", ax=ax, color="orange")
@@ -290,7 +272,7 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "cost_diag.png", "Top cost drivers", 0.88)
             except: pass
 
-        # 4. Readmission by Condition
+        # 4. Readmission by Condition (Row Level Only)
         if c["readmitted"] and c["diagnosis"] and is_row_level:
             try:
                 fig, ax = plt.subplots(figsize=(7, 4))
@@ -339,7 +321,7 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "outcomes.png", "Patient disposition", 0.65)
             except: pass
 
-        # 9. Day of Week Pattern
+        # 9. Day of Week Pattern (Always try)
         if self.time_col:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
@@ -352,8 +334,8 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "admit_dow.png", "Weekly volume pattern", 0.60)
             except: pass
         
-        # 10. Cost Boxplot
-        if c["cost"] and is_row_level:
+        # 10. Cost Boxplot (Try even if UNKNOWN)
+        if c["cost"]:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.boxplot(df[c["cost"]].dropna(), vert=False)
@@ -365,7 +347,7 @@ class HealthcareDomain(BaseDomain):
         visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals[:6]
 
-    # ---------------- INSIGHTS ----------------
+    # ---------------- INSIGHTS (SAFE FALLBACKS) ----------------
 
     def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any], shape_info: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         insights = []
@@ -380,12 +362,16 @@ class HealthcareDomain(BaseDomain):
         limit_los = kpis.get("benchmark_los", 7.0)
         limit_cost = kpis.get("benchmark_cost", 50000)
 
-        # 1. Dataset Context
-        if self.shape != DatasetShape.ROW_LEVEL_CLINICAL:
-            insights.append({"level": "INFO", "title": f"Mode: {self.shape.name}", "so_what": "Analysis adapted for dataset shape."})
+        # 🔧 FIX 1: Upgrade UNKNOWN shape handling
+        if self.shape == DatasetShape.UNKNOWN or self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
+             insights.append({
+                "level": "WARNING",
+                "title": "Limited Clinical Visibility",
+                "so_what": "Dataset lacks granular patient-level fields. Clinical risk analysis is limited, but financial and volume signals remain valid."
+            })
 
         # 2. Composite: "Triple Threat"
-        if (los and los > limit_los) and (cost > limit_cost) and (readm > 0.15):
+        if (los and los > limit_los) and (cost and cost > limit_cost) and (readm and readm > 0.15):
             insights.append({
                 "level": "CRITICAL", 
                 "title": "Systemic Performance Drag", 
@@ -393,7 +379,7 @@ class HealthcareDomain(BaseDomain):
             })
         
         # 3. Composite: "Operational Strain"
-        elif (los and los > limit_los) and (readm > 0.12):
+        elif (los and los > limit_los) and (readm and readm > 0.12):
             insights.append({
                 "level": "CRITICAL", 
                 "title": "Operational Strain", 
@@ -424,12 +410,18 @@ class HealthcareDomain(BaseDomain):
                 "so_what": f"Avg cost per patient (${cost:,.0f}) is significantly above median benchmarks."
             })
 
-        # 7. Atomic Fallbacks
+        # 7. Atomic Fallbacks (Ensure we never return empty)
         if readm and readm > 0.15 and not any(i["title"] == "Systemic Performance Drag" for i in insights):
             insights.append({"level": "RISK", "title": "High Readmission Rate", "so_what": f"Readmission rate is {readm:.1%}."})
 
+        # 🔧 FIX 2: Minimum Insight Contract
         if not insights:
-            insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Key metrics are within expected tolerance levels."})
+            if cost and cost > 0:
+                insights.append({"level": "INFO", "title": "Financial Baseline", "so_what": f"Average cost per patient is ${cost:,.0f}."})
+            elif weekend_rate > 0:
+                 insights.append({"level": "INFO", "title": "Volume Baseline", "so_what": "Admissions volume is being monitored."})
+            else:
+                insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Key metrics are within expected tolerance levels."})
 
         # Deduplication
         seen = set()
@@ -441,7 +433,7 @@ class HealthcareDomain(BaseDomain):
         
         return final_insights
 
-    # ---------------- RECOMMENDATIONS ----------------
+    # ---------------- RECOMMENDATIONS (LAYERED) ----------------
 
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
         if insights is None: insights = self.generate_insights(df, kpis, shape_info)
@@ -468,11 +460,6 @@ class HealthcareDomain(BaseDomain):
                 "priority": "MEDIUM",
                 "timeline": "90 days"
             })
-            recs.append({
-                "action": "Conduct peer review for outlier providers.",
-                "priority": "MEDIUM",
-                "timeline": "60 days"
-            })
 
         # 3. Weekend Surge
         if "Weekend Surge Detected" in titles:
@@ -482,31 +469,37 @@ class HealthcareDomain(BaseDomain):
                 "timeline": "Next Quarter"
             })
 
-        # 4. Financial
+        # 4. Financial (Always check if cost exists)
         if kpis.get("avg_cost_per_patient", 0) > 50000:
             recs.append({
                 "action": "Review high-cost outliers for billing errors.",
                 "priority": "MEDIUM",
                 "timeline": "30 days"
             })
+        elif self.cols["cost"]: # 🔧 FIX 5: Recommendation Layering
+             recs.append({
+                "action": "Monitor monthly cost variance per patient.",
+                "priority": "LOW",
+                "timeline": "Monthly"
+            })
 
-        # 5. Data Hygiene
-        if kpis.get("avg_los") is None:
+        # 5. Data Hygiene (Specific)
+        if kpis.get("avg_los") is None and self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
             recs.append({
                 "action": "Verify admission/discharge timestamps in ETL.",
                 "priority": "HIGH",
                 "timeline": "Immediate"
             })
 
-        # 6. General Efficiency
-        if kpis.get("bed_turnover_index", 0) < 0.1 and kpis.get("bed_turnover_index") is not None:
-            recs.append({
-                "action": "Optimize bed management and turnover workflow.",
+        # 6. Operational (Always check if time exists)
+        if self.time_col:
+             recs.append({
+                "action": "Flag weeks with abnormal admission spikes.",
                 "priority": "LOW",
-                "timeline": "6 months"
+                "timeline": "Weekly"
             })
 
-        # 7. Payer/Revenue (✅ OPTIONAL 2: Guard against small datasets)
+        # 7. Payer/Revenue
         if self.cols["payer"] and kpis.get("total_patients", 0) > 50:
             recs.append({
                 "action": "Evaluate payer contracts against readmission risks.",
