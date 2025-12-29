@@ -46,7 +46,9 @@ def build_narrative(
     - Safe for PDF / UI / API
     """
 
+    # -------------------------------------------------
     # Defensive normalization
+    # -------------------------------------------------
     kpis = kpis or {}
     insights = insights or []
     recommendations = recommendations or []
@@ -58,8 +60,8 @@ def build_narrative(
 
     # ---- Domain truth enforcement (Healthcare) ----
     if domain == "healthcare":
-        long_stay_rate = kpis.get("long_stay_rate", 0) or 0
-        readmission_rate = kpis.get("readmission_rate", 0) or 0
+        long_stay_rate = kpis.get("long_stay_rate") or 0
+        readmission_rate = kpis.get("readmission_rate") or 0
 
         if isinstance(long_stay_rate, (int, float)) and long_stay_rate > 0.25:
             summary.append(
@@ -73,21 +75,21 @@ def build_narrative(
                 "gaps in discharge planning or follow-up care."
             )
 
-    # ---- Insight reinforcement (secondary) ----
+    # ---- Insight reinforcement (secondary signal) ----
     for ins in insights[:2]:
         title = ins.get("title")
         so_what = ins.get("so_what")
         if title and so_what:
             summary.append(f"{title}: {so_what}")
 
-    # ---- FIX A: De-duplicate executive summary ----
+    # ---- De-duplicate executive summary ----
     seen = set()
-    clean_summary: List[str] = []
-    for s in summary:
-        if s not in seen:
-            clean_summary.append(s)
-            seen.add(s)
-    summary = clean_summary
+    deduped_summary: List[str] = []
+    for line in summary:
+        if line not in seen:
+            deduped_summary.append(line)
+            seen.add(line)
+    summary = deduped_summary
 
     # ---- Absolute fallback (never empty) ----
     if not summary:
@@ -104,7 +106,6 @@ def build_narrative(
         avg_cost = kpis.get("avg_cost_per_patient")
         avg_los = kpis.get("avg_los")
 
-        # FIX B: strict numeric safety
         if (
             isinstance(avg_cost, (int, float))
             and isinstance(avg_los, (int, float))
@@ -158,7 +159,8 @@ def build_narrative(
 
     # KPI-driven fallback (Healthcare)
     if not actions and domain == "healthcare":
-        if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] > 0.15:
+        long_stay_rate = kpis.get("long_stay_rate")
+        if isinstance(long_stay_rate, (int, float)) and long_stay_rate > 0.15:
             actions.append(
                 ActionItem(
                     action="Audit discharge planning for long-stay patients",
