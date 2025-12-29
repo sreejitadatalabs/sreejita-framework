@@ -47,12 +47,6 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 def generate_report_payload(input_path: str, config: dict) -> dict:
     """
     Orchestrator — SINGLE SOURCE OF TRUTH
-
-    GUARANTEES:
-    - Dataset-shape aware
-    - Domain-safe execution
-    - Visuals never block
-    - Narrative never breaks
     """
 
     input_path = Path(input_path)
@@ -112,24 +106,20 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
 
         kpis = engine.calculate_kpis(df)
 
-        # 🔑 Shape-aware insights
-        insights = engine.generate_insights(
-            df,
-            kpis,
-            shape_info=shape_info
-            if "shape_info" in engine.generate_insights.__code__.co_varnames
-            else None
-        )
+        # 🔑 Shape-aware insights (Robust Call)
+        # We try passing shape_info; if the engine is old/doesn't support it, we catch the error and retry without.
+        try:
+            insights = engine.generate_insights(df, kpis, shape_info=shape_info)
+        except TypeError:
+            # Fallback for older domains that don't accept shape_info yet
+            insights = engine.generate_insights(df, kpis)
 
-        # 🔑 Shape-aware recommendations
-        raw_recommendations = engine.generate_recommendations(
-            df,
-            kpis,
-            insights,
-            shape_info=shape_info
-            if "shape_info" in engine.generate_recommendations.__code__.co_varnames
-            else None
-        )
+        # 🔑 Shape-aware recommendations (Robust Call)
+        try:
+            raw_recommendations = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
+        except TypeError:
+            # Fallback
+            raw_recommendations = engine.generate_recommendations(df, kpis, insights)
 
         recommendations = enrich_recommendations(raw_recommendations)
 
@@ -149,20 +139,11 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         try:
             generated = engine.generate_visuals(df, visuals_dir) or []
         except Exception as e:
-            log.error(
-                "Visual generation failed for domain '%s': %s",
-                domain,
-                e,
-                exc_info=True,
-            )
+            log.error("Visual generation failed for domain '%s': %s", domain, e)
             generated = []
 
         for vis in generated:
-            if (
-                isinstance(vis, dict)
-                and vis.get("path")
-                and Path(vis["path"]).exists()
-            ):
+            if isinstance(vis, dict) and vis.get("path") and Path(vis["path"]).exists():
                 visuals.append(vis)
             else:
                 log.warning("Invalid visual skipped: %s", vis)
@@ -176,6 +157,6 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             "insights": insights,
             "recommendations": recommendations,
             "visuals": visuals,
-            "shape": shape_info,  # ✅ EXPOSED FOR NARRATIVE & PDF
+            "shape": shape_info,
         }
     }
