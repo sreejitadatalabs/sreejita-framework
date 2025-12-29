@@ -52,7 +52,7 @@ def build_narrative(
     recommendations: List[Dict[str, Any]],
 ) -> NarrativeResult:
     """
-    Deterministic Executive Narrative Engine v4.1 (Fixes KeyErrors)
+    Deterministic Executive Narrative Engine v4.2 (Context-Aware)
     """
     kpis = kpis or {}
     insights = insights or []
@@ -68,6 +68,12 @@ def build_narrative(
     # -------------------------------------------------
     if domain == "healthcare":
         
+        # FIX 4: Narrative Language Adjustment (Transparency for Aggregated Data)
+        if kpis.get("dataset_shape") == "aggregated_operational":
+            summary.append(
+                "NOTICE: This assessment is based on aggregated operational data; conclusions reflect broad trends rather than individual patient journeys."
+            )
+
         # --- 1. Operational Efficiency & Financial Translation ---
         avg_los = kpis.get("avg_los")
         total_patients = kpis.get("total_patients", 0)
@@ -90,8 +96,7 @@ def build_narrative(
                 loss_str = f"${opportunity_loss/1_000_000:.1f}M" if opportunity_loss > 1_000_000 else f"${opportunity_loss/1_000:.0f}K"
                 
                 summary.append(
-                    f"Average length of stay ({avg_los:.1f} days) significantly exceeds crisis thresholds, "
-                      f"indicating severe discharge inefficiencies."
+                    f"CRITICAL: Average LOS ({avg_los:.1f} days) significantly exceeds the {B['avg_los']['source']} crisis threshold of {limit} days."
                 )
                 financial.append(
                     f"Capacity Bottleneck: Excess stay duration ({excess_days:.1f} days over target) represents an estimated **{loss_str}** in annualized opportunity cost."
