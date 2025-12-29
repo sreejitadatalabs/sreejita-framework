@@ -492,6 +492,7 @@ class HealthcareDomain(BaseDomain):
 
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
         recs = []
+        t = HEALTHCARE_THRESHOLDS
         titles = [i["title"] for i in (insights or [])]
         
         if "High Facility Variance" in titles:
