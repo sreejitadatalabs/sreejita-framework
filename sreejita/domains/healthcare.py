@@ -43,7 +43,7 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
 
     best_shape = max(score, key=score.get)
 
-    # ✅ FIX 1: Priority Override (Row-level beats everything)
+    # Priority Override (Row-level beats everything)
     if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3:
         best_shape = DatasetShape.ROW_LEVEL_CLINICAL
 
@@ -86,7 +86,7 @@ def _derive_length_of_stay(df, admit, discharge):
 
 
 # =====================================================
-# HEALTHCARE DOMAIN (FINAL GOLD VERSION)
+# HEALTHCARE DOMAIN (FINAL POLISHED)
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
@@ -97,8 +97,10 @@ class HealthcareDomain(BaseDomain):
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.time_col = _detect_time_column(df)
-        shape_result = detect_dataset_shape(df)
-        self.shape = shape_result["shape"]
+        
+        # ✅ Store full result for debugging
+        self.shape_info = detect_dataset_shape(df)
+        self.shape = self.shape_info["shape"]
         
         self.cols = {
             "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
@@ -123,13 +125,12 @@ class HealthcareDomain(BaseDomain):
             if col_name and col_name in df.columns:
                 df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
 
-        # ✅ FIX 2: Readmission Coercion Safety (No fillna(0))
+        # Readmission Coercion Safety
         if self.cols["readmitted"]:
             col_r = self.cols["readmitted"]
             val_map = {"yes": 1, "no": 0, "true": 1, "false": 0, "1": 1, "0": 0, "y": 1, "n": 0}
             if df[col_r].dtype == object:
                 df[col_r] = df[col_r].astype(str).str.lower().map(val_map)
-            # Leave NaNs as NaNs to avoid skewing the mean
             df[col_r] = pd.to_numeric(df[col_r], errors='coerce')
 
         # Row Level Logic
@@ -150,8 +151,10 @@ class HealthcareDomain(BaseDomain):
         kpis: Dict[str, Any] = {}
         c = self.cols
         kpis["dataset_shape"] = self.shape.value
+        
+        # ✅ OPTIONAL 1: Expose scoring debug info
+        kpis["debug_shape_score"] = self.shape_info.get("score")
 
-        # ✅ FIX 3: No Early Return (Preserves structure & sanitization)
         if self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
             if c["volume"]: kpis["total_patients"] = df[c["volume"]].sum()
             if c["avg_los"]: kpis["avg_los"] = df[c["avg_los"]].mean()
@@ -184,18 +187,18 @@ class HealthcareDomain(BaseDomain):
 
             # Quality Metrics
             if c["readmitted"]:
-                kpis["readmission_rate"] = df[c["readmitted"]].mean() # Ignores NaNs correctly
+                kpis["readmission_rate"] = df[c["readmitted"]].mean()
             
             if c["outcome"]:
                 neg_mask = df[c["outcome"]].astype(str).str.lower().str.contains(r'died|expired|death|mortality')
                 kpis["mortality_rate"] = neg_mask.mean()
 
-            # ✅ FIX 5: Weekend Rate (Shape Aware)
+            # Weekend Rate
             if self.time_col and self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
                 df["_dow"] = df[self.time_col].dt.dayofweek
                 kpis["weekend_admission_rate"] = df["_dow"].isin([5, 6]).mean()
 
-            # ✅ FIX 4: Provider Variance Safety
+            # Provider Variance
             if c["doctor"] and c["los"]:
                 provider_counts = df[c["doctor"]].value_counts()
                 eligible = provider_counts[provider_counts >= 5].index 
@@ -208,7 +211,7 @@ class HealthcareDomain(BaseDomain):
                     else:
                         kpis["provider_variance_score"] = None
 
-        # Sanitize NaNs (Crucial for PDF/JSON safety)
+        # Sanitize NaNs
         for k_key, v in list(kpis.items()):
             if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
                 kpis[k_key] = None
@@ -343,7 +346,6 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "cost_box.png", "Financial outliers", 0.55)
             except: pass
 
-        # Sort and return top 6
         visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals[:6]
 
@@ -359,7 +361,6 @@ class HealthcareDomain(BaseDomain):
         weekend_rate = kpis.get("weekend_admission_rate", 0)
         prov_var = kpis.get("provider_variance_score", 0)
         
-        # Limits
         limit_los = kpis.get("benchmark_los", 7.0)
         limit_cost = kpis.get("benchmark_cost", 50000)
 
@@ -414,7 +415,7 @@ class HealthcareDomain(BaseDomain):
         if not insights:
             insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Key metrics are within expected tolerance levels."})
 
-        # ✅ FIX 6: Insight Deduplication
+        # Deduplication
         seen = set()
         final_insights = []
         for i in insights:
@@ -489,8 +490,8 @@ class HealthcareDomain(BaseDomain):
                 "timeline": "6 months"
             })
 
-        # 7. Payer/Revenue
-        if self.cols["payer"]:
+        # 7. Payer/Revenue (✅ OPTIONAL 2: Guard against small datasets)
+        if self.cols["payer"] and kpis.get("total_patients", 0) > 50:
             recs.append({
                 "action": "Evaluate payer contracts against readmission risks.",
                 "priority": "LOW",
