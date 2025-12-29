@@ -31,18 +31,14 @@ def classify_severity(value, metric, thresholds, reverse=False):
     """
     Classifies a value as INFO, WARNING, or CRITICAL.
     """
-    if value is None:
-        return "INFO"
-    
+    if value is None: return "INFO"
     t = thresholds.get(metric, {})
-    
     if reverse:
         if value < t.get("critical", 0): return "CRITICAL"
         if value < t.get("warning", 0): return "WARNING"
     else:
         if value >= t.get("critical", float("inf")): return "CRITICAL"
         if value >= t.get("warning", float("inf")): return "WARNING"
-        
     return "INFO"
 
 def build_narrative(
@@ -52,7 +48,7 @@ def build_narrative(
     recommendations: List[Dict[str, Any]],
 ) -> NarrativeResult:
     """
-    Deterministic Executive Narrative Engine v4.2 (Context-Aware)
+    Deterministic Executive Narrative Engine v5.0 (Financial Injection)
     """
     kpis = kpis or {}
     insights = insights or []
@@ -62,19 +58,22 @@ def build_narrative(
     financial = []
     risks = []
     actions = []
+    
+    # Context variable to hold calculated savings for injection into recommendations
+    calculated_savings = None 
 
     # -------------------------------------------------
     # DOMAIN INTELLIGENCE: HEALTHCARE
     # -------------------------------------------------
     if domain == "healthcare":
         
-        # FIX 4: Narrative Language Adjustment (Transparency for Aggregated Data)
+        # 1. Context Transparency
         if kpis.get("dataset_shape") == "aggregated_operational":
             summary.append(
                 "NOTICE: This assessment is based on aggregated operational data; conclusions reflect broad trends rather than individual patient journeys."
             )
 
-        # --- 1. Operational Efficiency & Financial Translation ---
+        # 2. Operational Efficiency & Financial Translation
         avg_los = kpis.get("avg_los")
         total_patients = kpis.get("total_patients", 0)
         
@@ -95,6 +94,9 @@ def build_narrative(
                 opportunity_loss = excess_days * cost_per_day * total_patients
                 loss_str = f"${opportunity_loss/1_000_000:.1f}M" if opportunity_loss > 1_000_000 else f"${opportunity_loss/1_000:.0f}K"
                 
+                # SAVE THIS VALUE FOR INJECTION
+                calculated_savings = loss_str
+                
                 summary.append(
                     f"CRITICAL: Average LOS ({avg_los:.1f} days) significantly exceeds the {B['avg_los']['source']} crisis threshold of {limit} days."
                 )
@@ -109,7 +111,7 @@ def build_narrative(
             else:
                 summary.append(f"Strong Efficiency: LOS ({avg_los:.1f} days) outperforms the {B['avg_los']['source']} benchmark ({target} days).")
 
-        # --- 2. Clinical Quality (Readmission) ---
+        # 3. Clinical Quality (Readmission)
         readm = kpis.get("readmission_rate")
         if readm:
             limit = B["readmission_rate"]["critical"]
@@ -118,9 +120,8 @@ def build_narrative(
                 risks.append(f"High readmission rate ({readm:.1%}) risks value-based payment penalties.")
                 actions.append(ActionItem("Implement discharge transition audit", "Nursing Leadership", "Immediate", f"Reduce readmissions < {B['readmission_rate']['good']:.0%}"))
 
-        # --- 3. Financial Health (FIXED) ---
+        # 4. Financial Health
         avg_cost = kpis.get("avg_cost_per_patient")
-        # FIX: Use KPI from domain (dynamic) instead of static B key
         benchmark_cost = kpis.get("benchmark_cost", 15000) 
         
         if avg_cost:
@@ -130,7 +131,7 @@ def build_narrative(
             elif avg_cost < benchmark_cost:
                 summary.append(f"Financial Stability: Direct cost per patient (${avg_cost:,.0f}) remains efficiently below benchmark.")
 
-        # --- 4. Data Trust ---
+        # 5. Data Trust
         comp = kpis.get("data_completeness", 1.0)
         if comp < 0.9:
             risks.append(f"Data Reliability: Key clinical fields are {100-comp*100:.0f}% incomplete, limiting precision.")
@@ -147,14 +148,22 @@ def build_narrative(
         else:
              financial.append("No immediate material financial risks detected.")
 
-    # Process Recommendations
-    for rec in recommendations[:3]:
+    # Process Recommendations (INTELLIGENT INJECTION)
+    for rec in recommendations[:5]: # Increase limit to 5
         if isinstance(rec, dict):
+            action_text = rec.get("action", "Review metrics")
+            outcome = rec.get("expected_outcome", "Improve KPI")
+            
+            # 🔥 INJECT FINANCIAL CONTEXT
+            # If we calculated a savings opportunity, and this action is about discharge/LOS, attach the $$$
+            if calculated_savings and any(x in action_text.lower() for x in ["discharge", "los", "length of stay"]):
+                outcome = f"{outcome} (Est. Opportunity: {calculated_savings})"
+
             actions.append(ActionItem(
-                action=rec.get("action", "Review metrics"),
+                action=action_text,
                 owner=rec.get("owner", "Operations"),
                 timeline=rec.get("timeline", "Quarterly"),
-                success_kpi=rec.get("expected_outcome", "Improve KPI")
+                success_kpi=outcome
             ))
 
     if not actions:
