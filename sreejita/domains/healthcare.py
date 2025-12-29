@@ -25,7 +25,8 @@ class DatasetShape(str, Enum):
     UNKNOWN = "unknown"
 
 def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
-    cols = set(c.lower() for c in df.columns)
+    # 1. Normalize columns (lowercase, strip spaces) for easier matching
+    cols = [c.lower().strip().replace(" ", "_") for c in df.columns]
     
     score = {
         DatasetShape.ROW_LEVEL_CLINICAL: 0,
@@ -34,19 +35,34 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
         DatasetShape.QUALITY_METRICS: 0,
     }
 
-    if any(c in cols for c in ["patient_id", "mrn", "pid"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
-    if any(c in cols for c in ["admission_date", "discharge_date"]): score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+    # 2. Fuzzy Matching Logic (Substrings)
+    # ROW LEVEL SIGNALS
+    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "subject"]): 
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
+    if any(x in c for c in cols for x in ["admit", "admission", "date_of_ad"]): 
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+    if any(x in c for c in cols for x in ["discharge", "disch"]): 
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+
+    # AGGREGATED SIGNALS
+    if any(x in c for c in cols for x in ["total_pat", "visits", "volume", "census"]): 
+        score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
     
-    if any(c in cols for c in ["total_patients", "visits", "volume"]): score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
-    if any(c in cols for c in ["revenue", "billing", "total_cost"]): score[DatasetShape.FINANCIAL_SUMMARY] += 2
-    if any("rate" in c for c in cols): score[DatasetShape.QUALITY_METRICS] += 2
+    # FINANCIAL SIGNALS
+    if any(x in c for c in cols for x in ["revenue", "bill", "charge", "cost", "amount"]): 
+        score[DatasetShape.FINANCIAL_SUMMARY] += 2
+
+    # QUALITY SIGNALS
+    if any(x in c for c in cols for x in ["rate", "mortality", "readm"]): 
+        score[DatasetShape.QUALITY_METRICS] += 2
 
     best_shape = max(score, key=score.get)
 
-    # Priority Override (Row-level beats everything)
+    # 3. Priority Override (Row-level beats everything)
     if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3:
         best_shape = DatasetShape.ROW_LEVEL_CLINICAL
 
+    # Only default to UNKNOWN if absolutely zero signals found
     if score[best_shape] == 0: 
         best_shape = DatasetShape.UNKNOWN
 
