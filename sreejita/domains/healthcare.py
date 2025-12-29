@@ -171,7 +171,7 @@ class HealthcareDomain(BaseDomain):
         if c["los"] and not df[c["los"]].dropna().empty:
             raw_kpis["avg_los"] = df[c["los"]].mean()
             raw_kpis["long_stay_rate"] = (df[c["los"]] > 7).mean()
-            raw_kpis["benchmark_los"] = 5.0
+            raw_kpis["benchmark_los"] = HEALTHCARE_BENCHMARKS["avg_los"]["good"]
         else: raw_kpis["avg_los"] = None
 
         if c["cost"]:
@@ -197,7 +197,7 @@ class HealthcareDomain(BaseDomain):
         current_score = _compute_board_confidence_score(raw_kpis)
         raw_kpis["board_confidence_score"] = current_score
         raw_kpis["maturity_level"] = _healthcare_maturity_level(current_score)
-        raw_kpis["board_confidence_trend"] = "→" # Trend Logic Placeholder
+        raw_kpis["board_confidence_trend"] = None # Trend Logic Placeholder
 
         # Priority Sorting
         ordered_keys = ["board_confidence_score", "maturity_level", "total_patients", "avg_cost_per_patient", "avg_los", "readmission_rate", "long_stay_rate", "avg_cost_per_day"]
