@@ -119,7 +119,7 @@ def build_narrative(
         
         if avg_cost:
             if avg_cost > benchmark_cost * 1.2:
-                summary.append(f"Cost Variance: Avg cost per patient is significant above the calculated benchmark of ${benchmark_cost:,.0f}.")
+                summary.append(f"Cost Variance: Avg cost per patient is significantly above the calculated benchmark of ${benchmark_cost:,.0f}.")
                 financial.append(f"High cost per episode is eroding margin potential.")
             elif avg_cost < benchmark_cost:
                 summary.append(f"Financial Stability: Direct cost per patient (${avg_cost:,.0f}) remains efficiently below benchmark.")
