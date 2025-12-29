@@ -110,8 +110,15 @@ def build_narrative(
         
         # --- 1. Operational Efficiency (LOS) ---
         avg_los = kpis.get("avg_los")
-        cost_per_day = kpis.get("avg_cost_per_day", 2000) # Default if missing
         total_patients = kpis.get("total_patients", 0)
+        
+        # Robust Cost Calculation (Critical for Financial Translation)
+        # 1. Try explicit KPI -> 2. Derive from Total/LOS -> 3. Fallback
+        cost_per_day = kpis.get("avg_cost_per_day")
+        if not cost_per_day and avg_los and kpis.get("avg_cost_per_patient"):
+            cost_per_day = kpis["avg_cost_per_patient"] / avg_los
+        if not cost_per_day:
+            cost_per_day = 2000 # Safe fallback
 
         if avg_los:
             sev = classify_severity(avg_los, "avg_los", t)
