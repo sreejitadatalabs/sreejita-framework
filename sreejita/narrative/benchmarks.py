@@ -4,14 +4,14 @@
 HEALTHCARE BENCHMARKS & THRESHOLDS (AUTHORITATIVE)
 --------------------------------------------------
 This file defines "What Good Looks Like" for the Healthcare domain.
-It is used by the Narrative Engine to generate judgment (Critical/Warning/Good).
-
-Sources:
-- CMS (Centers for Medicare & Medicaid Services)
-- OECD Health Statistics
-- Standard Operational Heuristics for Acute Care
+It includes:
+1. BENCHMARKS: Rich metadata for narrative context (Source, Unit, Targets).
+2. THRESHOLDS: Flat key-value pairs for code logic/scoring.
 """
 
+# =====================================================
+# 1. NARRATIVE BENCHMARKS (Context & Sources)
+# =====================================================
 HEALTHCARE_BENCHMARKS = {
     # --- Operational Efficiency ---
     "avg_los": {
@@ -50,10 +50,33 @@ HEALTHCARE_BENCHMARKS = {
     },
     
     # --- Financial Health (Dynamic) ---
-    # These are multipliers of the dataset median, not absolute dollars.
     "cost_per_patient": {
         "warning_multiplier": 1.5,   # 1.5x Median = Warning
         "critical_multiplier": 2.5,  # 2.5x Median = Critical Outlier
         "source": "Internal Financial Baseline"
     }
+}
+
+
+# =====================================================
+# 2. LOGIC THRESHOLDS (For Scoring & Alerts)
+# =====================================================
+HEALTHCARE_THRESHOLDS = {
+    # Operations
+    "avg_los_warning": 6.0,
+    "avg_los_critical": 7.0,
+    "long_stay_rate_warning": 0.20,
+    "long_stay_rate_critical": 0.30,
+
+    # Clinical
+    "readmission_warning": 0.15,
+    "readmission_critical": 0.18,
+
+    # Financial
+    "cost_multiplier_warning": 1.2,   # vs median
+    "cost_multiplier_critical": 1.5,
+
+    # Workforce / Capacity
+    "provider_variance_warning": 0.40,
+    "weekend_rate_warning": 0.35,
 }
