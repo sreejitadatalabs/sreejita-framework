@@ -90,7 +90,8 @@ def build_narrative(
                 loss_str = f"${opportunity_loss/1_000_000:.1f}M" if opportunity_loss > 1_000_000 else f"${opportunity_loss/1_000:.0f}K"
                 
                 summary.append(
-                    f"CRITICAL: Average LOS ({avg_los:.1f} days) exceeds the {B['avg_los']['source']} crisis threshold of {limit} days."
+                    f"Average length of stay ({avg_los:.1f} days) significantly exceeds crisis thresholds, "
+                      f"indicating severe discharge inefficiencies."
                 )
                 financial.append(
                     f"Capacity Bottleneck: Excess stay duration ({excess_days:.1f} days over target) represents an estimated **{loss_str}** in annualized opportunity cost."
