@@ -329,69 +329,101 @@ class HealthcareDomain(BaseDomain):
         visuals = []
         output_dir.mkdir(parents=True, exist_ok=True)
         c = self.cols
+        
+        # Helper: Save & Register
         def save(fig, name, cap, imp):
-            fig.savefig(output_dir / name, bbox_inches="tight")
+            fig.savefig(output_dir / name, bbox_inches="tight", dpi=100)
             plt.close(fig)
             visuals.append({"path": str(output_dir / name), "caption": cap, "importance": imp})
+        
+        # Helper: Human Format
         def human_fmt(x, _):
-            if x >= 1e6: return f"{x/1e6:.1f}M"
-            if x >= 1e3: return f"{x/1e3:.0f}K"
+            if x >= 1e6: return f"${x/1e6:.1f}M"
+            if x >= 1e3: return f"${x/1e3:.0f}K"
             return str(int(x))
 
-        # 1. Volume
+        # ---------------------------------------------------------
+        # 1. VOLUME TREND
+        # ---------------------------------------------------------
         if self.time_col:
             try:
-                fig, ax = plt.subplots(figsize=(7, 4))
-                df.set_index(self.time_col).resample('ME').size().plot(ax=ax, color="#1f77b4")
-                ax.set_title("Patient Volume Trend")
-                save(fig, "vol.png", "Demand stability", 0.99)
+                fig, ax = plt.subplots(figsize=(8, 4))
+                df.set_index(self.time_col).resample('ME').size().plot(ax=ax, color="#1f77b4", linewidth=2)
+                ax.set_title("Patient Volume Trend", fontweight='bold')
+                ax.grid(True, alpha=0.2)
+                save(fig, "vol.png", "Demand stability over time", 0.99)
             except: pass
 
-        # 2. LOS Distribution (Benchmark)
+        # ---------------------------------------------------------
+        # 2. LOS DISTRIBUTION (Benchmark)
+        # ---------------------------------------------------------
         if c["los"] and not df[c["los"]].dropna().empty:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
                 df[c["los"]].hist(ax=ax, bins=15, color="teal", alpha=0.7)
                 ax.axvline(VISUAL_BENCHMARK_LOS, color='red', linestyle='--', linewidth=1.5, label=f'Goal ({VISUAL_BENCHMARK_LOS}d)')
                 ax.legend()
-                ax.set_title("LOS Distribution vs Goal")
+                ax.set_title("LOS Distribution vs Goal", fontweight='bold')
                 save(fig, "los.png", "Stay duration & adherence", 0.95)
             except: pass
 
-        # 3. Cost by Condition
+        # ---------------------------------------------------------
+        # 3. DYNAMIC COST DRIVERS (Smart Title)
+        # ---------------------------------------------------------
         if c["diagnosis"] and c["cost"]:
             try:
                 if not df[c["cost"]].dropna().empty:
-                    fig, ax = plt.subplots(figsize=(7, 4))
-                    df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5).plot(kind="bar", ax=ax, color="orange")
-                    ax.set_title("Top Cost Drivers")
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    stats = df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5)
+                    
+                    # Color the top bar differently
+                    colors = ['#d62728' if i == 0 else '#ff7f0e' for i in range(len(stats))]
+                    stats.plot(kind="bar", ax=ax, color=colors)
+                    
+                    # Dynamic Title
+                    top_condition = stats.idxmax()
+                    ax.set_title(f"Highest Cost Driver: {top_condition}", fontweight='bold')
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost.png", "Cost drivers", 0.90)
+                    plt.xticks(rotation=45, ha='right')
+                    save(fig, "cost.png", "Cost drivers by condition", 0.90)
             except: pass
 
-        # 4. Readmission
+        # ---------------------------------------------------------
+        # 4. READMISSION RISK
+        # ---------------------------------------------------------
         if c["readmitted"] and c["diagnosis"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
             try:
                 if not df[c["readmitted"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
-                    df.groupby(c["diagnosis"])[c["readmitted"]].mean().nlargest(5).plot(kind="barh", ax=ax, color="red")
-                    ax.set_title("Readmission Risk Areas")
-                    save(fig, "readm.png", "Clinical risk", 0.88)
+                    df.groupby(c["diagnosis"])[c["readmitted"]].mean().nlargest(5).plot(kind="barh", ax=ax, color="#d62728", alpha=0.8)
+                    ax.set_title("Highest Readmission Risks", fontweight='bold')
+                    save(fig, "readm.png", "Clinical risk areas", 0.88)
             except: pass
 
-        # 5. Cost vs LOS
-        if c["cost"] and c["los"]:
+        # ---------------------------------------------------------
+        # 5. COST VS LOS (Color-Coded Scatter)
+        # ---------------------------------------------------------
+        if c["cost"] and c["los"] and c["diagnosis"]:
             try:
-                valid = df[[c["cost"], c["los"]]].dropna()
+                valid = df[[c["cost"], c["los"], c["diagnosis"]]].dropna()
                 if not valid.empty:
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    ax.scatter(valid[c["los"]], valid[c["cost"]], alpha=0.5, color="gray", s=15)
-                    ax.set_title("Cost vs. LOS Correlation")
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    
+                    # Color code by top diagnosis
+                    top_diag = valid[c["diagnosis"]].value_counts().nlargest(5).index
+                    for diag in top_diag:
+                        subset = valid[valid[c["diagnosis"]] == diag]
+                        ax.scatter(subset[c["los"]], subset[c["cost"]], label=diag, alpha=0.6, s=40)
+                    
+                    ax.set_title("Cost vs. LOS: Clinical Correlation", fontweight='bold')
+                    ax.legend(title="Condition")
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost_los.png", "Efficiency", 0.85)
+                    save(fig, "cost_los.png", "Efficiency outliers", 0.85)
             except: pass
 
-        # 6. Provider Variance
+        # ---------------------------------------------------------
+        # 6. PROVIDER VARIANCE (Bar Chart)
+        # ---------------------------------------------------------
         if c["doctor"] and c["los"]:
             try:
                 if not df[c["los"]].dropna().empty:
@@ -401,53 +433,67 @@ class HealthcareDomain(BaseDomain):
                     save(fig, "prov.png", "Care consistency", 0.80)
             except: pass
 
-        # 7. Payer Mix
+        # ---------------------------------------------------------
+        # 7. PAYER MIX
+        # ---------------------------------------------------------
         if c["payer"]:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["payer"]].value_counts().head(5).plot(kind="pie", ax=ax, autopct='%1.1f%%')
-                save(fig, "payer.png", "Revenue source", 0.75)
+                df[c["payer"]].value_counts().head(5).plot(kind="pie", ax=ax, autopct='%1.1f%%', colors=plt.cm.Paired.colors)
+                save(fig, "payer.png", "Revenue source mix", 0.75)
             except: pass
 
-        # 8. Age
+        # ---------------------------------------------------------
+        # 8. PATIENT DEMOGRAPHICS
+        # ---------------------------------------------------------
         if c["age"]:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
                 df[c["age"]].hist(ax=ax, bins=20, color="green", alpha=0.6)
-                ax.set_title("Patient Demographics")
+                ax.set_title("Patient Age Distribution")
                 save(fig, "age.png", "Demographics", 0.60)
             except: pass
 
-        # 9. Cost Boxplot
+        # ---------------------------------------------------------
+        # 9. COST OUTLIERS (Boxplot)
+        # ---------------------------------------------------------
         if c["cost"]:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.boxplot(df[c["cost"]].dropna(), vert=False)
-                ax.set_title("Cost Outliers")
+                ax.set_title("Cost Distribution & Outliers")
+                ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
                 save(fig, "cost_box.png", "Financial outliers", 0.55)
             except: pass
 
-        # 10. Admission Type
+        # ---------------------------------------------------------
+        # 10. ADMISSION TYPE
+        # ---------------------------------------------------------
         if c["type"]:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["type"]].value_counts().plot(kind="pie", ax=ax, autopct='%1.1f%%')
+                df[c["type"]].value_counts().plot(kind="pie", ax=ax, autopct='%1.1f%%', startangle=90)
                 ax.set_title("Admission Types")
                 save(fig, "type.png", "Acuity mix", 0.50)
             except: pass
 
-        # 11. Day of Week
+        # ---------------------------------------------------------
+        # 11. WEEKDAY ANALYSIS
+        # ---------------------------------------------------------
         if self.time_col:
             try:
                 fig, ax = plt.subplots(figsize=(6, 4))
-                df["_dow"] = df[self.time_col].dt.dayofweek
-                df["_dow"].value_counts().sort_index().plot(kind="bar", ax=ax, color="purple")
-                ax.set_title("Admissions by Day")
-                save(fig, "dow.png", "Staffing", 0.45)
+                df["_dow"] = df[self.time_col].dt.day_name()
+                # Sort explicitly M-S
+                days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                df["_dow"] = pd.Categorical(df["_dow"], categories=days, ordered=True)
+                df["_dow"].value_counts().sort_index().plot(kind="bar", ax=ax, color="purple", alpha=0.7)
+                ax.set_title("Admissions by Day of Week")
+                save(fig, "dow.png", "Staffing alignment", 0.45)
             except: pass
-
+                
         return sorted(visuals, key=lambda x: x["importance"], reverse=True)[:6]
-
+        
     def generate_insights(self, df, kpis, shape_info=None):
         insights = []
         t = HEALTHCARE_THRESHOLDS
