@@ -43,40 +43,51 @@ def build_narrative(
     - KPI-driven executive logic
     - Never empty sections
     - Domain-aware but not domain-coupled
+    - Safe for PDF / UI / API
     """
 
+    # Defensive normalization
     kpis = kpis or {}
     insights = insights or []
     recommendations = recommendations or []
 
     # =================================================
-    # EXECUTIVE SUMMARY (FIX 4 — REALITY AWARE)
+    # EXECUTIVE SUMMARY (REALITY-AWARE)
     # =================================================
     summary: List[str] = []
 
-    # ---- Healthcare-specific truth enforcement ----
+    # ---- Domain truth enforcement (Healthcare) ----
     if domain == "healthcare":
-        long_stay_rate = kpis.get("long_stay_rate", 0)
-        readmission_rate = kpis.get("readmission_rate", 0)
+        long_stay_rate = kpis.get("long_stay_rate", 0) or 0
+        readmission_rate = kpis.get("readmission_rate", 0) or 0
 
-        if long_stay_rate > 0.25:
+        if isinstance(long_stay_rate, (int, float)) and long_stay_rate > 0.25:
             summary.append(
                 f"Operational strain detected: {long_stay_rate:.1%} of patients exceed "
                 "length-of-stay targets, indicating discharge bottlenecks and reduced bed availability."
             )
 
-        if readmission_rate > 0.15:
+        if isinstance(readmission_rate, (int, float)) and readmission_rate > 0.15:
             summary.append(
                 f"Clinical risk elevated: Readmission rate at {readmission_rate:.1%} suggests "
                 "gaps in discharge planning or follow-up care."
             )
 
-    # ---- Insight-driven reinforcement (secondary) ----
+    # ---- Insight reinforcement (secondary) ----
     for ins in insights[:2]:
         title = ins.get("title")
         so_what = ins.get("so_what")
         if title and so_what:
             summary.append(f"{title}: {so_what}")
+
+    # ---- FIX A: De-duplicate executive summary ----
+    seen = set()
+    clean_summary: List[str] = []
+    for s in summary:
+        if s not in seen:
+            clean_summary.append(s)
+            seen.add(s)
+    summary = clean_summary
 
     # ---- Absolute fallback (never empty) ----
     if not summary:
@@ -85,7 +96,7 @@ def build_narrative(
         )
 
     # =================================================
-    # FINANCIAL IMPACT (EXPLAINABLE & TIED TO KPIs)
+    # FINANCIAL IMPACT (SAFE & KPI-TIED)
     # =================================================
     financial: List[str] = []
 
@@ -93,12 +104,18 @@ def build_narrative(
         avg_cost = kpis.get("avg_cost_per_patient")
         avg_los = kpis.get("avg_los")
 
-        if avg_cost and avg_los and avg_los > 7:
+        # FIX B: strict numeric safety
+        if (
+            isinstance(avg_cost, (int, float))
+            and isinstance(avg_los, (int, float))
+            and avg_los > 7
+        ):
             financial.append(
                 f"Extended length of stay is increasing cost per patient "
                 f"(average ${avg_cost:,.0f}), reducing throughput efficiency."
             )
 
+    # Generic KPI-driven fallback
     if not financial:
         for k, v in kpis.items():
             if isinstance(v, (int, float)) and abs(v) > 0:
@@ -111,7 +128,7 @@ def build_narrative(
         financial.append("No immediate material financial risk detected.")
 
     # =================================================
-    # RISKS (FIX — INCLUDE WARNING & CRITICAL)
+    # RISKS (CRITICAL + RISK + WARNING)
     # =================================================
     risks: List[str] = []
 
@@ -127,7 +144,7 @@ def build_narrative(
     # =================================================
     actions: List[ActionItem] = []
 
-    # Prefer domain recommendations
+    # Prefer domain-generated recommendations
     for rec in recommendations[:2]:
         if isinstance(rec, dict):
             actions.append(
@@ -139,9 +156,9 @@ def build_narrative(
                 )
             )
 
-    # KPI-driven fallback actions (healthcare)
+    # KPI-driven fallback (Healthcare)
     if not actions and domain == "healthcare":
-        if kpis.get("long_stay_rate", 0) > 0.15:
+        if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] > 0.15:
             actions.append(
                 ActionItem(
                     action="Audit discharge planning for long-stay patients",
@@ -151,6 +168,7 @@ def build_narrative(
                 )
             )
 
+    # Absolute fallback (never empty)
     if not actions:
         actions.append(
             ActionItem(
