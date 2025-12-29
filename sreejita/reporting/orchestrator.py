@@ -4,6 +4,7 @@ import pandas as pd
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
+from sreejita.core.dataset_shape import detect_dataset_shape  # ✅ NEW
 
 log = logging.getLogger("sreejita.orchestrator")
 
@@ -40,7 +41,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (STABLE)
+# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (SHAPE-AWARE)
 # =====================================================
 
 def generate_report_payload(input_path: str, config: dict) -> dict:
@@ -48,9 +49,10 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     Orchestrator — SINGLE SOURCE OF TRUTH
 
     GUARANTEES:
-    - Never raises due to visuals
-    - Always returns payload
-    - Domain bugs never block PDF
+    - Dataset-shape aware
+    - Domain-safe execution
+    - Visuals never block
+    - Narrative never breaks
     """
 
     input_path = Path(input_path)
@@ -69,7 +71,17 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
-    # 2. DOMAIN DECISION
+    # 2. DATASET SHAPE DETECTION (🔥 CRITICAL)
+    # -------------------------------------------------
+    try:
+        shape_info = detect_dataset_shape(df)
+        log.info("Detected dataset shape: %s", shape_info.get("shape"))
+    except Exception as e:
+        log.warning("Dataset shape detection failed: %s", e)
+        shape_info = {"shape": "unknown"}
+
+    # -------------------------------------------------
+    # 3. DOMAIN DECISION
     # -------------------------------------------------
     decision = decide_domain(df)
     domain = decision.selected_domain
@@ -80,38 +92,53 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         return {
             "unknown": {
                 "kpis": {"rows": len(df), "columns": len(df.columns)},
-                "insights": [
-                    {
-                        "level": "RISK",
-                        "title": "Unknown Domain",
-                        "so_what": "No matching domain engine found.",
-                    }
-                ],
+                "insights": [{
+                    "level": "RISK",
+                    "title": "Unknown Domain",
+                    "so_what": "No matching domain engine found.",
+                }],
                 "recommendations": [],
                 "visuals": [],
+                "shape": shape_info,
             }
         }
 
     # -------------------------------------------------
-    # 3. DOMAIN LIFECYCLE
+    # 4. DOMAIN LIFECYCLE (SHAPE-AWARE)
     # -------------------------------------------------
     try:
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
         kpis = engine.calculate_kpis(df)
-        insights = engine.generate_insights(df, kpis)
 
-        raw_recommendations = engine.generate_recommendations(df, kpis)
+        # 🔑 Shape-aware insights
+        insights = engine.generate_insights(
+            df,
+            kpis,
+            shape_info=shape_info
+            if "shape_info" in engine.generate_insights.__code__.co_varnames
+            else None
+        )
+
+        # 🔑 Shape-aware recommendations
+        raw_recommendations = engine.generate_recommendations(
+            df,
+            kpis,
+            insights,
+            shape_info=shape_info
+            if "shape_info" in engine.generate_recommendations.__code__.co_varnames
+            else None
+        )
+
         recommendations = enrich_recommendations(raw_recommendations)
 
     except Exception as e:
-        # HARD FAIL ONLY FOR CORE ANALYTICS
         log.exception("Domain engine failed: %s", domain)
         raise RuntimeError(f"Domain processing failed for '{domain}': {e}")
 
     # -------------------------------------------------
-    # 4. VISUALS (FAIL-SAFE — NEVER BLOCK)
+    # 5. VISUALS (FAIL-SAFE)
     # -------------------------------------------------
     visuals = []
 
@@ -130,7 +157,6 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             )
             generated = []
 
-        # Soft validation (NO RAISE)
         for vis in generated:
             if (
                 isinstance(vis, dict)
@@ -142,7 +168,7 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
                 log.warning("Invalid visual skipped: %s", vis)
 
     # -------------------------------------------------
-    # 5. STANDARDIZED PAYLOAD (AUTHORITATIVE)
+    # 6. STANDARDIZED PAYLOAD (AUTHORITATIVE)
     # -------------------------------------------------
     return {
         domain: {
@@ -150,5 +176,6 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
             "insights": insights,
             "recommendations": recommendations,
             "visuals": visuals,
+            "shape": shape_info,  # ✅ EXPOSED FOR NARRATIVE & PDF
         }
-    } 
+    }
