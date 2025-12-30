@@ -65,7 +65,6 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
     return {"shape": best, "score": score}
 
 def _calculate_internal_trend(df: pd.DataFrame, time_col: str, metric_col: str) -> str:
-    """Compares recent vs historical data for real trends (↑, ↓, →)."""
     if not time_col or metric_col not in df.columns: return "→"
     try:
         df = df.sort_values(time_col).dropna(subset=[metric_col])
@@ -84,9 +83,6 @@ def _calculate_internal_trend(df: pd.DataFrame, time_col: str, metric_col: str) 
 # 3️⃣ BOARD CONFIDENCE (Breakdown Dictionary)
 # =====================================================
 def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) -> Tuple[int, Dict[str, int]]:
-    """
-    Calculates Score AND returns a breakdown dictionary.
-    """
     score = 100
     breakdown = {} 
     t = HEALTHCARE_THRESHOLDS
@@ -95,36 +91,29 @@ def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) 
     if context == CareContext.AGGREGATED:
         score = 70
         breakdown["Aggregated Data Limit"] = -30
-        
         if kpis.get("avg_los") and kpis.get("benchmark_los") and kpis["avg_los"] <= kpis["benchmark_los"]: 
             score += 10
             breakdown["Bonus: LOS within Target"] = 10
-        
         if kpis.get("readmission_rate") and kpis["readmission_rate"] <= 0.1:
             score += 10
             breakdown["Bonus: Optimal Readmissions"] = 10
-            
         final_score = min(score, 85)
         if final_score < score:
             breakdown["Cap: Aggregated Ceiling"] = final_score - score
-            
         return final_score, breakdown
 
     # --- ROW LEVEL PATH ---
-    
-    # A. Check EXPECTED metrics
     required = EXPECTED_METRICS.get(context, set())
     for metric in required:
         if kpis.get(metric) is None:
             score -= 10
             breakdown[f"Missing Metric: {metric}"] = -10
 
-    # B. Facility Variance
     if kpis.get("facility_variance_score", 0) > 0.5:
         score -= 10
         breakdown["High Facility Variance"] = -10
 
-    # C. Threshold Penalties
+    # Operational
     if kpis.get("long_stay_rate", 0) >= t["long_stay_rate_critical"]: 
         score -= 25
         breakdown["Critical Long Stay Rate"] = -25
@@ -136,17 +125,18 @@ def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) 
         score -= 10
         breakdown["LOS Exceeds Benchmark"] = -10
 
+    # Clinical
     if kpis.get("readmission_rate", 0) >= t["readmission_critical"]: 
         score -= 20
         breakdown["Critical Readmission Rate"] = -20
     
+    # Financial
     if kpis.get("avg_cost_per_patient") and kpis.get("benchmark_cost"):
-        # Strict logic: If cost > benchmark, apply penalty
         if kpis["avg_cost_per_patient"] > kpis["benchmark_cost"]: 
             score -= 10
             breakdown["Cost > Benchmark"] = -10
 
-    # D. Diagnostic Specific
+    # Diagnostic
     if context == CareContext.DIAGNOSTIC:
         if kpis.get("data_completeness", 0) < 0.9: 
             score -= 20
@@ -172,7 +162,6 @@ class HealthcareDomain(BaseDomain):
         self.shape_info = detect_dataset_shape(df)
         self.shape = self.shape_info["shape"]
         
-        # UNIVERSAL COLUMN MAPPING
         self.cols = {
             "pid": resolve_column(df, "patient_id") or resolve_column(df, "name") or resolve_column(df, "mrn"),
             "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id") or resolve_column(df, "test_id"),
@@ -191,18 +180,14 @@ class HealthcareDomain(BaseDomain):
             "type": resolve_column(df, "admission_type") or resolve_column(df, "type"),
         }
 
-        # CONTEXT RESOLUTION
+        # 1️⃣ EXPLICIT CARE-CONTEXT RESOLUTION
         cols_lower = [c.lower() for c in df.columns]
         if self.shape == DatasetShape.ROW_LEVEL_CLINICAL:
             is_ed = any(x in c for c in cols_lower for x in ["triage", "acuity", "arrival"])
-            if is_ed:
-                self.care_context = CareContext.EMERGENCY
-            elif self.cols["los"] or (self.cols["admit"] and self.cols["discharge"]):
-                self.care_context = CareContext.INPATIENT
-            elif self.cols["encounter"] and not self.cols["los"]:
-                self.care_context = CareContext.DIAGNOSTIC
-            else:
-                self.care_context = CareContext.OUTPATIENT
+            if is_ed: self.care_context = CareContext.EMERGENCY
+            elif self.cols["los"] or (self.cols["admit"] and self.cols["discharge"]): self.care_context = CareContext.INPATIENT
+            elif self.cols["encounter"] and not self.cols["los"]: self.care_context = CareContext.DIAGNOSTIC
+            else: self.care_context = CareContext.OUTPATIENT
         elif self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
             self.care_context = CareContext.AGGREGATED
         else:
@@ -239,12 +224,15 @@ class HealthcareDomain(BaseDomain):
         valid_cols = [v for v in c.values() if v]
         raw_kpis["data_completeness"] = round(1 - df[valid_cols].isna().mean().mean(), 2) if valid_cols else 0.0
 
+        # --- AGGREGATED PATH ---
         if self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
             if c["volume"]: raw_kpis["total_patients"] = df[c["volume"]].sum()
             if c["avg_los"]: 
                 raw_kpis["avg_los"] = df[c["avg_los"]].mean()
                 raw_kpis["benchmark_los"] = 5.0 
             raw_kpis["is_aggregated"] = True
+            
+        # --- ROW LEVEL PATH ---
         else:
             raw_kpis["is_aggregated"] = False
             raw_kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
@@ -258,17 +246,14 @@ class HealthcareDomain(BaseDomain):
                     raw_kpis["long_stay_rate"] = (df[c["los"]] > 7).mean()
                     raw_kpis["benchmark_los"] = 5.0
                 else: raw_kpis["avg_los"] = None
+
                 if c["readmitted"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
                     raw_kpis["readmission_rate"] = df[c["readmitted"]].mean()
 
             if c["cost"]:
                 raw_kpis["total_billing"] = df[c["cost"]].sum()
                 raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
-                
-                # 🚨 TIGHTENED BENCHMARK (1.1x Median) - FIX 1
                 raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 1.1
-                raw_kpis["benchmark_source_cost"] = "Internal Median (1.1x)" 
-                
                 if raw_kpis.get("avg_los"): 
                     raw_kpis["avg_cost_per_day"] = raw_kpis["avg_cost_per_patient"] / raw_kpis["avg_los"]
 
@@ -279,7 +264,6 @@ class HealthcareDomain(BaseDomain):
                     if fac_stats.mean() > 0:
                         raw_kpis["facility_variance_score"] = fac_stats.std() / fac_stats.mean()
             
-            # Trends
             if self.time_col:
                 if c["cost"]: raw_kpis["cost_trend"] = _calculate_internal_trend(df, self.time_col, c["cost"])
                 if c["volume"]: raw_kpis["vol_trend"] = _calculate_internal_trend(df, self.time_col, c["volume"])
@@ -291,23 +275,24 @@ class HealthcareDomain(BaseDomain):
                 stats = df.groupby(c["doctor"])[c["los"]].mean()
                 if stats.mean() > 0: raw_kpis["provider_variance_score"] = stats.std() / stats.mean()
 
-        # Board Intelligence (Using Breakdown Dict)
-        current_score, score_breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
+        # 🔥 BOARD INTELLIGENCE (Context-Weighted)
+        # We capture BOTH score and the explanation list
+        try:
+            current_score, score_breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
+        except Exception:
+            current_score, score_breakdown = 50, {"Error": "Score calculation failed"}
+
         raw_kpis["board_confidence_score"] = current_score
-        raw_kpis["board_score_breakdown"] = score_breakdown # Dict
+        raw_kpis["board_score_breakdown"] = score_breakdown 
         raw_kpis["maturity_level"] = _healthcare_maturity_level(current_score)
         raw_kpis["board_confidence_trend"] = raw_kpis.get("cost_trend", "→")
 
-        # Cleanup
+        # Filter out Enums for clean JSON
         final_kpis = {}
-        ordered = ["board_confidence_score", "maturity_level", "total_patients", "avg_cost_per_patient", "avg_los", "readmission_rate"]
-        for k in ordered:
-            if k in raw_kpis: final_kpis[k] = raw_kpis[k]
         for k, v in raw_kpis.items():
-            if k not in final_kpis:
-                if isinstance(v, Enum): final_kpis[k] = v.value
-                elif not (isinstance(v, float) and (np.isnan(v) or np.isinf(v))): final_kpis[k] = v
-        
+            if isinstance(v, Enum): final_kpis[k] = v.value
+            elif not (isinstance(v, float) and (np.isnan(v) or np.isinf(v))): final_kpis[k] = v
+                
         return final_kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
@@ -345,7 +330,7 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "los.png", "Stay duration & adherence", 0.95)
             except: pass
 
-        # 3. Cost Drivers (Smart Title + Color)
+        # 3. Cost Drivers (Smart Title)
         if c["diagnosis"] and c["cost"]:
             try:
                 if not df[c["cost"]].dropna().empty:
@@ -450,7 +435,7 @@ class HealthcareDomain(BaseDomain):
         t = HEALTHCARE_THRESHOLDS
         c = self.cols
         
-        # 1. ROOT CAUSE ANALYSIS (FIX 2)
+        # 1. ROOT CAUSE ANALYSIS (New)
         if c["diagnosis"] and c["los"] and not df[c["los"]].dropna().empty:
             diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count'])
             diag_perf = diag_perf[diag_perf['count'] > 5]
