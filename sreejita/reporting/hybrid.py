@@ -175,7 +175,9 @@ class HybridReport(BaseReport):
                 "board_confidence_trend", 
                 "dataset_shape", 
                 "is_aggregated",
-                "debug_shape_score"
+                "debug_shape_score",
+                "care_context",
+                "board_confidence_explanation" # Added this so it doesn't break table
             ]
             
             # Limit to top 12 metrics to prevent spam
