@@ -188,7 +188,7 @@ class HybridReport(BaseReport):
                 "debug_shape_score",
                 "care_context",
                 "board_confidence_explanation",
-                "board_score_breakdown" # Hidden from main table, shown in specialized table above
+                "board_score_breakdown" # Hidden from main table
             ]
             
             # Limit to top 12 metrics to prevent spam
