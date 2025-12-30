@@ -80,14 +80,14 @@ def _calculate_internal_trend(df: pd.DataFrame, time_col: str, metric_col: str) 
     except: return "→"
 
 def _get_trend_explanation(trend_arrow):
-    """Explains WHY the trend is what it is (Gap 5)."""
+    """Explains WHY the trend is what it is."""
     if trend_arrow == "→": return "Flat trend indicates no sustained improvement over prior period."
     if trend_arrow == "↑": return "Increasing trend requires immediate variance control."
     if trend_arrow == "↓": return "Decreasing trend indicates operational improvements taking effect."
     return "Trend data insufficient."
 
 def _get_score_interpretation(score):
-    """Explains the Governance Implication of the score (Gap 1/C)."""
+    """Explains the Governance Implication of the score."""
     if score < 45: 
         return "CRITICAL RISK: Score reflects unmanaged variance and missing quality controls. Requires immediate governance intervention."
     if score < 60: 
@@ -336,12 +336,13 @@ class HealthcareDomain(BaseDomain):
         raw_kpis.update({
             "board_confidence_score": current_score,
             "board_score_breakdown": score_breakdown,
-            # GAP 1 FIX: Add explicit interpretation
+            # [FIX] Add explicit interpretations for the PDF/Engine
             "board_confidence_interpretation": _get_score_interpretation(current_score), 
-            # GAP 5 FIX: Add trend context
             "trend_explanation": _get_trend_explanation(trend),                        
             "maturity_level": _healthcare_maturity_level(current_score),
-            "board_confidence_trend": trend
+            "board_confidence_trend": trend,
+            # [FIX] Explicit Benchmark Context
+            "benchmark_context": "Benchmarks aligned to CMS Inpatient Norms & Internal Medians."
         })
 
         # PRIORITY SORTING
@@ -524,7 +525,7 @@ class HealthcareDomain(BaseDomain):
                     why = "High Practice Variance" if row['std'] > (row['mean'] * 0.5) else "Structural Delay"
                     drivers.append(f"{diag}: +{excess:.1f}d ({why})")
             
-            if drivers:
+             if drivers:
                 # GAP 4 FIX: Capacity Translation (Excess Days -> Blocked Beds)
                 blocked_beds = total_excess_days / 365
                 insights.append({
