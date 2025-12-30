@@ -69,7 +69,7 @@ def build_narrative(
             summary.append(f"GOVERNANCE ALERT: {interpretation}")
         
         if kpis.get("dataset_shape") == "aggregated_operational":
-            summary.append("NOTICE: This assessment is based on aggregated operational data.")
+            summary.append("NOTICE: This assessment is based on aggregated operational data; conclusions reflect broad trends.")
 
         # --- 2. OPERATIONAL IMPACT & PROJECTION ---
         avg_los = kpis.get("avg_los")
@@ -85,7 +85,9 @@ def build_narrative(
                 loss_str = f"${opportunity_loss/1_000_000:.1f}M" if opportunity_loss > 1_000_000 else f"${opportunity_loss/1_000:.0f}K"
                 calculated_savings = loss_str
                 
-                summary.append(f"FINANCIAL IMPACT: Excess LOS represents a {loss_str} annualized opportunity cost.")
+                # GAP 4 FIX: Capacity Context in Summary
+                blocked_beds = (excess_days * total_patients) / 365
+                summary.append(f"FINANCIAL IMPACT: Excess LOS represents a {loss_str} opportunity and effectively blocks {blocked_beds:.0f} beds annually.")
                 
                 # GAP D: The "What If" Projection
                 one_day_val = total_patients * cost_per_day
@@ -161,6 +163,9 @@ def build_narrative(
     if not actions:
         actions.append(ActionItem("Monitor key metrics", "Ops Lead", "Ongoing", "Stability"))
 
+    # GAP 5 FIX: Benchmark Context
+    summary.append(f"CONTEXT: {kpis.get('benchmark_context', 'Benchmarks aligned to standard norms.')}")
+    
     return NarrativeResult(
         executive_summary=list(dict.fromkeys(summary)),
         financial_impact=financial,
@@ -168,6 +173,6 @@ def build_narrative(
         action_plan=actions,
         key_findings=insights
     )
-    
+
 def generate_narrative(*args, **kwargs):
     return build_narrative(*args, **kwargs)
