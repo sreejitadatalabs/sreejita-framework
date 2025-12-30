@@ -87,10 +87,13 @@ def _get_trend_explanation(trend_arrow):
     return "Trend data insufficient."
 
 def _get_score_interpretation(score):
-    """Explains the Governance Implication of the score (Gap 1)."""
-    if score < 40: return "REACTIVE MODE: Risks identified only after financial impact. Governance priority: Stabilization."
-    if score < 60: return "UNSTABLE: High variance detected. Governance priority: Standardization."
-    if score < 80: return "CONTROLLED: Processes stable but reactive. Governance priority: Optimization."
+    """Explains the Governance Implication of the score (Gap 1/C)."""
+    if score < 45: 
+        return "CRITICAL RISK: Score reflects unmanaged variance and missing quality controls. Requires immediate governance intervention."
+    if score < 60: 
+        return "UNSTABLE: High variance and reactive management detected. Governance priority: Standardization."
+    if score < 80: 
+        return "CONTROLLED: Processes stable but reactive. Governance priority: Optimization."
     return "PREDICTIVE: Best-in-class operations."
     
 # =====================================================
@@ -524,7 +527,7 @@ class HealthcareDomain(BaseDomain):
                                "<br/><i>Likely drivers include discharge delays, comorbidity complexity, and protocol variation.</i>"
                 })
 
-        # 2. DETAILED FACILITY VARIANCE (Best vs Worst)
+        # 2. DETAILED FACILITY VARIANCE (Gap B Fix)
         if kpis.get("facility_variance_score", 0) > 0.5 and c["facility"] and c["los"]:
             fac_stats = df.groupby(c["facility"])[c["los"]].mean()
             if not fac_stats.empty:
@@ -532,7 +535,7 @@ class HealthcareDomain(BaseDomain):
                 insights.append({
                     "level": "RISK", 
                     "title": "High Facility Variance", 
-                    "so_what": f"Performance gap: {best} ({fac_stats[best]:.1f}d) vs {worst} ({fac_stats[worst]:.1f}d)."
+                    "so_what": f"{worst} averages {fac_stats[worst]:.1f} days vs {best} at {fac_stats[best]:.1f} days, indicating local operational bottlenecks."
                 })
 
         # 3. MISSING DATA BLIND SPOT
