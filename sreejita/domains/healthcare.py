@@ -310,7 +310,7 @@ class HealthcareDomain(BaseDomain):
             if c["facility"] and c["cost"]:
                 fac_stats = df.groupby(c["facility"])[c["cost"]].mean()
                 if fac_stats.mean() > 0:
-                    raw_kpis["facility_variance_score"] = fac_stats.std() / fac_stats.mean()
+                    raw_kpis["facility_variance_score"] = min(fac_stats.std() / fac_stats.mean(), 1.0)
             
             # Real Trends (Prioritize LOS for Inpatient)
             if self.time_col:
@@ -495,166 +495,247 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "dow.png", "Staffing alignment", 0.45)
             except: pass
                 
-        return sorted(visuals, key=lambda x: x["importance"], reverse=True)
+        return sorted(visuals, key=lambda x: x["importance"], reverse=True)[:6]
 
     def generate_insights(self, df, kpis, shape_info=None):
         insights = []
         t = HEALTHCARE_THRESHOLDS
         c = self.cols
-        
+    
+        # -------------------------------------------------
         # 1. ENHANCED ROOT CAUSE & CLASSIFICATION
-        if c["diagnosis"] and c["los"] and not df[c["los"]].dropna().empty:
-            diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count', 'std'])
+        # -------------------------------------------------
+        if c.get("diagnosis") and c.get("los") and not df[c["los"]].dropna().empty:
+            diag_perf = (
+                df.groupby(c["diagnosis"])[c["los"]]
+                .agg(['mean', 'count', 'std'])
+            )
+    
             diag_perf = diag_perf[diag_perf['count'] > 5].nlargest(3, 'mean')
-            
+    
             drivers = []
             total_excess_days = 0
             global_target = kpis.get("benchmark_los", 5.0)
-            
+    
             for diag, row in diag_perf.iterrows():
-                if row['mean'] > global_target:
-                    excess = row['mean'] - global_target
-                    total_excess = excess * row['count']
-                    total_excess_days += total_excess
-                    
-                    # Deterministic "Why" Classification
-                    cause_type = "Structural Delay"
-                    if row['std'] > (row['mean'] * 0.5):
+                if row["mean"] > global_target:
+                    excess = row["mean"] - global_target
+                    excess_days = excess * row["count"]
+                    total_excess_days += excess_days
+    
+                    # Deterministic root-cause classification
+                    if row["std"] > (row["mean"] * 0.5):
                         cause_type = "Practice Variance"
-                    elif row['mean'] > 10:
+                    elif row["mean"] > 10:
                         cause_type = "Clinical Complexity"
-                        
+                    else:
+                        cause_type = "Structural Delay"
+    
                     drivers.append(f"{diag}: +{excess:.1f}d ({cause_type})")
-            
+    
             if drivers:
-                # FIX 8: Financial Impact Calculation
-                cost_per_day = kpis.get("avg_cost_per_day", 2000) # Default to 2000 if missing
-                financial_impact = total_excess_days * cost_per_day
-                fin_str = f"${financial_impact/1e6:.1f}M" if financial_impact > 1e6 else f"${financial_impact/1e3:.0f}K"
-                
+                avg_cost_per_day = kpis.get(
+                    "avg_cost_per_day",
+                    HEALTHCARE_EXTERNAL_LIMITS.get("avg_cost_per_day", 2000)
+                )
+    
+                financial_impact = total_excess_days * avg_cost_per_day
+                fin_str = (
+                    f"${financial_impact/1e6:.1f}M"
+                    if financial_impact >= 1e6
+                    else f"${financial_impact/1e3:.0f}K"
+                )
+    
                 blocked_beds = total_excess_days / 365
+    
                 insights.append({
-                    "level": "CRITICAL", 
-                    "title": "Excess Days Breakdown", 
-                    "so_what": f"Total Excess Days: {total_excess_days:,.0f} ({fin_str} opportunity).<br/>Equiv. to {blocked_beds:.1f} beds blocked.<br/>Drivers: " + "; ".join(drivers)
+                    "level": "CRITICAL",
+                    "title": "Excess Days Breakdown",
+                    "so_what": (
+                        f"Total Excess Days: {total_excess_days:,.0f} "
+                        f"({fin_str} opportunity).<br/>"
+                        f"Equivalent to {blocked_beds:.1f} beds blocked.<br/>"
+                        f"Drivers: " + "; ".join(drivers)
+                    ),
+                    "source": "Diagnosis LOS Analysis",
+                    "executive_summary_flag": True
                 })
-                
-        # 2. DETAILED FACILITY VARIANCE
-        if kpis.get("facility_variance_score", 0) > 0.5 and c["facility"] and c["los"]:
+    
+        # -------------------------------------------------
+        # 2. FACILITY VARIANCE
+        # -------------------------------------------------
+        if kpis.get("facility_variance_score", 0) > 0.5 and c.get("facility") and c.get("los"):
             fac_stats = df.groupby(c["facility"])[c["los"]].mean()
             if not fac_stats.empty:
                 best, worst = fac_stats.idxmin(), fac_stats.idxmax()
                 gap = fac_stats[worst] - fac_stats[best]
+    
                 insights.append({
-                    "level": "RISK", 
-                    "title": "High Facility Variance", 
-                    "so_what": f"Operational Gap: {gap:.1f} days.<br/>{worst} ({fac_stats[worst]:.1f}d) vs {best} ({fac_stats[best]:.1f}d)."
+                    "level": "RISK",
+                    "title": "High Facility Variance",
+                    "so_what": (
+                        f"Operational gap of {gap:.1f} days between facilities.<br/>"
+                        f"{worst}: {fac_stats[worst]:.1f}d vs {best}: {fac_stats[best]:.1f}d."
+                    ),
+                    "source": "Facility Comparison"
                 })
-
-        # 3. MISSING DATA BLIND SPOT
+    
+        # -------------------------------------------------
+        # 3. QUALITY DATA BLIND SPOT
+        # -------------------------------------------------
         if kpis.get("readmission_rate") is None and self.care_context == CareContext.INPATIENT:
             insights.append({
                 "level": "RISK",
                 "title": "Quality Blind Spot",
-                "so_what": "Readmission data missing. Cannot validate if extended LOS is driving safety or inefficiency."
+                "so_what": (
+                    "Readmission data missing. Cannot determine whether extended LOS "
+                    "reflects quality care or inefficiency."
+                ),
+                "source": "Quality & Safety Metrics"
             })
-
-        # 4. Standard Checks
-        if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] >= t.get("long_stay_rate_critical", 0.3):
-            insights.append({"level": "CRITICAL", "title": "Severe Discharge Bottleneck", "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed targets."})
-          
-        if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", 999999):
-            insights.append({"level": "WARNING", "title": "Cost Anomaly", "so_what": "Costs exceed benchmark thresholds."})
-
+    
+        # -------------------------------------------------
+        # 4. DISCHARGE BOTTLENECK
+        # -------------------------------------------------
+        if isinstance(kpis.get("long_stay_rate"), (int, float)) and \
+           kpis["long_stay_rate"] >= t.get("long_stay_rate_critical", 0.3):
+    
+            insights.append({
+                "level": "CRITICAL",
+                "title": "Severe Discharge Bottleneck",
+                "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed LOS targets.",
+                "source": "LOS Distribution Analysis",
+                "executive_summary_flag": True
+            })
+    
+        # -------------------------------------------------
+        # 5. COST ANOMALY
+        # -------------------------------------------------
+        if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", float("inf")):
+            insights.append({
+                "level": "WARNING",
+                "title": "Cost Anomaly",
+                "so_what": "Average cost per patient exceeds benchmark thresholds.",
+                "source": "Financial Benchmarking"
+            })
+    
+        # -------------------------------------------------
+        # 6. DATA QUALITY
+        # -------------------------------------------------
         if kpis.get("data_completeness", 1) < 0.90:
-            insights.append({"level": "RISK", "title": "Data Integrity Gap", "so_what": "Missing clinical fields limit precision."})
-
+            insights.append({
+                "level": "RISK",
+                "title": "Data Integrity Gap",
+                "so_what": "Missing clinical fields limit diagnostic and financial precision.",
+                "source": "Data Integrity Scan"
+            })
+    
         if not insights:
-            insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Metrics within tolerance."})
-            
+            insights.append({
+                "level": "INFO",
+                "title": "Stable Operations",
+                "so_what": "All monitored metrics are within acceptable tolerance.",
+                "source": "Overall KPI Review"
+            })
+    
         return insights
 
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
         recs = []
         titles = [i["title"] for i in (insights or [])]
-        
-        if "High Provider Variance" in titles or kpis.get("provider_variance_score", 0) > 0.4:
+    
+        if kpis.get("provider_variance_score", 0) > 0.4:
             recs.append({
-                "action": "Initiate Provider Peer Benchmarking", 
-                "priority": "MEDIUM", 
-                "timeline": "60 days", 
-                "owner": "CMO", 
-                "expected_outcome": "Reduce Variance (Target: Deviation < 0.3)"
+                "action": "Initiate provider peer benchmarking",
+                "priority": "MEDIUM",
+                "timeline": "60 days",
+                "owner": "CMO",
+                "expected_outcome": "Reduce provider LOS deviation below 0.3",
+                "confidence": 0.80
             })
-
+    
         if "High Facility Variance" in titles:
-             recs.append({
-                 "action": "Standardize protocols across sites", 
-                 "priority": "HIGH", 
-                 "timeline": "Q2", 
-                 "owner": "Ops Director", 
-                 "expected_outcome": "Unified Care (Target: Gap < 10%)"
-             })
-
+            recs.append({
+                "action": "Standardize care protocols across facilities",
+                "priority": "HIGH",
+                "timeline": "Q2",
+                "owner": "Operations Director",
+                "expected_outcome": "Reduce inter-facility LOS gap below 10%",
+                "confidence": 0.85
+            })
+    
         if "Severe Discharge Bottleneck" in titles:
             recs.append({
-                "action": "Audit discharge planning", 
-                "priority": "HIGH", 
-                "timeline": "30 days", 
-                "owner": "Clinical Ops", 
-                "expected_outcome": "Reduce Long Stay Rate to <20%"
+                "action": "Audit discharge planning workflow",
+                "priority": "HIGH",
+                "timeline": "30 days",
+                "owner": "Clinical Operations",
+                "expected_outcome": "Reduce long-stay rate below 20%",
+                "confidence": 0.90
             })
-            
-        if "Excess Days Breakdown" in titles: 
+    
+        if "Excess Days Breakdown" in titles:
             recs.append({
-                "action": "Launch diagnosis-specific pathways", 
-                "priority": "HIGH", 
-                "timeline": "90 days", 
-                "owner": "CMO", 
-                "expected_outcome": "Reduce Avg LOS to < 5.5 days"
+                "action": "Implement diagnosis-specific care pathways",
+                "priority": "HIGH",
+                "timeline": "90 days",
+                "owner": "CMO",
+                "expected_outcome": "Reduce average LOS below 5.5 days",
+                "confidence": 0.88
             })
-
+    
         if "Quality Blind Spot" in titles:
-             recs.append({
-                 "action": "Integrate readmission data feed", 
-                 "priority": "CRITICAL", 
-                 "timeline": "Immediate", 
-                 "owner": "IT/Data", 
-                 "expected_outcome": "Validate Safety/LOS Trade-off"
-             })
-             
-        if kpis.get("avg_cost_per_patient", 0) > 50000 or "Cost Anomaly" in titles:
             recs.append({
-                "action": "Review high-cost outliers", 
-                "priority": "MEDIUM", 
-                "timeline": "30 days", 
-                "owner": "Finance", 
-                "expected_outcome": "Recover Revenue (Target: -10% Cost)"
+                "action": "Integrate readmission data feed",
+                "priority": "CRITICAL",
+                "timeline": "Immediate",
+                "owner": "IT / Data Engineering",
+                "expected_outcome": "Enable LOS vs quality trade-off analysis",
+                "confidence": 0.95
             })
-        
+    
+        if kpis.get("avg_cost_per_patient", 0) > 50000:
+            recs.append({
+                "action": "Review high-cost patient outliers",
+                "priority": "MEDIUM",
+                "timeline": "30 days",
+                "owner": "Finance",
+                "expected_outcome": "Achieve 10% cost reduction",
+                "confidence": 0.75
+            })
+    
         if kpis.get("readmission_rate", 0) > 0.15:
             recs.append({
-                "action": "Implement post-discharge calls", 
-                "priority": "HIGH", 
-                "timeline": "Immediate", 
-                "owner": "Nursing", 
-                "expected_outcome": "Reduce Readmits to < 10%" 
+                "action": "Implement post-discharge follow-up program",
+                "priority": "HIGH",
+                "timeline": "Immediate",
+                "owner": "Nursing",
+                "expected_outcome": "Reduce readmissions below 10%",
+                "confidence": 0.85
             })
-        
-        if self.cols["payer"]:
+    
+        if self.cols.get("payer"):
             recs.append({
-                "action": "Evaluate payer contracts", 
-                "priority": "LOW", 
-                "timeline": "Annual", 
-                "owner": "Revenue Cycle", 
-                "expected_outcome": "Optimize Yield (Target: +2% Net Rev)"
+                "action": "Evaluate payer contract performance",
+                "priority": "LOW",
+                "timeline": "Annual",
+                "owner": "Revenue Cycle",
+                "expected_outcome": "Improve net revenue by 2%",
+                "confidence": 0.65
             })
-
+    
         if not recs:
-            recs.append({"action": "Monitor trends", "priority": "LOW", "timeline": "Ongoing", "owner": "Ops", "expected_outcome": "Stability"})
-        
+            recs.append({
+                "action": "Continue monitoring performance",
+                "priority": "LOW",
+                "timeline": "Ongoing",
+                "owner": "Operations",
+                "expected_outcome": "Maintain stability",
+                "confidence": 0.60
+            })
+    
         return recs[:5]
-
+    
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
     TOKENS = {"patient", "admission", "diagnosis", "medical_condition", "clinical", "doctor", "insurance", "encounter", "test_date"}
