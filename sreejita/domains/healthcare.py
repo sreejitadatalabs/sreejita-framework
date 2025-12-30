@@ -17,6 +17,16 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 class HealthcareMapping:
     """
     Healthcare FACT extraction layer.
+
+    RULES (STRICT):
+    - NO benchmarks
+    - NO scoring
+    - NO thresholds
+    - NO executive interpretation
+    - NO rendering logic
+
+    This class only answers:
+    "What does the data say?"
     """
 
     def __init__(self, df: pd.DataFrame, cols: Dict[str, str]):
@@ -39,7 +49,8 @@ class HealthcareMapping:
         if not critical:
             return 0.0
 
-        return round(1 - self.df[critical].isna().mean().mean(), 2)
+        # POLISH: Explicit numeric cast
+        return float(round(1 - self.df[critical].isna().mean().mean(), 2))
 
     # =================================================
     # VOLUME SIGNALS
@@ -139,6 +150,9 @@ class HealthcareMapping:
     # TEMPORAL SIGNALS
     # =================================================
     def trend(self, time_col: str, metric_key: str) -> str:
+        """
+        Returns symbolic trend only: ↑ ↓ →
+        """
         if not time_col or metric_key not in self.c:
             return "→"
 
@@ -154,7 +168,8 @@ class HealthcareMapping:
         hist = df.iloc[:cut][metric].mean()
         recent = df.iloc[cut:][metric].mean()
 
-        if not hist or hist == 0:
+        # POLISH: NaN / Infinite / Zero safety
+        if hist is None or not np.isfinite(hist) or hist == 0:
             return "→"
 
         delta = (recent - hist) / hist
@@ -274,13 +289,13 @@ def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) 
             score -= 10
             breakdown[f"Missing Metric: {metric}"] = -10
 
-    # B. Facility Variance (TYPE SAFE FIX)
+    # B. Facility Variance (TYPE SAFE)
     fac_var = kpis.get("facility_variance_score")
     if isinstance(fac_var, (int, float)) and fac_var > 0.5:
         score -= 10
         breakdown["High Facility Variance"] = -10
 
-    # C. Threshold Penalties
+    # C. Threshold Penalties (TYPE SAFE)
     long_stay = kpis.get("long_stay_rate")
     if isinstance(long_stay, (int, float)):
         if long_stay >= t.get("long_stay_rate_critical", 0.3): 
@@ -739,11 +754,11 @@ class HealthcareDomain(BaseDomain):
         if "Severe Discharge Bottleneck" in titles or (isinstance(lsr, (int, float)) and lsr >= 0.2):
             add("Analyze and remove primary process bottleneck", "HIGH", "Operational Excellence", "30–60 days", "Improved throughput and capacity utilization", 0.90, 0.92)
 
-        # 3. Root Cause
+        # 3. Root Cause (MATCHES TITLE "Excess Length of Stay Drivers")
         if "Excess Length of Stay Drivers" in titles:
             add("Apply targeted interventions to top-performing-impact categories", "HIGH", "Functional Leadership", "90 days", "Reduction in excess effort and cost concentration", 0.88, 0.90)
 
-        # 4. Quality
+        # 4. Quality (MATCHES TITLE "Quality Measurement Blind Spot")
         if "Quality Measurement Blind Spot" in titles:
             add("Integrate missing quality or outcome indicators", "CRITICAL", "Data & Analytics", "Immediate", "Enable safety vs efficiency trade-off visibility", 0.95, 0.93)
 
