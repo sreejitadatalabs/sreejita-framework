@@ -7,6 +7,7 @@ This file defines "What Good Looks Like" for the Healthcare domain.
 It includes:
 1. BENCHMARKS: Rich metadata for narrative context (Source, Unit, Targets).
 2. THRESHOLDS: Flat key-value pairs for code logic/scoring.
+3. EXTERNAL LIMITS: Governance anchors to prevent internal bias (The "Reality Check").
 """
 
 # =====================================================
@@ -51,8 +52,8 @@ HEALTHCARE_BENCHMARKS = {
     
     # --- Financial Health (Dynamic) ---
     "cost_per_patient": {
-        "warning_multiplier": 1.5,   # 1.5x Median = Warning
-        "critical_multiplier": 2.5,  # 2.5x Median = Critical Outlier
+        "warning_multiplier": 1.2,   # Tightened from 1.5
+        "critical_multiplier": 1.5,  # Tightened from 2.5
         "source": "Internal Financial Baseline"
     }
 }
@@ -79,4 +80,22 @@ HEALTHCARE_THRESHOLDS = {
     # Workforce / Capacity
     "provider_variance_warning": 0.40,
     "weekend_rate_warning": 0.35,
+}
+
+# =====================================================
+# 3. EXTERNAL GOVERNANCE LIMITS (The "Reality Check")
+# =====================================================
+# These prevent "Internal Inflation" (where high internal costs set high internal benchmarks).
+# The system forces the benchmark down to these caps if the internal data is too high.
+HEALTHCARE_EXTERNAL_LIMITS = {
+    "avg_cost_per_patient": {
+        "soft_cap": 12000,
+        "hard_cap": 20000,
+        "source": "CMS / OECD blended heuristic"
+    },
+    "avg_los": {
+        "soft_cap": 5.0,
+        "hard_cap": 10.0,
+        "source": "Standard Acute Care Norms"
+    }
 }
