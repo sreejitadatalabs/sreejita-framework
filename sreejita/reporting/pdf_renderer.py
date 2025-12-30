@@ -91,7 +91,7 @@ class ExecutivePDFRenderer:
         # 🔥 BOARD VIEW SCORECARD
         kpis = payload.get("kpis", {})
         score = kpis.get("board_confidence_score", "N/A")
-        breakdown = kpis.get("board_score_breakdown", {}) # Retrieve breakdown dict
+        breakdown = kpis.get("board_score_breakdown", {}) 
         maturity = kpis.get("maturity_level", "Unknown")
         trend = kpis.get("board_confidence_trend", "→")
         domain = payload['meta'].get('domain', 'Healthcare')
@@ -122,7 +122,16 @@ class ExecutivePDFRenderer:
         ]))
         story.append(score_table)
 
-        # 🔧 SCORE BREAKDOWN TABLE (Mandatory for 10/10)
+        # GAP 4: MATURITY LEGEND
+        legend_style = ParagraphStyle(name="Legend", fontName="Helvetica-Oblique", fontSize=8, textColor=HexColor("#6b7280"), alignment=TA_CENTER)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Maturity Levels: Bronze (<60): Reactive/Risk-Driven | Silver (60-80): Controlled/Benchmark-Aware | Gold (>80): Predictive/Optimized",
+            legend_style
+        ))
+        story.append(Spacer(1, 10))
+
+        # 🔧 SCORE BREAKDOWN TABLE
         if breakdown and isinstance(breakdown, dict):
             story.append(Spacer(1, 8))
             
