@@ -9,7 +9,7 @@ from sreejita.narrative.engine import build_narrative
 
 
 # =====================================================
-# HYBRID REPORT ENGINE (v3.6.5 — PLATINUM)
+# HYBRID REPORT ENGINE (v3.7 — PLATINUM)
 # =====================================================
 
 class HybridReport(BaseReport):
@@ -19,6 +19,7 @@ class HybridReport(BaseReport):
     - Board Confidence & Maturity Injection
     - Executive Narrative Integration
     - Deterministic Rendering
+    - Score Breakdown Visualization
     """
 
     name = "hybrid"
@@ -158,9 +159,18 @@ class HybridReport(BaseReport):
                     "Silver": "🥈",
                     "Bronze": "🥉"
                 }.get(maturity, "ℹ️")
-                f.write(f"- **Maturity Level:** {icon} **{maturity}**\n\n")
-            else:
-                f.write("\n")
+                f.write(f"- **Maturity Level:** {icon} **{maturity}**\n")
+
+            # 🔧 SCORE BREAKDOWN TABLE (New Feature)
+            breakdown = kpis.get("board_score_breakdown", {})
+            if breakdown:
+                f.write("\n**Score Drivers:**\n")
+                f.write("| Driver | Impact |\n")
+                f.write("| :--- | :---: |\n")
+                for reason, points in breakdown.items():
+                    sign = "+" if points > 0 else ""
+                    f.write(f"| {reason} | **{sign}{points}** |\n")
+            f.write("\n")
 
         # --- 📊 OPERATIONAL METRICS (Filtered) ---
         if kpis:
@@ -177,7 +187,8 @@ class HybridReport(BaseReport):
                 "is_aggregated",
                 "debug_shape_score",
                 "care_context",
-                "board_confidence_explanation" # Added this so it doesn't break table
+                "board_confidence_explanation",
+                "board_score_breakdown" # Hidden from main table, shown in specialized table above
             ]
             
             # Limit to top 12 metrics to prevent spam
