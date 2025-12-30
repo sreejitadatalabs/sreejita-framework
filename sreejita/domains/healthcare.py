@@ -322,6 +322,8 @@ class HealthcareDomain(BaseDomain):
                 stats = df.groupby(c["doctor"])[c["los"]].mean()
                 if stats.mean() > 0: raw_kpis["provider_variance_score"] = stats.std() / stats.mean()
 
+        raw_kpis["benchmark_context"] = "Benchmarks aligned to CMS Inpatient Norms & Internal Medians."
+        
         # 🔥 BOARD INTELLIGENCE (Dict based)
         try: 
             current_score, score_breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
@@ -501,10 +503,10 @@ class HealthcareDomain(BaseDomain):
         t = HEALTHCARE_THRESHOLDS
         c = self.cols
         
-        # 1. ENHANCED ROOT CAUSE & EXCESS DAYS MATH (Gap 1 Fix)
+        # 1. ENHANCED ROOT CAUSE & IMPACT (Gap 2 & 4)
         if c["diagnosis"] and c["los"] and not df[c["los"]].dropna().empty:
-            diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count'])
-            # Filter for meaningful volume
+            # Group by diagnosis: Get Mean (Magnitude), Count (Volume), Std (Variance/Why)
+            diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count', 'std'])
             diag_perf = diag_perf[diag_perf['count'] > 5].nlargest(3, 'mean')
             
             drivers = []
@@ -516,40 +518,45 @@ class HealthcareDomain(BaseDomain):
                     excess = row['mean'] - global_target
                     total_excess = excess * row['count']
                     total_excess_days += total_excess
-                    drivers.append(f"{diag}: +{excess:.1f}d x {row['count']} pts = {total_excess:.0f} excess days")
+                    
+                    # GAP 2 FIX: Heuristic "Why"
+                    # High Variance (>50% of mean) = Inconsistent Practice. Low Variance = Structural/Process Delay.
+                    why = "High Practice Variance" if row['std'] > (row['mean'] * 0.5) else "Structural Delay"
+                    drivers.append(f"{diag}: +{excess:.1f}d ({why})")
             
             if drivers:
-                # GAP 2 FIX: Added "Likely drivers" hypothesis to show depth
+                # GAP 4 FIX: Capacity Translation (Excess Days -> Blocked Beds)
+                blocked_beds = total_excess_days / 365
                 insights.append({
                     "level": "CRITICAL", 
                     "title": "Excess Days Breakdown", 
-                    "so_what": f"Total Excess Days: {total_excess_days:,.0f}. Driven by: <br/>" + "<br/>".join(drivers) + 
-                               "<br/><i>Likely drivers include discharge delays, comorbidity complexity, and protocol variation.</i>"
+                    "so_what": f"Total Excess Days: {total_excess_days:,.0f} (Equiv. to {blocked_beds:.1f} beds permanently blocked).<br/>Driven by: " + "; ".join(drivers)
                 })
 
-        # 2. DETAILED FACILITY VARIANCE (Gap B Fix)
+        # 2. DETAILED FACILITY VARIANCE (Gap 3)
         if kpis.get("facility_variance_score", 0) > 0.5 and c["facility"] and c["los"]:
             fac_stats = df.groupby(c["facility"])[c["los"]].mean()
             if not fac_stats.empty:
                 best, worst = fac_stats.idxmin(), fac_stats.idxmax()
+                gap = fac_stats[worst] - fac_stats[best]
                 insights.append({
                     "level": "RISK", 
                     "title": "High Facility Variance", 
-                    "so_what": f"{worst} averages {fac_stats[worst]:.1f} days vs {best} at {fac_stats[best]:.1f} days, indicating local operational bottlenecks."
+                    "so_what": f"Operational Gap: {gap:.1f} days.<br/>{worst} ({fac_stats[worst]:.1f}d) vs {best} ({fac_stats[best]:.1f}d)."
                 })
 
-        # 3. MISSING DATA BLIND SPOT
+        # 3. MISSING DATA BLIND SPOT (Gap 1)
         if kpis.get("readmission_rate") is None and self.care_context == CareContext.INPATIENT:
             insights.append({
                 "level": "RISK",
                 "title": "Quality Blind Spot",
-                "so_what": "Readmission data missing. Cannot assess clinical safety vs speed trade-offs."
+                "so_what": "Readmission data missing. Cannot validate if extended LOS is driving safety or inefficiency."
             })
 
-        # 4. Standard Operational Checks
+        # 4. Standard Checks
         if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] >= t["long_stay_rate_critical"]:
             insights.append({"level": "CRITICAL", "title": "Severe Discharge Bottleneck", "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed targets."})
-            
+         
         # 5. Diagnostic Context
         if kpis.get("care_context") == "diagnostic":
             insights.append({"level": "INFO", "title": "Diagnostic Dataset", "so_what": f"Analysis focused on {kpis.get('total_encounters',0)} clinical encounters."})
@@ -570,6 +577,7 @@ class HealthcareDomain(BaseDomain):
             insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Metrics within tolerance."})
             
         return insights
+
         
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
         recs = []
