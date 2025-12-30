@@ -81,71 +81,87 @@ def _calculate_internal_trend(df: pd.DataFrame, time_col: str, metric_col: str) 
 # =====================================================
 # 3️⃣ BOARD CONFIDENCE (Weighted & Explained)
 # =====================================================
-def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) -> Tuple[int, List[str]]:
+def _compute_board_confidence_score(kpis: Dict[str, Any], context: CareContext) -> Tuple[int, Dict[str, int]]:
+    """
+    Calculates Score AND returns a structured breakdown dictionary for the Scorecard.
+    Returns: (Score, {Reason: Points})
+    """
     score = 100
-    explanation = []
+    breakdown = {} 
     t = HEALTHCARE_THRESHOLDS
     
-    explanation.append(f"Context detected as **{context.value.upper()}** based on data shape.")
-
     # --- AGGREGATED PATH ---
     if context == CareContext.AGGREGATED:
+        # Start at 70 (Implicit -30 penalty for data shape)
         score = 70
-        explanation.append("Baseline confidence (70/100) applied for aggregated summary data.")
+        breakdown["Aggregated Data Limit"] = -30
+        
+        # Bonuses
         if kpis.get("avg_los") and kpis.get("benchmark_los") and kpis["avg_los"] <= kpis["benchmark_los"]: 
             score += 10
-            explanation.append("Bonus (+10): Avg LOS is within target.")
+            breakdown["Bonus: LOS within Target"] = 10
+        
         if kpis.get("readmission_rate") and kpis["readmission_rate"] <= 0.1:
             score += 10
-            explanation.append("Bonus (+10): Readmission rate is optimal.")
+            breakdown["Bonus: Optimal Readmissions"] = 10
+            
         final_score = min(score, 85)
-        if final_score < score: explanation.append("Score capped at 85/100 due to lack of granular row-level data.")
-        return final_score, explanation
+        if final_score < score:
+            # If we hit the cap, record the adjustment
+            diff = final_score - score
+            breakdown["Cap: Aggregated Ceiling"] = diff
+            
+        return final_score, breakdown
 
     # --- ROW LEVEL PATH ---
-    # A. Check EXPECTED metrics
+    
+    # A. Check EXPECTED metrics (The Universal Rule)
     required = EXPECTED_METRICS.get(context, set())
     for metric in required:
         if kpis.get(metric) is None:
             score -= 10
-            explanation.append(f"Penalty (-10): Expected metric '{metric}' is missing from this {context.value} dataset.")
+            breakdown[f"Missing Metric: {metric}"] = -10
 
     # B. Facility Variance
     if kpis.get("facility_variance_score", 0) > 0.5:
         score -= 10
-        explanation.append("Penalty (-10): High performance variance detected across facility locations.")
+        breakdown["High Facility Variance"] = -10
 
     # C. Threshold Penalties
+    # Operational
     if kpis.get("long_stay_rate", 0) >= t["long_stay_rate_critical"]: 
         score -= 25
-        explanation.append("Penalty (-25): Critical bottleneck in long-stay discharges.")
+        breakdown["Critical Long Stay Rate"] = -25
     elif kpis.get("long_stay_rate", 0) >= t["long_stay_rate_warning"]: 
         score -= 15
-        explanation.append("Penalty (-15): Long-stay rate indicates emerging bottleneck.")
+        breakdown["High Long Stay Rate"] = -15
 
     if kpis.get("avg_los") and kpis.get("benchmark_los") and kpis["avg_los"] > kpis["benchmark_los"]: 
         score -= 10
-        explanation.append("Penalty (-10): Average LOS exceeds benchmark.")
+        breakdown["LOS Exceeds Benchmark"] = -10
 
+    # Clinical
     if kpis.get("readmission_rate", 0) >= t["readmission_critical"]: 
         score -= 20
-        explanation.append("Penalty (-20): Readmission rate is critically high.")
+        breakdown["Critical Readmission Rate"] = -20
     
+    # Financial
     if kpis.get("avg_cost_per_patient") and kpis.get("benchmark_cost"):
         if kpis["avg_cost_per_patient"] > kpis["benchmark_cost"] * t["cost_multiplier_warning"]: 
             score -= 10
-            explanation.append("Penalty (-10): Cost per patient significantly exceeds internal baseline.")
+            breakdown["Cost > Benchmark"] = -10
 
-    # D. Diagnostic Checks
+    # D. Diagnostic Specific Checks
     if context == CareContext.DIAGNOSTIC:
         if kpis.get("data_completeness", 0) < 0.9: 
             score -= 20
-            explanation.append("Penalty (-20): Diagnostic data completeness is below 90%.")
+            breakdown["Low Data Completeness"] = -20
 
-    if score == 100:
-        explanation.append("Perfect Score: All metrics within optimal operational thresholds.")
+    # E. Positive Reinforcement (Empty breakdown implies perfection)
+    if not breakdown and score == 100:
+        breakdown["Perfect Operational State"] = 0
 
-    return max(score, 0), explanation
+    return max(score, 0), breakdown
 
 def _healthcare_maturity_level(board_score: int) -> str:
     if board_score >= 85: return "Gold"
@@ -275,9 +291,9 @@ class HealthcareDomain(BaseDomain):
                 if stats.mean() > 0: raw_kpis["provider_variance_score"] = stats.std() / stats.mean()
 
         # 🔥 BOARD INTELLIGENCE
-        current_score, explanation_list = _compute_board_confidence_score(raw_kpis, self.care_context)
+        current_score, score_breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
         raw_kpis["board_confidence_score"] = current_score
-        raw_kpis["board_confidence_explanation"] = explanation_list
+        raw_kpis["board_score_breakdown"] = score_breakdown # Store the Dict, not the List
         raw_kpis["maturity_level"] = _healthcare_maturity_level(current_score)
         raw_kpis["board_confidence_trend"] = raw_kpis.get("cost_trend", "→")
 
@@ -370,16 +386,31 @@ class HealthcareDomain(BaseDomain):
                     save(fig, "cost_los.png", "Efficiency outliers", 0.85)
             except: pass
 
-        # 6. Provider Variance
+        # 6. PROVIDER VARIANCE (With HIPAA Guard)
+        
         if c["doctor"] and c["los"]:
             try:
-                if not df[c["los"]].dropna().empty:
-                    fig, ax = plt.subplots(figsize=(7, 4))
-                    df.groupby(c["doctor"])[c["los"]].mean().nlargest(10).plot(kind="bar", ax=ax, color="brown")
-                    ax.set_title("Provider Variance (Avg LOS)")
-                    save(fig, "prov.png", "Care consistency", 0.80)
+                # SAFETY CHECK: If there are > 50 unique "doctors", it is likely 
+                # a Patient Name column mapped incorrectly. Skip to prevent data leak.
+                unique_providers = df[c["doctor"]].nunique()
+                
+                if unique_providers <= 50:
+                    if not df[c["los"]].dropna().empty:
+                        fig, ax = plt.subplots(figsize=(7, 4))
+                        
+                        # Plot top 10 providers by Avg LOS
+                        stats = df.groupby(c["doctor"])[c["los"]].mean().nlargest(10)
+                        stats.plot(kind="bar", ax=ax, color="brown")
+                        
+                        ax.set_title("Provider Variance (Avg LOS)", fontweight='bold')
+                        plt.xticks(rotation=45, ha='right')
+                        
+                        # Add a grid for readability
+                        ax.grid(axis='y', linestyle='--', alpha=0.3)
+                        
+                        save(fig, "prov.png", "Care consistency & provider variability", 0.80)
             except: pass
-
+                
         # 7. Payer Mix
         if c["payer"]:
             try:
