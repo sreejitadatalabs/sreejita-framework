@@ -1,25 +1,26 @@
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
 from dataclasses import asdict
 
 from sreejita.reporting.base import BaseReport
 from sreejita.narrative.engine import build_narrative
+from sreejita.narrative.executive_cognition import build_executive_payload
 
 
 # =====================================================
-# HYBRID REPORT ENGINE (v3.7 — PLATINUM)
+# HYBRID REPORT ENGINE (v3.7 — STABLE)
 # =====================================================
 
 class HybridReport(BaseReport):
     """
     Hybrid Report Engine
-    Features: 
-    - Board Confidence & Maturity Injection
-    - Executive Narrative Integration
-    - Deterministic Rendering
-    - Score Breakdown Visualization
+
+    Responsibilities:
+    - Orchestrate domain → narrative → executive cognition
+    - Render Markdown (human-readable)
+    - Produce UI / PDF-safe payload
     """
 
     name = "hybrid"
@@ -31,9 +32,9 @@ class HybridReport(BaseReport):
         self,
         domain_results: Dict[str, Dict[str, Any]],
         narrative_data: Any,
+        executive_payload: Dict[str, Any],
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None,
-        config: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
         output_dir = Path(output_dir)
@@ -44,12 +45,10 @@ class HybridReport(BaseReport):
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
+            self._write_executive_snapshot(f, executive_payload)
             self._write_narrative(f, narrative_data)
-            
-            # Sort domains to show Healthcare/Finance first
-            sorted_domains = self._sort_domains(domain_results.keys())
-            
-            for domain in sorted_domains:
+
+            for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
                     f,
                     domain,
@@ -61,167 +60,105 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
+    # EXECUTIVE SNAPSHOT (TOP OF REPORT)
+    # -------------------------------------------------
+    def _write_executive_snapshot(self, f, payload: Dict[str, Any]):
+        snap = payload.get("decision_snapshot")
+        if not snap:
+            return
+
+        f.write("## Executive Decision Snapshot\n\n")
+        risk = snap.get("overall_risk", {})
+        f.write(
+            f"**Overall Risk:** {risk.get('icon','')} "
+            f"{risk.get('label','UNKNOWN')} ({risk.get('score','-')}/100)\n\n"
+        )
+
+        f.write("### Top Problems\n")
+        for p in snap.get("top_problems", []):
+            f.write(f"- {p}\n")
+
+        f.write("\n### Top Actions (90 Days)\n")
+        for a in snap.get("top_actions", []):
+            f.write(f"- {a}\n")
+
+        f.write("\n### Decisions Required\n")
+        for d in snap.get("decisions_required", []):
+            f.write(f"- [ ] {d}\n")
+
+        f.write("\n---\n\n")
+
+    # -------------------------------------------------
     # EXECUTIVE NARRATIVE
     # -------------------------------------------------
     def _write_narrative(self, f, narrative):
-        f.write("\n## 1. Executive Brief\n\n")
+        f.write("## Executive Brief\n\n")
 
-        # Executive Summary
-        summary = getattr(narrative, "executive_summary", []) or []
-        if not summary:
-            summary = ["Operational performance indicators require management attention."]
-        
-        for line in summary:
-            f.write(f"  • {line}\n")
-        f.write("\n")
+        for line in narrative.executive_summary or []:
+            f.write(f"- {line}\n")
 
-        # Financial Impact (The "So What?")
-        financial = getattr(narrative, "financial_impact", []) or []
-        if financial:
-            f.write("### 💰 Financial Impact\n")
-            for line in financial:
+        if narrative.financial_impact:
+            f.write("\n### Financial Impact\n")
+            for line in narrative.financial_impact:
                 f.write(f"- {line}\n")
-            f.write("\n")
 
-        # Strategic Risks
-        risks = getattr(narrative, "risks", []) or []
-        if risks:
-            f.write("### ⚠️ Strategic Risks\n")
-            for line in risks:
-                f.write(f"- {line}\n")
-            f.write("\n")
+        if narrative.risks:
+            f.write("\n### Strategic Risks\n")
+            for r in narrative.risks:
+                f.write(f"- {r}\n")
 
-        # Action Plan Table
-        actions = getattr(narrative, "action_plan", []) or []
-        if actions:
-            f.write("### 🚀 Strategic Action Plan\n")
+        if narrative.action_plan:
+            f.write("\n### Action Plan\n")
             f.write("| Action | Owner | Timeline | Success Metric |\n")
             f.write("| :--- | :--- | :--- | :--- |\n")
-            for item in actions:
-                # Handle both dict (from JSON) and dataclass (from engine)
-                act = item if isinstance(item, dict) else asdict(item)
-                f.write(f"| {act.get('action')} | {act.get('owner')} | {act.get('timeline')} | {act.get('success_kpi')} |\n")
-            f.write("\n")
+            for a in narrative.action_plan:
+                row = a if isinstance(a, dict) else asdict(a)
+                f.write(
+                    f"| {row.get('action')} | {row.get('owner')} | "
+                    f"{row.get('timeline')} | {row.get('success_kpi')} |\n"
+                )
 
-        f.write("---\n\n")
+        f.write("\n---\n\n")
 
     # -------------------------------------------------
-    # DOMAIN DEEP DIVE (With Board Intelligence)
+    # DOMAIN SECTION
     # -------------------------------------------------
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
-        f.write(f"## 2. Deep Dive: {domain.replace('_', ' ').title()}\n\n")
-
-        if not isinstance(result, dict):
-            f.write("_Invalid domain output._\n\n")
-            return
+        f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
 
         kpis = result.get("kpis", {}) or {}
         visuals = result.get("visuals", []) or []
 
-        # --- 🧭 BOARD CONFIDENCE SCORE INJECTION ---
-        score = kpis.get("board_confidence_score")
-        trend = kpis.get("board_confidence_trend", "→")
-        
-        if isinstance(score, (int, float)):
-            f.write("### 🧭 Board Confidence Score\n\n")
-
-            # Logic: Determine Label & Interpretation
-            if score >= 85:
-                label = "🟢 High Confidence"
-                note = "Operations are stable with no immediate executive intervention required."
-            elif score >= 70:
-                label = "🟡 Moderate Confidence"
-                note = "Targeted operational improvements recommended."
-            elif score >= 50:
-                label = "🟠 Elevated Risk"
-                note = "Leadership attention required to prevent degradation."
-            else:
-                label = "🔴 Critical Risk"
-                note = "Immediate executive intervention required."
-
-            # Logic: Trend Text
-            trend_label = {
-                "↑": "Improving",
-                "→": "Stable",
-                "↓": "Deteriorating"
-            }.get(trend, "Stable")
-
-            # Write Block
-            f.write(f"- **Score:** **{score} / 100** ({label})\n")
-            f.write(f"- **Trend:** {trend} **{trend_label}**\n")
-            f.write(f"- **Interpretation:** {note}\n")
-            
-            # 🏅 Maturity Level Injection
-            maturity = kpis.get("maturity_level")
-            if maturity:
-                icon = {
-                    "Gold": "🥇",
-                    "Silver": "🥈",
-                    "Bronze": "🥉"
-                }.get(maturity, "ℹ️")
-                f.write(f"- **Maturity Level:** {icon} **{maturity}**\n")
-
-            # 🔧 SCORE BREAKDOWN TABLE (New Feature)
-            breakdown = kpis.get("board_score_breakdown", {})
-            if breakdown:
-                f.write("\n**Score Drivers:**\n")
-                f.write("| Driver | Impact |\n")
-                f.write("| :--- | :---: |\n")
-                for reason, points in breakdown.items():
-                    sign = "+" if points > 0 else ""
-                    f.write(f"| {reason} | **{sign}{points}** |\n")
-            f.write("\n")
-
-        # --- 📊 OPERATIONAL METRICS (Filtered) ---
+        # KPIs (render, not decide)
         if kpis:
-            f.write("### 📊 Operational Metrics\n")
+            f.write("### Key Metrics\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
-            
-            # Hide internal meta-keys from the clean table
-            hidden_keys = [
-                "board_confidence_score", 
-                "maturity_level", 
-                "board_confidence_trend", 
-                "dataset_shape", 
-                "is_aggregated",
-                "debug_shape_score",
-                "care_context",
-                "board_confidence_explanation",
-                "board_score_breakdown" # Hidden from main table
-            ]
-            
-            # Limit to top 12 metrics to prevent spam
-            for k, v in list(kpis.items())[:12]:
-                if k not in hidden_keys:
-                    f.write(f"| {k.replace('_',' ').title()} | **{self._format_value(k, v)}** |\n")
+            for k, v in kpis.items():
+                f.write(f"| {k.replace('_',' ').title()} | {self._format_value(k, v)} |\n")
             f.write("\n")
 
-        # --- 👁️ VISUAL EVIDENCE ---
+        # Visuals (top 6 already sorted by domain)
         if visuals:
-            f.write("### 📉 Visual Evidence\n")
-            # Strict Limit: Top 6 Visuals Only
+            f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
-                img_path = vis.get("path", "")
-                if img_path and "placeholder" not in img_path:
-                    # Markdown image link
-                    f.write(f"![{vis.get('caption')}]({img_path})\n")
-                    f.write(f"> *{vis.get('caption')}*\n\n")
+                f.write(f"![{vis.get('caption')}]({vis.get('path')})\n")
+                f.write(f"> {vis.get('caption')}\n\n")
 
     # -------------------------------------------------
     # HEADER & FOOTER
     # -------------------------------------------------
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
-        f.write(f"# Sreejita Executive Report\n\n")
+        f.write("# Sreejita Executive Report\n\n")
         f.write(f"**Run ID:** `{run_id}` | **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n")
         if metadata:
             for k, v in metadata.items():
                 f.write(f"- **{k.replace('_',' ').title()}**: {v}\n")
-        f.write("---\n")
+        f.write("\n---\n\n")
 
     def _write_footer(self, f):
         f.write("\n---\n")
-        f.write("_Generated by **Sreejita Intelligence Engine** · Framework v3.6.5_\n")
+        f.write("_Generated by **Sreejita Intelligence Engine** · Framework v3.7_\n")
 
     # -------------------------------------------------
     # HELPERS
@@ -232,13 +169,13 @@ class HybridReport(BaseReport):
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
-            if any(x in key.lower() for x in ["rate", "ratio", "margin", "ctr", "roas"]):
-                return f"{v:.1%}" if abs(v) <= 5 else f"{v:.2f}"
+            if "rate" in key or "ratio" in key:
+                return f"{v:.1%}"
             if abs(v) >= 1_000_000:
-                return f"{v / 1_000_000:.1f}M"
+                return f"{v/1_000_000:.1f}M"
             if abs(v) >= 1_000:
-                return f"{v / 1_000:.1f}K"
-            return f"{v:,.0f}" if isinstance(v, (int)) or v > 10 else f"{v:.2f}"
+                return f"{v/1_000:.1f}K"
+            return f"{v:.2f}"
         return str(v)
 
 
@@ -247,58 +184,47 @@ class HybridReport(BaseReport):
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Orchestrator Entry Point.
-    Ties together Domain Logic -> Narrative -> Markdown Generation.
-    """
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Compute Domain Intelligence
     domain_results = generate_report_payload(input_path, config)
 
-    # 2. Identify Primary Domain
     engine = HybridReport()
     primary_domain = engine._sort_domains(domain_results.keys())[0]
-    result = domain_results.get(primary_domain, {}) or {}
+    primary = domain_results.get(primary_domain, {})
 
-    # 3. Generate Narrative (With Financial Translation)
     narrative = build_narrative(
         domain=primary_domain,
-        kpis=result.get("kpis", {}),
-        insights=result.get("insights", []),
-        recommendations=result.get("recommendations", []),
+        kpis=primary.get("kpis", {}),
+        insights=primary.get("insights", []),
+        recommendations=primary.get("recommendations", []),
     )
 
-    # 4. Build Markdown Report
+    executive_payload = build_executive_payload(
+        primary.get("kpis", {}),
+        primary.get("insights", []),
+        primary.get("recommendations", []),
+    )
+
     md_path = engine.build(
         domain_results=domain_results,
         narrative_data=narrative,
+        executive_payload=executive_payload,
         output_dir=run_dir,
         metadata=config.get("metadata"),
-        config=config,
     )
-
-    # 5. Construct Payload (UI/PDF Safe)
-    payload = {
-        "meta": {
-            "domain": primary_domain.replace("_", " ").title(),
-            "run_id": f"RUN-{datetime.utcnow():%Y%m%d-%H%M%S}",
-        },
-        "summary": narrative.executive_summary,
-        "kpis": result.get("kpis", {}),
-        "visuals": result.get("visuals", []),
-        "insights": narrative.key_findings,
-        # Ensure Recommendations are dicts for JSON serialization
-        "recommendations": [asdict(r) if not isinstance(r, dict) else r for r in narrative.action_plan],
-        "risks": narrative.risks,
-        "financial_impact": narrative.financial_impact,
-    }
 
     return {
         "markdown": str(md_path),
-        "payload": payload,
+        "payload": {
+            "executive_snapshot": executive_payload.get("decision_snapshot"),
+            "primary_kpis": executive_payload.get("executive_kpis"),
+            "summary": narrative.executive_summary,
+            "visuals": primary.get("visuals", []),
+            "insights": narrative.key_findings,
+            "recommendations": primary.get("recommendations", []),
+        },
         "run_dir": str(run_dir),
     }
