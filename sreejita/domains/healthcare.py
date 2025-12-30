@@ -534,10 +534,9 @@ class HealthcareDomain(BaseDomain):
                     drivers.append(f"{diag}: +{excess:.1f}d ({cause_type})")
     
             if drivers:
-                avg_cost_per_day = kpis.get(
-                    "avg_cost_per_day",
-                    HEALTHCARE_EXTERNAL_LIMITS.get("avg_cost_per_day", 2000)
-                )
+                avg_cost_per_day = kpis.get("avg_cost_per_day")
+                if not avg_cost_per_day or avg_cost_per_day <= 0:
+                    avg_cost_per_day = HEALTHCARE_EXTERNAL_LIMITS.get("avg_cost_per_day", 2000)
     
                 financial_impact = total_excess_days * avg_cost_per_day
                 fin_str = (
@@ -611,6 +610,8 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # 5. COST ANOMALY
         # -------------------------------------------------
+        # Governance rule: any cost above benchmark is penalized (binary, not tiered)
+        
         if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", float("inf")):
             insights.append({
                 "level": "WARNING",
