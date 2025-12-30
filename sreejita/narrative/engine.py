@@ -120,15 +120,21 @@ def build_narrative(
         if comp < 0.9:
             risks.append(f"Data Reliability: Key clinical fields are {100-comp*100:.0f}% incomplete.")
 
-        # --- 6. INSIGHT INTEGRATION (Replaces old Root Cause Injection) ---
+        # --- 6. INSIGHT INTEGRATION ---
         for insight in insights:
-            # Lift high-priority insights to summary (Root Causes, Quality Gaps)
-            if insight['level'] == 'CRITICAL' or insight['title'] == "Quality Blind Spot":
-                # Check for duplicates before adding
+            # Gap 1: Lift the Math Breakdown to Summary
+            if insight['title'] == "Excess Days Breakdown":
+                 # Format slightly for text summary
+                 clean_text = insight['so_what'].replace("<br/>", "; ")
+                 summary.append(f"IMPACT MATH: {clean_text}")
+
+            # Gap 2: Outcome Justification Logic Bridge
+            elif insight['title'] == "Quality Blind Spot":
+                summary.append("GOVERNANCE RISK: Outcome Justification Unknown. Extended LOS cannot be justified without readmission data.")
+            
+            elif insight['level'] == 'CRITICAL':
                 msg = f"{insight['title']}: {insight['so_what']}"
-                # Simple dedupe check
-                if msg not in summary:
-                    summary.append(msg)
+                if msg not in summary: summary.append(msg)
 
     # Universal Fallbacks
     if not summary: summary.append("Operational indicators are within expected thresholds.")
