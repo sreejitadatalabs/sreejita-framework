@@ -1,62 +1,57 @@
 import logging
 from pathlib import Path
+from typing import Dict, Any
+
 import pandas as pd
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
-from sreejita.core.dataset_shape import detect_dataset_shape  # ✅ NEW
+from sreejita.core.dataset_shape import detect_dataset_shape
 
 log = logging.getLogger("sreejita.orchestrator")
 
 
 # =====================================================
-# SAFE TABULAR LOADER (CSV + EXCEL)
+# SAFE TABULAR LOADER
 # =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
-    """
-    Safely read CSV or Excel files with real-world fallbacks.
-    """
     suffix = path.suffix.lower()
 
     if suffix == ".csv":
-        try:
-            return pd.read_csv(path)
-        except UnicodeDecodeError:
+        for enc in (None, "latin-1", "cp1252"):
             try:
-                return pd.read_csv(path, encoding="latin-1")
-            except UnicodeDecodeError:
-                return pd.read_csv(path, encoding="cp1252")
+                return pd.read_csv(path, encoding=enc)
+            except Exception:
+                continue
 
     if suffix in (".xls", ".xlsx"):
-        try:
-            return pd.read_excel(path)
-        except ValueError:
+        for engine in (None, "openpyxl", "xlrd"):
             try:
-                return pd.read_excel(path, engine="openpyxl")
+                return pd.read_excel(path, engine=engine)
             except Exception:
-                return pd.read_excel(path, engine="xlrd")
+                continue
 
-    raise ValueError(f"Unsupported file type: {suffix}")
+    raise ValueError(f"Unsupported or unreadable file: {path}")
 
 
 # =====================================================
-# ORCHESTRATOR — SINGLE SOURCE OF TRUTH (SHAPE-AWARE)
+# ORCHESTRATOR — SINGLE SOURCE OF TRUTH
 # =====================================================
 
-def generate_report_payload(input_path: str, config: dict) -> dict:
+def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Orchestrator — SINGLE SOURCE OF TRUTH
+    Authoritative orchestration layer.
+    - No intelligence
+    - No formatting
+    - No assumptions
     """
 
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    if "run_dir" not in config:
-        raise RuntimeError("config['run_dir'] is required")
-
-    run_dir = Path(config["run_dir"])
+    run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
@@ -65,14 +60,14 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE DETECTION (🔥 CRITICAL)
+    # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(df)
-        log.info("Detected dataset shape: %s", shape_info.get("shape"))
+        log.info("Dataset shape detected: %s", shape_info.get("shape"))
     except Exception as e:
-        log.warning("Dataset shape detection failed: %s", e)
-        shape_info = {"shape": "unknown"}
+        log.warning("Shape detection failed: %s", e)
+        shape_info = {"shape": "unknown", "score": {}}
 
     # -------------------------------------------------
     # 3. DOMAIN DECISION
@@ -81,15 +76,15 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
     domain = decision.selected_domain
     engine = decision.engine
 
-    if engine is None:
-        log.warning("No engine found for domain: %s", domain)
+    if not engine:
+        log.warning("No domain engine resolved.")
         return {
             "unknown": {
-                "kpis": {"rows": len(df), "columns": len(df.columns)},
+                "kpis": {},
                 "insights": [{
                     "level": "RISK",
                     "title": "Unknown Domain",
-                    "so_what": "No matching domain engine found.",
+                    "so_what": "No suitable domain engine could be identified."
                 }],
                 "recommendations": [],
                 "visuals": [],
@@ -98,65 +93,62 @@ def generate_report_payload(input_path: str, config: dict) -> dict:
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN LIFECYCLE (SHAPE-AWARE)
+    # 4. DOMAIN EXECUTION (DEFENSIVE)
     # -------------------------------------------------
     try:
+        # Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        kpis = engine.calculate_kpis(df)
+        # KPIs (REQUIRED)
+        kpis = engine.calculate_kpis(df) or {}
 
-        # 🔑 Shape-aware insights (Robust Call)
-        # We try passing shape_info; if the engine is old/doesn't support it, we catch the error and retry without.
+        # Insights (SHAPE-AWARE, SAFE)
         try:
-            insights = engine.generate_insights(df, kpis, shape_info=shape_info)
+            insights = engine.generate_insights(df, kpis, shape_info=shape_info) or []
         except TypeError:
-            # Fallback for older domains that don't accept shape_info yet
-            insights = engine.generate_insights(df, kpis)
+            insights = engine.generate_insights(df, kpis) or []
 
-        # 🔑 Shape-aware recommendations (Robust Call)
+        # Recommendations (SHAPE-AWARE, SAFE)
         try:
-            raw_recommendations = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
+            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info) or []
         except TypeError:
-            # Fallback
-            raw_recommendations = engine.generate_recommendations(df, kpis, insights)
+            raw_recs = engine.generate_recommendations(df, kpis, insights) or []
 
-        recommendations = enrich_recommendations(raw_recommendations)
+        recommendations = enrich_recommendations(raw_recs) or []
 
     except Exception as e:
-        log.exception("Domain engine failed: %s", domain)
+        log.exception("Domain processing failed: %s", domain)
         raise RuntimeError(f"Domain processing failed for '{domain}': {e}")
 
     # -------------------------------------------------
-    # 5. VISUALS (FAIL-SAFE)
+    # 5. VISUAL GENERATION (FAIL-SAFE)
     # -------------------------------------------------
     visuals = []
 
     if hasattr(engine, "generate_visuals"):
-        visuals_dir = run_dir / "visuals"
+        visuals_dir = run_dir / "visuals" / domain
         visuals_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             generated = engine.generate_visuals(df, visuals_dir) or []
         except Exception as e:
-            log.error("Visual generation failed for domain '%s': %s", domain, e)
+            log.error("Visual generation failed for %s: %s", domain, e)
             generated = []
 
-        for vis in generated:
-            if isinstance(vis, dict) and vis.get("path") and Path(vis["path"]).exists():
-                visuals.append(vis)
-            else:
-                log.warning("Invalid visual skipped: %s", vis)
+        for v in generated:
+            if isinstance(v, dict) and v.get("path") and Path(v["path"]).exists():
+                visuals.append(v)
 
     # -------------------------------------------------
-    # 6. STANDARDIZED PAYLOAD (AUTHORITATIVE)
+    # 6. AUTHORITATIVE PAYLOAD (CONTRACT SAFE)
     # -------------------------------------------------
     return {
         domain: {
-            "kpis": kpis,
-            "insights": insights,
-            "recommendations": recommendations,
-            "visuals": visuals,
+            "kpis": kpis or {},
+            "insights": insights or [],
+            "recommendations": recommendations or [],
+            "visuals": visuals or [],
             "shape": shape_info,
         }
     }
