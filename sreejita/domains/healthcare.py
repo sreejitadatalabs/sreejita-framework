@@ -471,49 +471,72 @@ class HealthcareDomain(BaseDomain):
         t = HEALTHCARE_THRESHOLDS
         c = self.cols
         
-        # 1. ROOT CAUSE ANALYSIS (New)
+        # 1. ENHANCED ROOT CAUSE (Top 3 Conditions)
         if c["diagnosis"] and c["los"] and not df[c["los"]].dropna().empty:
+            # Group by diagnosis, get mean LOS and count
             diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count'])
-            diag_perf = diag_perf[diag_perf['count'] > 5]
-            if not diag_perf.empty:
-                worst_diag = diag_perf['mean'].idxmax()
-                worst_val = diag_perf['mean'].max()
-                global_avg = kpis.get("avg_los", 0)
-                if worst_val > global_avg * 1.2:
-                    insights.append({
-                        "level": "CRITICAL", 
-                        "title": "Root Cause Identified", 
-                        "so_what": f"'{worst_diag}' patients average {worst_val:.1f} days (vs global {global_avg:.1f}), driving the bottleneck."
-                    })
+            # Filter for volume > 5 and get top 3 worst LOS
+            diag_perf = diag_perf[diag_perf['count'] > 5].nlargest(3, 'mean')
+            
+            drivers = []
+            global_avg = kpis.get("avg_los", 0)
+            
+            for diag, row in diag_perf.iterrows():
+                # Only list if it exceeds global average by 20%
+                if row['mean'] > global_avg * 1.2:
+                    drivers.append(f"{diag} ({row['mean']:.1f}d)")
+            
+            if drivers:
+                insights.append({
+                    "level": "CRITICAL", 
+                    "title": "Diagnosis-Specific Root Causes", 
+                    "so_what": f"LOS inflated by: {', '.join(drivers)} vs avg {global_avg:.1f}d."
+                })
 
-        # 2. Facility Variance
-        if kpis.get("facility_variance_score", 0) > 0.5:
-            insights.append({"level": "RISK", "title": "High Facility Variance", "so_what": "Significant cost/quality gaps exist between hospital sites."})
+        # 2. DETAILED FACILITY VARIANCE (Best vs Worst)
+        if kpis.get("facility_variance_score", 0) > 0.5 and c["facility"] and c["los"]:
+            fac_stats = df.groupby(c["facility"])[c["los"]].mean()
+            if not fac_stats.empty:
+                best, worst = fac_stats.idxmin(), fac_stats.idxmax()
+                insights.append({
+                    "level": "RISK", 
+                    "title": "High Facility Variance", 
+                    "so_what": f"Performance gap: {best} ({fac_stats[best]:.1f}d) vs {worst} ({fac_stats[worst]:.1f}d)."
+                })
 
-        # 3. Diagnostic Context
+        # 3. MISSING DATA BLIND SPOT
+        if kpis.get("readmission_rate") is None and self.care_context == CareContext.INPATIENT:
+            insights.append({
+                "level": "RISK",
+                "title": "Quality Blind Spot",
+                "so_what": "Readmission data missing. Cannot assess clinical safety vs speed trade-offs."
+            })
+
+        # 4. Standard Operational Checks
+        if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] >= t["long_stay_rate_critical"]:
+            insights.append({"level": "CRITICAL", "title": "Severe Discharge Bottleneck", "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed targets."})
+            
+        # 5. Diagnostic Context
         if kpis.get("care_context") == "diagnostic":
             insights.append({"level": "INFO", "title": "Diagnostic Dataset", "so_what": f"Analysis focused on {kpis.get('total_encounters',0)} clinical encounters."})
 
-        # 4. Discharge Bottleneck
-        if isinstance(kpis.get("long_stay_rate"), (int, float)) and kpis["long_stay_rate"] >= t["long_stay_rate_critical"]:
-            insights.append({"level": "CRITICAL", "title": "Severe Discharge Bottleneck", "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed targets."})
-
-        # 5. Systemic Inefficiency
+        # 6. Systemic Inefficiency
         if (kpis.get("avg_los") and kpis.get("benchmark_los") and kpis["avg_los"] > kpis["benchmark_los"] and kpis.get("readmission_rate", 0) >= t["readmission_critical"]):
             insights.append({"level": "CRITICAL", "title": "Systemic Care Inefficiency", "so_what": "Extended stays + high readmissions."})
 
-        # 6. Cost Anomaly
-        if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", 999999) * 1.5:
-            insights.append({"level": "WARNING", "title": "Cost Anomaly", "so_what": "Costs significantly exceed benchmarks."})
+        # 7. Cost Anomaly
+        if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", 999999):
+            insights.append({"level": "WARNING", "title": "Cost Anomaly", "so_what": "Costs exceed benchmark thresholds."})
 
-        # 7. Data Risk
+        # 8. Data Risk
         if kpis.get("data_completeness", 1) < 0.90:
             insights.append({"level": "RISK", "title": "Data Integrity Gap", "so_what": "Missing clinical fields limit precision."})
 
         if not insights:
             insights.append({"level": "INFO", "title": "Stable Operations", "so_what": "Metrics within tolerance."})
+            
         return insights
-
+        
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
         recs = []
         t = HEALTHCARE_THRESHOLDS
