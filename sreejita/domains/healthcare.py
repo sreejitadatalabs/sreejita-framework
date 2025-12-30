@@ -15,6 +15,203 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
 
 # =====================================================
+# HEALTHCARE DOMAIN MAPPING (DOMAIN-SIDE ONLY)
+# =====================================================
+class HealthcareMapping:
+    """
+    Healthcare FACT extraction layer.
+
+    RULES (STRICT):
+    - NO benchmarks
+    - NO scoring
+    - NO thresholds
+    - NO executive interpretation
+    - NO rendering logic
+
+    This class only answers:
+    "What does the data say?"
+    """
+
+    def __init__(self, df: pd.DataFrame, cols: Dict[str, str]):
+        self.df = df
+        self.c = cols
+
+    # =================================================
+    # DATA QUALITY
+    # =================================================
+    def data_completeness(self) -> float:
+        critical = [
+            self.c.get("pid"),
+            self.c.get("los"),
+            self.c.get("cost"),
+            self.c.get("diagnosis"),
+            self.c.get("facility"),
+        ]
+        critical = [c for c in critical if c and c in self.df.columns]
+
+        if not critical:
+            return 0.0
+
+        return round(1 - self.df[critical].isna().mean().mean(), 2)
+
+    # =================================================
+    # VOLUME SIGNALS
+    # =================================================
+    def total_patients(self) -> int:
+        if self.c.get("pid") and self.c["pid"] in self.df.columns:
+            return self.df[self.c["pid"]].nunique()
+        return len(self.df)
+
+    def total_encounters(self) -> int:
+        if self.c.get("encounter") and self.c["encounter"] in self.df.columns:
+            return self.df[self.c["encounter"]].nunique()
+        return len(self.df)
+
+    def visits_per_patient(self) -> Optional[float]:
+        if self.c.get("pid") and self.c.get("encounter"):
+            patients = self.total_patients()
+            encounters = self.total_encounters()
+            if patients > 0:
+                return encounters / patients
+        return None
+
+    # =================================================
+    # LENGTH OF STAY SIGNALS
+    # =================================================
+    def avg_los(self) -> Optional[float]:
+        if self.c.get("los") and self.c["los"] in self.df.columns:
+            return self.df[self.c["los"]].mean()
+        return None
+
+    def long_stay_rate(self, threshold: float) -> Optional[float]:
+        if self.c.get("los") and self.c["los"] in self.df.columns:
+            return (self.df[self.c["los"]] > threshold).mean()
+        return None
+
+    # =================================================
+    # QUALITY SIGNALS
+    # =================================================
+    def readmission_rate(self) -> Optional[float]:
+        if (
+            self.c.get("readmitted")
+            and self.c["readmitted"] in self.df.columns
+            and pd.api.types.is_numeric_dtype(self.df[self.c["readmitted"]])
+        ):
+            return self.df[self.c["readmitted"]].mean()
+        return None
+
+    # =================================================
+    # COST SIGNALS
+    # =================================================
+    def total_cost(self) -> Optional[float]:
+        if self.c.get("cost") and self.c["cost"] in self.df.columns:
+            return self.df[self.c["cost"]].sum()
+        return None
+
+    def avg_cost_per_patient(self) -> Optional[float]:
+        if self.c.get("cost") and self.c["cost"] in self.df.columns:
+            return self.df[self.c["cost"]].mean()
+        return None
+
+    def avg_cost_per_day(self) -> Optional[float]:
+        if (
+            self.c.get("cost")
+            and self.c.get("los")
+            and self.c["cost"] in self.df.columns
+            and self.c["los"] in self.df.columns
+        ):
+            los_mean = self.df[self.c["los"]].mean()
+            if los_mean and los_mean > 0:
+                return self.df[self.c["cost"]].mean() / los_mean
+        return None
+
+    # =================================================
+    # VARIANCE SIGNALS
+    # =================================================
+    def facility_variance(self) -> Optional[float]:
+        if self.c.get("facility") and self.c.get("cost"):
+            fac = self.c["facility"]
+            cost = self.c["cost"]
+            if fac in self.df.columns and cost in self.df.columns:
+                stats = self.df.groupby(fac)[cost].mean()
+                if stats.mean() > 0:
+                    return min(stats.std() / stats.mean(), 1.0)
+        return None
+
+    def provider_variance(self) -> Optional[float]:
+        if self.c.get("doctor") and self.c.get("los"):
+            doc = self.c["doctor"]
+            los = self.c["los"]
+            if doc in self.df.columns and los in self.df.columns:
+                stats = self.df.groupby(doc)[los].mean()
+                if stats.mean() > 0:
+                    return min(stats.std() / stats.mean(), 1.0)
+        return None
+
+    # =================================================
+    # TEMPORAL SIGNALS
+    # =================================================
+    def trend(self, time_col: str, metric_key: str) -> str:
+        """
+        Returns symbolic trend only: ↑ ↓ →
+        """
+        if not time_col or metric_key not in self.c:
+            return "→"
+
+        metric = self.c.get(metric_key)
+        if metric not in self.df.columns or time_col not in self.df.columns:
+            return "→"
+
+        df = self.df.dropna(subset=[metric]).sort_values(time_col)
+        if len(df) < 10:
+            return "→"
+
+        cut = int(len(df) * 0.8)
+        hist = df.iloc[:cut][metric].mean()
+        recent = df.iloc[cut:][metric].mean()
+
+        if not hist or hist == 0:
+            return "→"
+
+        delta = (recent - hist) / hist
+        if delta > 0.05:
+            return "↑"
+        if delta < -0.05:
+            return "↓"
+        return "→"
+
+    def weekend_admission_rate(self, time_col: str) -> Optional[float]:
+        if time_col and time_col in self.df.columns:
+            dow = self.df[time_col].dt.dayofweek
+            return dow.isin([5, 6]).mean()
+        return None
+
+    # =================================================
+    # ROOT CAUSE INPUT (NO INTERPRETATION)
+    # =================================================
+    def diagnosis_los_profile(self, min_cases: int) -> pd.DataFrame:
+        """
+        Returns diagnosis-level LOS statistics.
+        Interpretation happens elsewhere.
+        """
+        if self.c.get("diagnosis") and self.c.get("los"):
+            d = self.c["diagnosis"]
+            los = self.c["los"]
+            if d in self.df.columns and los in self.df.columns:
+                stats = (
+                    self.df
+                    .groupby(d)[los]
+                    .agg(mean="mean", count="count", std="std")
+                    .reset_index()
+                )
+                return stats[stats["count"] >= min_cases]
+        return pd.DataFrame()        
+
+    def internal_cost_benchmark(self, multiplier: float = 1.1) -> Optional[float]:
+        if self.c.get("cost") and self.c["cost"] in self.df.columns:
+            return self.df[self.c["cost"]].median() * multiplier
+        return None
+# =====================================================
 # CONSTANTS & STANDARDS
 # =====================================================
 VISUAL_BENCHMARK_LOS = 5.0
@@ -247,495 +444,649 @@ class HealthcareDomain(BaseDomain):
         return df
 
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        # FIX 5: Normalize Enum to value immediately
+        """
+        UNIVERSAL KPI ORCHESTRATOR (Domain-safe, Engine-governed)
+    
+        Responsibilities:
+        - Delegate fact extraction to domain mapping
+        - Apply governance & scoring logic
+        - Output executive-safe KPIs only
+        """
+    
+        # -------------------------------------------------
+        # 0. Normalize context
+        # -------------------------------------------------
         raw_kpis = {
-            "dataset_shape": self.shape.value if hasattr(self.shape, 'value') else self.shape,
-            "care_context": self.care_context.value if hasattr(self.care_context, 'value') else self.care_context
+            "dataset_shape": self.shape.value if hasattr(self.shape, "value") else self.shape,
+            "care_context": self.care_context.value if hasattr(self.care_context, "value") else self.care_context,
         }
+    
         c = self.cols
-        
-        # FIX 2: Context-Aware Data Completeness (Critical Columns Only)
-        critical_cols = [c[k] for k in ["pid", "los", "cost", "diagnosis", "facility"] if c.get(k)]
-        if critical_cols:
-            raw_kpis["data_completeness"] = round(1 - df[critical_cols].isna().mean().mean(), 2)
-        else:
-            raw_kpis["data_completeness"] = 0.0
-
-        if self.shape == DatasetShape.AGGREGATED_OPERATIONAL:
-            if c["volume"]: raw_kpis["total_patients"] = df[c["volume"]].sum()
-            if c["avg_los"]: 
-                raw_kpis["avg_los"] = df[c["avg_los"]].mean()
-                raw_kpis["benchmark_los"] = 5.0 
-            raw_kpis["is_aggregated"] = True
-        else:
-            raw_kpis["is_aggregated"] = False
-            raw_kpis["total_patients"] = df[c["pid"]].nunique() if c["pid"] else len(df)
-            
-            if self.care_context == CareContext.DIAGNOSTIC:
-                raw_kpis["total_encounters"] = len(df)
-                if c["pid"]: raw_kpis["visits_per_patient"] = len(df) / raw_kpis["total_patients"]
+        mapping = HealthcareMapping(df, c)
+    
+        # -------------------------------------------------
+        # 1. Data integrity (FACT)
+        # -------------------------------------------------
+        raw_kpis["data_completeness"] = mapping.data_completeness()
+    
+        # -------------------------------------------------
+        # 2. Volume & population (FACT)
+        # -------------------------------------------------
+        raw_kpis["total_patients"] = mapping.total_patients()
+        raw_kpis["total_encounters"] = mapping.total_encounters()
+        raw_kpis["visits_per_patient"] = mapping.visits_per_patient()
+    
+        # -------------------------------------------------
+        # 3. Length of Stay (FACT)
+        # -------------------------------------------------
+        raw_kpis["avg_los"] = mapping.avg_los()
+        los_threshold = HEALTHCARE_THRESHOLDS.get("long_stay_rate_warning", 7)
+        raw_kpis["long_stay_rate"] = mapping.long_stay_rate(los_threshold)
+    
+        # Benchmarks (ENGINE-AWARE, NOT DATA-DRIVEN)
+        if raw_kpis.get("avg_los") is not None:
+            raw_kpis["benchmark_los"] = HEALTHCARE_THRESHOLDS.get("benchmark_los", 5.0)
+            raw_kpis["benchmark_source_los"] = "External Norm (Config)"
+    
+        # -------------------------------------------------
+        # 4. Readmissions & quality (FACT)
+        # -------------------------------------------------
+        raw_kpis["readmission_rate"] = mapping.readmission_rate()
+    
+        # -------------------------------------------------
+        # 5. Cost & financials (FACT)
+        # -------------------------------------------------
+        raw_kpis["total_billing"] = mapping.total_cost()
+        raw_kpis["avg_cost_per_patient"] = mapping.avg_cost_per_patient()
+        raw_kpis["avg_cost_per_day"] = mapping.avg_cost_per_day()
+    
+        # Cost benchmark anchoring (ENGINE RULE)
+        if raw_kpis.get("avg_cost_per_patient") is not None:
+            internal_benchmark = mapping.internal_cost_benchmark(multiplier=1.1)
+            external_cap = HEALTHCARE_EXTERNAL_LIMITS.get(
+                "avg_cost_per_patient", {}
+            ).get("soft_cap", 50000)
+    
+            if internal_benchmark and internal_benchmark > external_cap:
+                raw_kpis["benchmark_cost"] = external_cap
+                raw_kpis["benchmark_source_cost"] = "External Cap"
             else:
-                if c["los"] and not df[c["los"]].dropna().empty:
-                    raw_kpis["avg_los"] = df[c["los"]].mean()
-                    
-                    # FIX 3: Dynamic LOS Threshold (Benchmark Relative)
-                    los_threshold = max(HEALTHCARE_THRESHOLDS.get("avg_los_warning", 7), 5.0 * 1.4)
-                    raw_kpis["long_stay_rate"] = (df[c["los"]] > los_threshold).mean()
-                    
-                    raw_kpis["benchmark_los"] = 5.0
-                    raw_kpis["benchmark_source_los"] = "CMS Inpatient Norms" # FIX 4
-                else: raw_kpis["avg_los"] = None
-                
-                if c["readmitted"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
-                    raw_kpis["readmission_rate"] = df[c["readmitted"]].mean()
-
-            if c["cost"]:
-                raw_kpis["total_billing"] = df[c["cost"]].sum()
-                raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
-                
-                # Governance: External Anchoring
-                internal_bench = df[c["cost"]].median() * 1.1
-                external_cap = HEALTHCARE_EXTERNAL_LIMITS.get("avg_cost_per_patient", {}).get("soft_cap", 50000)
-                
-                if internal_bench > external_cap:
-                    raw_kpis["benchmark_cost"] = external_cap
-                    raw_kpis["benchmark_source_cost"] = "External Cap (CMS/OECD)"
-                else:
-                    raw_kpis["benchmark_cost"] = internal_bench
-                    raw_kpis["benchmark_source_cost"] = "Internal Median (1.1x)"
-                
-                if raw_kpis.get("avg_los") and raw_kpis["avg_los"] > 0: 
-                    raw_kpis["avg_cost_per_day"] = raw_kpis["avg_cost_per_patient"] / raw_kpis["avg_los"]
-
-            if c["facility"] and c["cost"]:
-                fac_stats = df.groupby(c["facility"])[c["cost"]].mean()
-                if fac_stats.mean() > 0:
-                    raw_kpis["facility_variance_score"] = min(fac_stats.std() / fac_stats.mean(), 1.0)
-            
-            # Real Trends (Prioritize LOS for Inpatient)
-            if self.time_col:
-                if c["los"]: raw_kpis["los_trend"] = _calculate_internal_trend(df, self.time_col, c["los"])
-                if c["cost"]: raw_kpis["cost_trend"] = _calculate_internal_trend(df, self.time_col, c["cost"])
-                if c["volume"]: raw_kpis["vol_trend"] = _calculate_internal_trend(df, self.time_col, c["volume"])
-                if self.care_context == CareContext.INPATIENT:
-                     df["_dow"] = df[self.time_col].dt.dayofweek
-                     raw_kpis["weekend_admission_rate"] = df["_dow"].isin([5, 6]).mean()
-
-            if c["doctor"] and c["los"]:
-                stats = df.groupby(c["doctor"])[c["los"]].mean()
-                if stats.mean() > 0: raw_kpis["provider_variance_score"] = stats.std() / stats.mean()
-
-        # Board Intelligence
-        try: 
-            current_score, score_breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
-        except Exception: 
-            current_score, score_breakdown = 50, {"Calculation Error": -50}
-
-        # Trend Logic (Prioritize LOS trend for better insights - Fix 9)
-        trend = raw_kpis.get("los_trend", raw_kpis.get("cost_trend", "→"))
-        
-        # FIX 7: Board Confidence Band
-        band = "Low" if current_score < 50 else "Medium" if current_score < 70 else "High" if current_score < 85 else "Elite"
-
+                raw_kpis["benchmark_cost"] = internal_benchmark
+                raw_kpis["benchmark_source_cost"] = "Internal Median (1.1x)"
+    
+        # -------------------------------------------------
+        # 6. Variance & operational risk (FACT)
+        # -------------------------------------------------
+        raw_kpis["facility_variance_score"] = mapping.facility_variance()
+        raw_kpis["provider_variance_score"] = mapping.provider_variance()
+    
+        # -------------------------------------------------
+        # 7. Trends (FACT → SYMBOLIC)
+        # -------------------------------------------------
+        if self.time_col:
+            raw_kpis["los_trend"] = mapping.trend(self.time_col, "los")
+            raw_kpis["cost_trend"] = mapping.trend(self.time_col, "cost")
+            raw_kpis["volume_trend"] = mapping.trend(self.time_col, "volume")
+    
+            if self.care_context == CareContext.INPATIENT:
+                raw_kpis["weekend_admission_rate"] = mapping.weekend_admission_rate(self.time_col)
+    
+        # -------------------------------------------------
+        # 8. Board confidence scoring (ENGINE)
+        # -------------------------------------------------
+        try:
+            score, breakdown = _compute_board_confidence_score(raw_kpis, self.care_context)
+        except Exception:
+            score, breakdown = 50, {"Scoring Failure": -50}
+    
+        trend_symbol = (
+            raw_kpis.get("los_trend")
+            or raw_kpis.get("cost_trend")
+            or "→"
+        )
+    
+        band = (
+            "Low" if score < 50
+            else "Medium" if score < 70
+            else "High" if score < 85
+            else "Elite"
+        )
+    
         raw_kpis.update({
-            "board_confidence_score": current_score,
+            "board_confidence_score": score,
             "board_confidence_band": band,
-            "board_score_breakdown": score_breakdown,
-            "board_confidence_interpretation": _get_score_interpretation(current_score), 
-            "trend_explanation": _get_trend_explanation(trend),                        
-            "maturity_level": _healthcare_maturity_level(current_score),
-            "board_confidence_trend": trend,
-            "benchmark_context": "Benchmarks aligned to CMS Inpatient Norms & Internal Medians."
+            "board_score_breakdown": breakdown,
+            "board_confidence_trend": trend_symbol,
+            "board_confidence_interpretation": _get_score_interpretation(score),
+            "trend_explanation": _get_trend_explanation(trend_symbol),
+            "maturity_level": _healthcare_maturity_level(score),
+            "benchmark_context": "Benchmarks applied via engine governance rules",
         })
-
+    
+        # -------------------------------------------------
+        # 9. Executive-safe KPI filtering (OUTPUT CONTRACT)
+        # -------------------------------------------------
         final_kpis = {}
-        ordered = ["board_confidence_score", "maturity_level", "total_patients", "avg_cost_per_patient", "avg_los", "readmission_rate", "long_stay_rate"]
-        for k in ordered: 
-            if k in raw_kpis: final_kpis[k] = raw_kpis[k]
+        executive_order = [
+            "board_confidence_score",
+            "maturity_level",
+            "total_patients",
+            "avg_los",
+            "long_stay_rate",
+            "avg_cost_per_patient",
+            "readmission_rate",
+        ]
+    
+        for k in executive_order:
+            if k in raw_kpis:
+                final_kpis[k] = raw_kpis[k]
+    
         for k, v in raw_kpis.items():
             if k not in final_kpis:
-                if isinstance(v, Enum): final_kpis[k] = v.value
-                elif not (isinstance(v, float) and (np.isnan(v) or np.isinf(v))): final_kpis[k] = v
-        
+                if isinstance(v, Enum):
+                    final_kpis[k] = v.value
+                elif not (
+                    isinstance(v, float)
+                    and (np.isnan(v) or np.isinf(v))
+                ):
+                    final_kpis[k] = v
+    
         return final_kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        visuals = []
-        output_dir.mkdir(parents=True, exist_ok=True)
-        c = self.cols
-        
-        def save(fig, name, cap, imp):
-            fig.savefig(output_dir / name, bbox_inches="tight", dpi=100)
-            plt.close(fig)
-            visuals.append({"path": str(output_dir / name), "caption": cap, "importance": imp})
-        
-        def human_fmt(x, _):
-            if x >= 1e6: return f"${x/1e6:.1f}M"
-            if x >= 1e3: return f"${x/1e3:.0f}K"
-            return str(int(x))
+    visuals = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    c = self.cols
 
-        # 1. Volume
-        if self.time_col:
-            try:
+    def save(fig, name, caption, importance):
+        fig.savefig(output_dir / name, bbox_inches="tight", dpi=100)
+        plt.close(fig)
+        visuals.append({
+            "path": str(output_dir / name),
+            "caption": caption,
+            "importance": importance
+        })
+
+    def human_fmt(x, _):
+        if x is None or pd.isna(x):
+            return ""
+        try:
+            x = float(x)
+        except Exception:
+            return str(x)
+        if abs(x) >= 1e6:
+            return f"{x/1e6:.1f}M"
+        if abs(x) >= 1e3:
+            return f"{x/1e3:.0f}K"
+        return f"{int(x)}"
+
+    # 1️⃣ Activity Volume Trend
+    if self.time_col:
+        try:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            df.set_index(self.time_col).resample("ME").size().plot(ax=ax, linewidth=2)
+            ax.set_title("Activity Volume Over Time", fontweight="bold")
+            ax.grid(True, alpha=0.2)
+            save(fig, "vol_trend.png", "Observed activity volume across time.", 0.99)
+        except Exception:
+            pass
+
+    # 2️⃣ Duration / Cycle Time Distribution
+    if c.get("los") and not df[c["los"]].dropna().empty:
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["los"]].hist(ax=ax, bins=15, alpha=0.7)
+            ax.set_title("Cycle Time Distribution", fontweight="bold")
+            save(fig, "duration_dist.png", "Distribution of observed cycle durations.", 0.95)
+        except Exception:
+            pass
+
+    # 3️⃣ Top Value Contributors
+    if c.get("diagnosis") and c.get("cost"):
+        try:
+            stats = df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5)
+            if not stats.empty:
                 fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(self.time_col).resample('ME').size().plot(ax=ax, color="#1f77b4", linewidth=2)
-                ax.set_title("Patient Volume Trend", fontweight='bold')
-                ax.grid(True, alpha=0.2)
-                save(fig, "vol.png", "Demand stability over time", 0.99)
-            except: pass
+                stats.plot(kind="bar", ax=ax)
+                ax.set_title("Top Value Contributors", fontweight="bold")
+                ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+                plt.xticks(rotation=45, ha="right")
+                save(fig, "value_drivers.png", "Categories with highest average value.", 0.92)
+        except Exception:
+            pass
 
-        # 2. LOS
-        if c["los"] and not df[c["los"]].dropna().empty:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["los"]].hist(ax=ax, bins=15, color="teal", alpha=0.7)
-                ax.axvline(VISUAL_BENCHMARK_LOS, color='red', linestyle='--', linewidth=1.5, label=f'Goal ({VISUAL_BENCHMARK_LOS}d)')
+    # 4️⃣ Risk / Failure Rate by Category
+    if c.get("readmitted") and c.get("diagnosis") and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
+        try:
+            rates = df.groupby(c["diagnosis"])[c["readmitted"]].mean().nlargest(5)
+            if not rates.empty:
+                fig, ax = plt.subplots(figsize=(7, 4))
+                rates.plot(kind="barh", ax=ax)
+                ax.set_title("Highest Risk Categories", fontweight="bold")
+                save(fig, "risk_rates.png", "Observed risk rates by category.", 0.90)
+        except Exception:
+            pass
+
+    # 5️⃣ Value vs Duration Relationship
+    if c.get("cost") and c.get("los") and c.get("diagnosis"):
+        try:
+            valid = df[[c["cost"], c["los"], c["diagnosis"]]].dropna()
+            if not valid.empty:
+                fig, ax = plt.subplots(figsize=(8, 5))
+                for key in valid[c["diagnosis"]].value_counts().nlargest(5).index:
+                    subset = valid[valid[c["diagnosis"]] == key]
+                    ax.scatter(subset[c["los"]], subset[c["cost"]], alpha=0.6, label=str(key))
+                ax.set_title("Value vs Duration", fontweight="bold")
                 ax.legend()
-                ax.set_title("LOS Distribution vs Goal", fontweight='bold')
-                save(fig, "los.png", "Stay duration distribution. Wide spread indicates lack of standardization.", 0.95)
-            except: pass
+                ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+                save(fig, "value_vs_duration.png", "Relationship between duration and value.", 0.88)
+        except Exception:
+            pass
 
-        # 3. Cost Drivers
-        if c["diagnosis"] and c["cost"]:
-            try:
-                if not df[c["cost"]].dropna().empty:
-                    fig, ax = plt.subplots(figsize=(8, 4))
-                    stats = df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5)
-                    colors = ['#d62728' if i == 0 else '#ff7f0e' for i in range(len(stats))]
-                    stats.plot(kind="bar", ax=ax, color=colors)
-                    top_condition = stats.idxmax()
-                    ax.set_title(f"Highest Cost Driver: {top_condition}", fontweight='bold')
-                    ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    plt.xticks(rotation=45, ha='right')
-                    save(fig, "cost.png", "Cost drivers by condition. Top conditions represent 80% of opportunity.", 0.90)
-            except: pass
-
-        # 4. Readmission
-        if c["readmitted"] and c["diagnosis"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
-            try:
-                if not df[c["readmitted"]].dropna().empty:
+    # 6️⃣ Operator / Provider Variance
+    if c.get("doctor") and c.get("los"):
+        try:
+            count = df[c["doctor"]].nunique()
+            if 3 <= count <= 30:
+                stats = df.groupby(c["doctor"])[c["los"]].mean().nlargest(10)
+                if not stats.empty:
                     fig, ax = plt.subplots(figsize=(7, 4))
-                    df.groupby(c["diagnosis"])[c["readmitted"]].mean().nlargest(5).plot(kind="barh", ax=ax, color="#d62728", alpha=0.8)
-                    ax.set_title("Highest Readmission Risks", fontweight='bold')
-                    save(fig, "readm.png", "Clinical risk areas", 0.88)
-            except: pass
+                    stats.plot(kind="bar", ax=ax)
+                    ax.set_title("Operator-Level Variance", fontweight="bold")
+                    plt.xticks(rotation=45, ha="right")
+                    save(fig, "operator_variance.png", "Variation across operators.", 0.85)
+        except Exception:
+            pass
 
-        # 5. Cost vs LOS
-        if c["cost"] and c["los"] and c["diagnosis"]:
-            try:
-                valid = df[[c["cost"], c["los"], c["diagnosis"]]].dropna()
-                if not valid.empty:
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    top_diag = valid[c["diagnosis"]].value_counts().nlargest(5).index
-                    for diag in top_diag:
-                        subset = valid[valid[c["diagnosis"]] == diag]
-                        ax.scatter(subset[c["los"]], subset[c["cost"]], label=diag, alpha=0.6, s=40)
-                    ax.set_title("Cost vs. LOS: Clinical Correlation", fontweight='bold')
-                    ax.legend(title="Condition")
-                    ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(fig, "cost_los.png", "Efficiency outliers", 0.85)
-            except: pass
+    # 7️⃣ Payer / Source Mix
+    if c.get("payer"):
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["payer"]].value_counts().head(5).plot(kind="pie", ax=ax, autopct="%1.1f%%")
+            ax.set_title("Source Mix")
+            save(fig, "source_mix.png", "Distribution by source or payer.", 0.75)
+        except Exception:
+            pass
 
-        # 6. Provider Variance (FIX 6: Tighter HIPAA Guard 3-30)
-        if c["doctor"] and c["los"]:
-            try:
-                unique_providers = df[c["doctor"]].nunique()
-                if 3 <= unique_providers <= 30 and not df[c["los"]].dropna().empty:
-                    fig, ax = plt.subplots(figsize=(7, 4))
-                    df.groupby(c["doctor"])[c["los"]].mean().nlargest(10).plot(kind="bar", ax=ax, color="brown")
-                    ax.set_title("Provider Variance (Avg LOS)", fontweight='bold'); plt.xticks(rotation=45, ha='right')
-                    save(fig, "prov.png", "Care consistency & provider variability", 0.80)
-            except: pass
-        
-        # 7. Payer Mix
-        if c["payer"]:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["payer"]].value_counts().head(5).plot(kind="pie", ax=ax, autopct='%1.1f%%', colors=plt.cm.Paired.colors)
-                save(fig, "payer.png", "Revenue source mix", 0.75)
-            except: pass
+    # 8️⃣ Demographic Distribution
+    if c.get("age"):
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["age"]].hist(ax=ax, bins=20, alpha=0.6)
+            ax.set_title("Demographic Distribution")
+            save(fig, "demographics.png", "Population age distribution.", 0.65)
+        except Exception:
+            pass
 
-        # 8. Age
-        if c["age"]:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["age"]].hist(ax=ax, bins=20, color="green", alpha=0.6)
-                ax.set_title("Patient Age Distribution")
-                save(fig, "age.png", "Demographics", 0.60)
-            except: pass
+    # 9️⃣ Cost Distribution & Outliers
+    if c.get("cost"):
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.boxplot(df[c["cost"]].dropna(), vert=False)
+            ax.set_title("Value Distribution")
+            ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
+            save(fig, "value_box.png", "Distribution and outliers of value metric.", 0.60)
+        except Exception:
+            pass
 
-        # 9. Cost Boxplot
-        if c["cost"]:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                ax.boxplot(df[c["cost"]].dropna(), vert=False)
-                ax.set_title("Cost Distribution & Outliers")
-                ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
-                save(fig, "cost_box.png", "Financial outliers", 0.55)
-            except: pass
+    # 🔟 Category Type Mix
+    if c.get("type"):
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df[c["type"]].value_counts().plot(kind="pie", ax=ax, autopct="%1.1f%%")
+            ax.set_title("Category Mix")
+            save(fig, "category_mix.png", "Composition by category type.", 0.55)
+        except Exception:
+            pass
 
-        # 10. Admission Type
-        if c["type"]:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["type"]].value_counts().plot(kind="pie", ax=ax, autopct='%1.1f%%', startangle=90)
-                ax.set_title("Admission Types")
-                save(fig, "type.png", "Acuity mix", 0.50)
-            except: pass
+    # 1️⃣1️⃣ Temporal Pattern (Day-of-Week)
+    if self.time_col:
+        try:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            df["_dow"] = df[self.time_col].dt.day_name()
+            df["_dow"].value_counts().reindex(
+                ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+            ).plot(kind="bar", ax=ax)
+            ax.set_title("Temporal Pattern")
+            save(fig, "temporal_pattern.png", "Activity distribution by weekday.", 0.50)
+        except Exception:
+            pass
 
-        # 11. Weekday Analysis
-        if self.time_col:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df["_dow"] = df[self.time_col].dt.day_name()
-                days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                df["_dow"] = pd.Categorical(df["_dow"], categories=days, ordered=True)
-                df["_dow"].value_counts().sort_index().plot(kind="bar", ax=ax, color="purple", alpha=0.7)
-                ax.set_title("Admissions by Day of Week")
-                save(fig, "dow.png", "Staffing alignment", 0.45)
-            except: pass
-                
-        return sorted(visuals, key=lambda x: x["importance"], reverse=True)[:6]
+    # 🚨 IMPORTANT: Domain generates MANY visuals
+    # 🚨 Report layer decides how many to show
+    return sorted(visuals, key=lambda x: x["importance"], reverse=True)
+    
+    def generate_insights(self, df: pd.DataFrame, kpis: Dict[str, Any], shape_info=None):
+    """
+    UNIVERSAL INSIGHT GENERATOR (Domain-aware, Engine-neutral)
 
-    def generate_insights(self, df, kpis, shape_info=None):
-        insights = []
-        t = HEALTHCARE_THRESHOLDS
-        c = self.cols
-    
-        # -------------------------------------------------
-        # 1. ENHANCED ROOT CAUSE & CLASSIFICATION
-        # -------------------------------------------------
-        if c.get("diagnosis") and c.get("los") and not df[c["los"]].dropna().empty:
-            diag_perf = (
-                df.groupby(c["diagnosis"])[c["los"]]
-                .agg(['mean', 'count', 'std'])
-            )
-    
-            diag_perf = diag_perf[diag_perf['count'] > 5].nlargest(3, 'mean')
-    
-            drivers = []
-            total_excess_days = 0
-            global_target = kpis.get("benchmark_los", 5.0)
-    
-            for diag, row in diag_perf.iterrows():
-                if row["mean"] > global_target:
-                    excess = row["mean"] - global_target
-                    excess_days = excess * row["count"]
-                    total_excess_days += excess_days
-    
-                    # Deterministic root-cause classification
-                    if row["std"] > (row["mean"] * 0.5):
-                        cause_type = "Practice Variance"
-                    elif row["mean"] > 10:
-                        cause_type = "Clinical Complexity"
-                    else:
-                        cause_type = "Structural Delay"
-    
-                    drivers.append(f"{diag}: +{excess:.1f}d ({cause_type})")
-    
-            if drivers:
-                avg_cost_per_day = kpis.get("avg_cost_per_day")
-                if not avg_cost_per_day or avg_cost_per_day <= 0:
-                    avg_cost_per_day = HEALTHCARE_EXTERNAL_LIMITS.get("avg_cost_per_day", 2000)
-    
-                financial_impact = total_excess_days * avg_cost_per_day
-                fin_str = (
-                    f"${financial_impact/1e6:.1f}M"
-                    if financial_impact >= 1e6
-                    else f"${financial_impact/1e3:.0f}K"
+    Rules:
+    - Insights explain KPIs, not raw data
+    - No assumptions if required KPIs are missing
+    - CRITICAL insights may be executive-summary eligible
+    """
+
+    insights: List[Dict[str, Any]] = []
+    t = HEALTHCARE_THRESHOLDS
+    c = self.cols
+
+    # =================================================
+    # 1. ROOT CAUSE: EXCESS LOS (DIAGNOSIS-LEVEL)
+    # =================================================
+    if (
+        c.get("diagnosis")
+        and c.get("los")
+        and "avg_los" in kpis
+        and not df[c["los"]].dropna().empty
+    ):
+        diag_perf = (
+            df.groupby(c["diagnosis"])[c["los"]]
+            .agg(mean="mean", count="count", std="std")
+            .reset_index()
+        )
+
+        diag_perf = diag_perf[diag_perf["count"] > 5]
+        diag_perf = diag_perf.sort_values("mean", ascending=False).head(3)
+
+        drivers = []
+        total_excess_days = 0.0
+        global_target = kpis.get("benchmark_los", 5.0)
+
+        for _, row in diag_perf.iterrows():
+            if row["mean"] > global_target:
+                excess = row["mean"] - global_target
+                excess_days = excess * row["count"]
+                total_excess_days += excess_days
+
+                # Deterministic root cause classification
+                if row["std"] and row["std"] > (row["mean"] * 0.5):
+                    cause_type = "Practice Variance"
+                elif row["mean"] > 10:
+                    cause_type = "Clinical Complexity"
+                else:
+                    cause_type = "Structural Delay"
+
+                drivers.append(
+                    f"{row[c['diagnosis']]}: +{excess:.1f}d ({cause_type})"
                 )
-    
-                blocked_beds = total_excess_days / 365
-    
-                insights.append({
-                    "level": "CRITICAL",
-                    "title": "Excess Days Breakdown",
-                    "so_what": (
-                        f"Total Excess Days: {total_excess_days:,.0f} "
-                        f"({fin_str} opportunity).<br/>"
-                        f"Equivalent to {blocked_beds:.1f} beds blocked.<br/>"
-                        f"Drivers: " + "; ".join(drivers)
-                    ),
-                    "source": "Diagnosis LOS Analysis",
-                    "executive_summary_flag": True
-                })
-    
-        # -------------------------------------------------
-        # 2. FACILITY VARIANCE
-        # -------------------------------------------------
-        if kpis.get("facility_variance_score", 0) > 0.5 and c.get("facility") and c.get("los"):
-            fac_stats = df.groupby(c["facility"])[c["los"]].mean()
-            if not fac_stats.empty:
-                best, worst = fac_stats.idxmin(), fac_stats.idxmax()
-                gap = fac_stats[worst] - fac_stats[best]
-    
-                insights.append({
-                    "level": "RISK",
-                    "title": "High Facility Variance",
-                    "so_what": (
-                        f"Operational gap of {gap:.1f} days between facilities.<br/>"
-                        f"{worst}: {fac_stats[worst]:.1f}d vs {best}: {fac_stats[best]:.1f}d."
-                    ),
-                    "source": "Facility Comparison"
-                })
-    
-        # -------------------------------------------------
-        # 3. QUALITY DATA BLIND SPOT
-        # -------------------------------------------------
-        if kpis.get("readmission_rate") is None and self.care_context == CareContext.INPATIENT:
-            insights.append({
-                "level": "RISK",
-                "title": "Quality Blind Spot",
-                "so_what": (
-                    "Readmission data missing. Cannot determine whether extended LOS "
-                    "reflects quality care or inefficiency."
-                ),
-                "source": "Quality & Safety Metrics"
-            })
-    
-        # -------------------------------------------------
-        # 4. DISCHARGE BOTTLENECK
-        # -------------------------------------------------
-        if isinstance(kpis.get("long_stay_rate"), (int, float)) and \
-           kpis["long_stay_rate"] >= t.get("long_stay_rate_critical", 0.3):
-    
+
+        if drivers and total_excess_days > 0:
+            avg_cost_per_day = kpis.get("avg_cost_per_day")
+            if not avg_cost_per_day or avg_cost_per_day <= 0:
+                avg_cost_per_day = HEALTHCARE_EXTERNAL_LIMITS.get(
+                    "avg_cost_per_day", 2000
+                )
+
+            financial_impact = total_excess_days * avg_cost_per_day
+            fin_str = (
+                f"${financial_impact/1e6:.1f}M"
+                if financial_impact >= 1e6
+                else f"${financial_impact/1e3:.0f}K"
+            )
+
+            blocked_beds = total_excess_days / 365
+
             insights.append({
                 "level": "CRITICAL",
-                "title": "Severe Discharge Bottleneck",
-                "so_what": f"{kpis['long_stay_rate']:.1%} of patients exceed LOS targets.",
-                "source": "LOS Distribution Analysis",
+                "title": "Excess Length of Stay Drivers",
+                "so_what": (
+                    f"Total excess stay days: {total_excess_days:,.0f} "
+                    f"({fin_str} opportunity).<br/>"
+                    f"Equivalent capacity blocked: {blocked_beds:.1f} beds.<br/>"
+                    f"Primary drivers: " + "; ".join(drivers)
+                ),
+                "source": "LOS Root Cause Analysis",
                 "executive_summary_flag": True
             })
-    
-        # -------------------------------------------------
-        # 5. COST ANOMALY
-        # -------------------------------------------------
-        # Governance rule: any cost above benchmark is penalized (binary, not tiered)
-        
-        if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", float("inf")):
-            insights.append({
-                "level": "WARNING",
-                "title": "Cost Anomaly",
-                "so_what": "Average cost per patient exceeds benchmark thresholds.",
-                "source": "Financial Benchmarking"
-            })
-    
-        # -------------------------------------------------
-        # 6. DATA QUALITY
-        # -------------------------------------------------
-        if kpis.get("data_completeness", 1) < 0.90:
+
+    # =================================================
+    # 2. FACILITY VARIANCE
+    # =================================================
+    if (
+        kpis.get("facility_variance_score", 0) > 0.5
+        and c.get("facility")
+        and c.get("los")
+    ):
+        fac_stats = df.groupby(c["facility"])[c["los"]].mean()
+
+        if not fac_stats.empty and fac_stats.max() > fac_stats.min():
+            best = fac_stats.idxmin()
+            worst = fac_stats.idxmax()
+            gap = fac_stats[worst] - fac_stats[best]
+
             insights.append({
                 "level": "RISK",
-                "title": "Data Integrity Gap",
-                "so_what": "Missing clinical fields limit diagnostic and financial precision.",
-                "source": "Data Integrity Scan"
+                "title": "High Facility Performance Variance",
+                "so_what": (
+                    f"Average LOS differs by {gap:.1f} days between facilities.<br/>"
+                    f"Worst: {worst} ({fac_stats[worst]:.1f}d) vs "
+                    f"Best: {best} ({fac_stats[best]:.1f}d)."
+                ),
+                "source": "Facility Comparison"
             })
-    
-        if not insights:
-            insights.append({
-                "level": "INFO",
-                "title": "Stable Operations",
-                "so_what": "All monitored metrics are within acceptable tolerance.",
-                "source": "Overall KPI Review"
-            })
-    
-        return insights
 
+    # =================================================
+    # 3. QUALITY BLIND SPOT
+    # =================================================
+    if (
+        self.care_context == CareContext.INPATIENT
+        and "readmission_rate" in kpis
+        and kpis.get("readmission_rate") is None
+    ):
+        insights.append({
+            "level": "RISK",
+            "title": "Quality Measurement Blind Spot",
+            "so_what": (
+                "Readmission metrics are unavailable. Extended LOS cannot be "
+                "validated as quality-driven versus inefficiency-driven."
+            ),
+            "source": "Quality & Safety Controls"
+        })
+
+    # =================================================
+    # 4. DISCHARGE BOTTLENECK
+    # =================================================
+    long_stay_rate = kpis.get("long_stay_rate")
+    if (
+        isinstance(long_stay_rate, (int, float))
+        and long_stay_rate >= t.get("long_stay_rate_critical", 0.3)
+    ):
+        insights.append({
+            "level": "CRITICAL",
+            "title": "Severe Discharge Bottleneck",
+            "so_what": (
+                f"{long_stay_rate:.1%} of patients exceed acceptable "
+                "length-of-stay thresholds."
+            ),
+            "source": "LOS Distribution Analysis",
+            "executive_summary_flag": True
+        })
+
+    # =================================================
+    # 5. COST ANOMALY
+    # =================================================
+    avg_cost = kpis.get("avg_cost_per_patient")
+    benchmark_cost = kpis.get("benchmark_cost")
+
+    if (
+        isinstance(avg_cost, (int, float))
+        and isinstance(benchmark_cost, (int, float))
+        and avg_cost > benchmark_cost
+    ):
+        insights.append({
+            "level": "WARNING",
+            "title": "Cost Performance Anomaly",
+            "so_what": (
+                "Average cost per case exceeds benchmark expectations, "
+                "indicating potential inefficiencies or pricing exposure."
+            ),
+            "source": "Financial Benchmarking"
+        })
+
+    # =================================================
+    # 6. DATA QUALITY
+    # =================================================
+    data_completeness = kpis.get("data_completeness")
+    if isinstance(data_completeness, (int, float)) and data_completeness < 0.90:
+        insights.append({
+            "level": "RISK",
+            "title": "Data Integrity Gap",
+            "so_what": (
+                "Key clinical or operational fields are missing, "
+                "reducing analytical precision and decision confidence."
+            ),
+            "source": "Data Quality Assessment"
+        })
+
+    # =================================================
+    # 7. FALLBACK
+    # =================================================
+    if not insights:
+        insights.append({
+            "level": "INFO",
+            "title": "Operational Performance Within Tolerance",
+            "so_what": (
+                "No material risks or anomalies detected across monitored KPIs."
+            ),
+            "source": "Overall KPI Review"
+        })
+
+    return insights
+    
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
-        recs = []
-        titles = [i["title"] for i in (insights or [])]
-    
-        if kpis.get("provider_variance_score", 0) > 0.4:
-            recs.append({
-                "action": "Initiate provider peer benchmarking",
-                "priority": "MEDIUM",
-                "timeline": "60 days",
-                "owner": "CMO",
-                "expected_outcome": "Reduce provider LOS deviation below 0.3",
-                "confidence": 0.80
-            })
-    
-        if "High Facility Variance" in titles:
-            recs.append({
-                "action": "Standardize care protocols across facilities",
-                "priority": "HIGH",
-                "timeline": "Q2",
-                "owner": "Operations Director",
-                "expected_outcome": "Reduce inter-facility LOS gap below 10%",
-                "confidence": 0.85
-            })
-    
-        if "Severe Discharge Bottleneck" in titles:
-            recs.append({
-                "action": "Audit discharge planning workflow",
-                "priority": "HIGH",
-                "timeline": "30 days",
-                "owner": "Clinical Operations",
-                "expected_outcome": "Reduce long-stay rate below 20%",
-                "confidence": 0.90
-            })
-    
-        if "Excess Days Breakdown" in titles:
-            recs.append({
-                "action": "Implement diagnosis-specific care pathways",
-                "priority": "HIGH",
-                "timeline": "90 days",
-                "owner": "CMO",
-                "expected_outcome": "Reduce average LOS below 5.5 days",
-                "confidence": 0.88
-            })
-    
-        if "Quality Blind Spot" in titles:
-            recs.append({
-                "action": "Integrate readmission data feed",
-                "priority": "CRITICAL",
-                "timeline": "Immediate",
-                "owner": "IT / Data Engineering",
-                "expected_outcome": "Enable LOS vs quality trade-off analysis",
-                "confidence": 0.95
-            })
-    
-        if kpis.get("avg_cost_per_patient", 0) > 50000:
-            recs.append({
-                "action": "Review high-cost patient outliers",
-                "priority": "MEDIUM",
-                "timeline": "30 days",
-                "owner": "Finance",
-                "expected_outcome": "Achieve 10% cost reduction",
-                "confidence": 0.75
-            })
-    
-        if kpis.get("readmission_rate", 0) > 0.15:
-            recs.append({
-                "action": "Implement post-discharge follow-up program",
-                "priority": "HIGH",
-                "timeline": "Immediate",
-                "owner": "Nursing",
-                "expected_outcome": "Reduce readmissions below 10%",
-                "confidence": 0.85
-            })
-    
-        if self.cols.get("payer"):
-            recs.append({
-                "action": "Evaluate payer contract performance",
-                "priority": "LOW",
-                "timeline": "Annual",
-                "owner": "Revenue Cycle",
-                "expected_outcome": "Improve net revenue by 2%",
-                "confidence": 0.65
-            })
-    
-        if not recs:
-            recs.append({
-                "action": "Continue monitoring performance",
-                "priority": "LOW",
-                "timeline": "Ongoing",
-                "owner": "Operations",
-                "expected_outcome": "Maintain stability",
-                "confidence": 0.60
-            })
-    
-        return recs[:5]
+    recs = []
+    titles = {i["title"] for i in (insights or [])}
+
+    # Helper to add recommendations consistently
+    def add(action, priority, owner, timeline, outcome, confidence, impact):
+        recs.append({
+            "action": action,
+            "priority": priority,
+            "owner": owner,
+            "timeline": timeline,
+            "expected_outcome": outcome,
+            "confidence": round(float(confidence), 2),
+            "impact_score": round(float(impact), 2)
+        })
+
+    # -------------------------------------------------
+    # 1️⃣ Variance Reduction (Highest Universal ROI)
+    # -------------------------------------------------
+    if kpis.get("facility_variance_score", 0) > 0.5 or \
+       kpis.get("provider_variance_score", 0) > 0.4:
+
+        add(
+            action="Reduce performance variance across entities",
+            priority="HIGH",
+            owner="Operations Leadership",
+            timeline="60–90 days",
+            outcome="Improved consistency on primary performance metric",
+            confidence=0.85,
+            impact=0.95
+        )
+
+    # -------------------------------------------------
+    # 2️⃣ Bottleneck / Flow Constraint
+    # -------------------------------------------------
+    if "Severe Discharge Bottleneck" in titles or \
+       kpis.get("long_stay_rate", 0) >= HEALTHCARE_THRESHOLDS.get("long_stay_rate_warning", 0.2):
+
+        add(
+            action="Analyze and remove primary process bottleneck",
+            priority="HIGH",
+            owner="Operational Excellence",
+            timeline="30–60 days",
+            outcome="Improved throughput and capacity utilization",
+            confidence=0.90,
+            impact=0.92
+        )
+
+    # -------------------------------------------------
+    # 3️⃣ Root-Cause Hotspot Intervention
+    # -------------------------------------------------
+    if "Excess Days Breakdown" in titles:
+
+        add(
+            action="Apply targeted interventions to top-performing-impact categories",
+            priority="HIGH",
+            owner="Functional Leadership",
+            timeline="90 days",
+            outcome="Reduction in excess effort and cost concentration",
+            confidence=0.88,
+            impact=0.90
+        )
+
+    # -------------------------------------------------
+    # 4️⃣ Missing Quality / Risk Signal
+    # -------------------------------------------------
+    if "Quality Blind Spot" in titles:
+
+        add(
+            action="Integrate missing quality or outcome indicators",
+            priority="CRITICAL",
+            owner="Data & Analytics",
+            timeline="Immediate",
+            outcome="Enable safety vs efficiency trade-off visibility",
+            confidence=0.95,
+            impact=0.93
+        )
+
+    # -------------------------------------------------
+    # 5️⃣ Financial Outlier Control
+    # -------------------------------------------------
+    if kpis.get("avg_cost_per_patient", 0) > kpis.get("benchmark_cost", float("inf")):
+
+        add(
+            action="Investigate and control high-value outliers",
+            priority="MEDIUM",
+            owner="Finance & Operations",
+            timeline="30–60 days",
+            outcome="Improved unit economics and margin stability",
+            confidence=0.80,
+            impact=0.85
+        )
+
+    # -------------------------------------------------
+    # 6️⃣ External Dependency Optimization (Optional)
+    # -------------------------------------------------
+    if self.cols.get("payer"):
+
+        add(
+            action="Review external partner or contract performance",
+            priority="LOW",
+            owner="Commercial / Revenue Teams",
+            timeline="Annual",
+            outcome="Improved alignment between cost and value realization",
+            confidence=0.65,
+            impact=0.60
+        )
+
+    # -------------------------------------------------
+    # Fallback (No Critical Signals)
+    # -------------------------------------------------
+    if not recs:
+        add(
+            action="Continue monitoring key performance indicators",
+            priority="LOW",
+            owner="Operations",
+            timeline="Ongoing",
+            outcome="Sustained performance stability",
+            confidence=0.60,
+            impact=0.40
+        )
+
+    # -------------------------------------------------
+    # 🔥 CRITICAL RULE
+    # Sort by impact, NOT by priority label
+    # Report layer will display top 3–5
+    # -------------------------------------------------
+    recs = sorted(recs, key=lambda x: x["impact_score"], reverse=True)
+
+    # Remove internal-only field before returning
+    for r in recs:
+        r.pop("impact_score", None)
+
+    return recs[:5]
     
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
