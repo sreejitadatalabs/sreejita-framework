@@ -471,26 +471,29 @@ class HealthcareDomain(BaseDomain):
         t = HEALTHCARE_THRESHOLDS
         c = self.cols
         
-        # 1. ENHANCED ROOT CAUSE (Top 3 Conditions)
+        # 1. ENHANCED ROOT CAUSE & EXCESS DAYS MATH (Gap 1 Fix)
         if c["diagnosis"] and c["los"] and not df[c["los"]].dropna().empty:
-            # Group by diagnosis, get mean LOS and count
             diag_perf = df.groupby(c["diagnosis"])[c["los"]].agg(['mean', 'count'])
-            # Filter for volume > 5 and get top 3 worst LOS
+            # Filter for meaningful volume
             diag_perf = diag_perf[diag_perf['count'] > 5].nlargest(3, 'mean')
             
             drivers = []
-            global_avg = kpis.get("avg_los", 0)
+            total_excess_days = 0
+            global_target = kpis.get("benchmark_los", 5.0)
             
             for diag, row in diag_perf.iterrows():
-                # Only list if it exceeds global average by 20%
-                if row['mean'] > global_avg * 1.2:
-                    drivers.append(f"{diag} ({row['mean']:.1f}d)")
+                if row['mean'] > global_target:
+                    excess = row['mean'] - global_target
+                    total_excess = excess * row['count']
+                    total_excess_days += total_excess
+                    drivers.append(f"{diag}: +{excess:.1f}d x {row['count']} pts = {total_excess:.0f} excess days")
             
             if drivers:
+                # Add the detailed math as a CRITICAL insight
                 insights.append({
                     "level": "CRITICAL", 
-                    "title": "Diagnosis-Specific Root Causes", 
-                    "so_what": f"LOS inflated by: {', '.join(drivers)} vs avg {global_avg:.1f}d."
+                    "title": "Excess Days Breakdown", 
+                    "so_what": f"Total Excess Days: {total_excess_days:,.0f}. Driven by: <br/>" + "<br/>".join(drivers)
                 })
 
         # 2. DETAILED FACILITY VARIANCE (Best vs Worst)
@@ -542,20 +545,62 @@ class HealthcareDomain(BaseDomain):
         t = HEALTHCARE_THRESHOLDS
         titles = [i["title"] for i in (insights or [])]
         
+        if "High Provider Variance" in titles or kpis.get("provider_variance_score", 0) > 0.4:
+            recs.append({
+                "action": "Initiate Provider Peer Benchmarking", 
+                "priority": "MEDIUM", 
+                "timeline": "60 days", 
+                "owner": "CMO", 
+                "expected_outcome": "Reduce Variance (Target: Deviation < 0.3)"
+            })
+
         if "High Facility Variance" in titles:
-             recs.append({"action": "Standardize protocols across sites", "priority": "HIGH", "timeline": "Q2", "owner": "Ops Director", "expected_outcome": "Unified Care"})
+             recs.append({
+                 "action": "Standardize protocols across sites", 
+                 "priority": "HIGH", 
+                 "timeline": "Q2", 
+                 "owner": "Ops Director", 
+                 "expected_outcome": "Unified Care (Target: Gap < 10%)"
+             })
 
         if "Severe Discharge Bottleneck" in titles:
-            recs.append({"action": "Audit discharge planning", "priority": "HIGH", "timeline": "30 days", "owner": "Clinical Ops", "expected_outcome": "Reduce LOS"})
+            recs.append({
+                "action": "Audit discharge planning", 
+                "priority": "HIGH", 
+                "timeline": "30 days", 
+                "owner": "Clinical Ops", 
+                "expected_outcome": "Reduce Long Stay Rate to <20%"
+            })
+            
+        if "Excess Days Breakdown" in titles: # Linked to new insight
+            recs.append({
+                "action": "Launch diagnosis-specific pathways", 
+                "priority": "HIGH", 
+                "timeline": "90 days", 
+                "owner": "CMO", 
+                "expected_outcome": "Reduce Avg LOS to < 5.5 days"
+            })
+
+        if "Quality Blind Spot" in titles:
+             recs.append({
+                 "action": "Integrate readmission data feed", 
+                 "priority": "CRITICAL", 
+                 "timeline": "Immediate", 
+                 "owner": "IT/Data", 
+                 "expected_outcome": "Validate Safety/LOS Trade-off"
+             })
+             
+        if kpis.get("avg_cost_per_patient", 0) > 50000 or "Cost Anomaly" in titles:
+            recs.append({
+                "action": "Review high-cost outliers", 
+                "priority": "MEDIUM", 
+                "timeline": "30 days", 
+                "owner": "Finance", 
+                "expected_outcome": "Recover Revenue (Target: -10% Cost)"
+            })
 
         if kpis.get("readmission_rate", 0) > t["readmission_warning"]:
             recs.append({"action": "Implement post-discharge calls", "priority": "HIGH", "timeline": "Immediate", "owner": "Nursing", "expected_outcome": "Reduce Readmits"})
-        
-        if "High Provider Variance" in titles or kpis.get("provider_variance_score", 0) > 0.4:
-            recs.append({"action": "Standardize treatment protocols", "priority": "MEDIUM", "timeline": "90 days", "owner": "CMO", "expected_outcome": "Reduce Variance"})
-        
-        if kpis.get("avg_cost_per_patient", 0) > 50000 or "Cost Anomaly" in titles:
-            recs.append({"action": "Review high-cost outliers", "priority": "MEDIUM", "timeline": "30 days", "owner": "Finance", "expected_outcome": "Recover Revenue"})
         
         if self.cols["payer"]:
             recs.append({"action": "Evaluate payer contracts", "priority": "LOW", "timeline": "Annual", "owner": "Revenue Cycle", "expected_outcome": "Optimize Yield"})
