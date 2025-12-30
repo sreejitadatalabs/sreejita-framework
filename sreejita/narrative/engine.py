@@ -123,13 +123,17 @@ def build_narrative(
                 risks.append(f"High readmission rate ({readm:.1%}) risks value-based payment penalties.")
                 actions.append(ActionItem("Implement discharge transition audit", "Nursing Leadership", "Immediate", f"Reduce readmissions < {B['readmission_rate']['good']:.0%}"))
 
-        # --- 4. Financial Health ---
+        # --- 4. Financial Health (CRITICAL FIX) ---
         avg_cost = kpis.get("avg_cost_per_patient")
         benchmark_cost = kpis.get("benchmark_cost", 15000) 
         
         if avg_cost:
-            if avg_cost > benchmark_cost * 1.2:
-                summary.append(f"Cost Variance: Avg cost per patient is significantly above benchmark (${benchmark_cost:,.0f}).")
+            # Logic: If Cost > Benchmark, it is ALWAYS a variance. No 1.2x buffer.
+            if avg_cost > benchmark_cost:
+                diff = avg_cost - benchmark_cost
+                summary.append(f"Financial Alert: Avg cost (${avg_cost:,.0f}) exceeds benchmark (${benchmark_cost:,.0f}) by ${diff:,.0f}.")
+                financial.append(f"High cost per episode is eroding margin potential.")
+                
             elif avg_cost < benchmark_cost:
                 summary.append(f"Financial Stability: Direct cost per patient (${avg_cost:,.0f}) remains efficiently below benchmark.")
 
