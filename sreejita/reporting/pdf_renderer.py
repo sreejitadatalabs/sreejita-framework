@@ -1,3 +1,5 @@
+# sreejita/reporting/pdf_renderer.py
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -75,49 +77,94 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story = []
 
+        # Custom Styles
         styles.add(ParagraphStyle(name="ExecTitle", fontName="Helvetica-Bold", fontSize=24, alignment=TA_CENTER, spaceAfter=24, textColor=self.PRIMARY))
         styles.add(ParagraphStyle(name="ExecSection", fontName="Helvetica-Bold", fontSize=16, spaceBefore=20, spaceAfter=12, textColor=self.PRIMARY))
         styles.add(ParagraphStyle(name="ExecBody", fontName="Helvetica", fontSize=11, leading=15, spaceAfter=8))
         styles.add(ParagraphStyle(name="ExecCaption", fontName="Helvetica-Oblique", fontSize=9, alignment=TA_CENTER, textColor=HexColor("#6b7280"), spaceAfter=12))
 
-        # PAGE 1
+        # --- PAGE 1: HEADER & SCORECARD ---
         story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
-        story.append(Paragraph(f"<b>Domain:</b> {payload['meta'].get('domain', 'Unknown')}", styles["ExecBody"]))
         story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}", styles["ExecBody"]))
+        story.append(Spacer(1, 12))
 
-        story.append(Spacer(1, 16))
+        # 🔥 BOARD VIEW SCORECARD (New Feature)
+        kpis = payload.get("kpis", {})
+        score = kpis.get("board_confidence_score", "N/A")
+        maturity = kpis.get("maturity_level", "Unknown")
+        trend = kpis.get("board_confidence_trend", "→")
+        domain = payload['meta'].get('domain', 'Healthcare')
+
+        # Dynamic Color Logic
+        score_color = "#10b981" # Green
+        try:
+            score_val = float(score)
+            if score_val < 70: score_color = "#dc2626" # Red
+            elif score_val < 85: score_color = "#f59e0b" # Orange
+        except: pass
+
+        # Scorecard Table Data
+        score_data = [
+            [f"Board Confidence Score: {score}/100", f"Maturity Level: {maturity}"],
+            [f"Trend: {trend} (vs prior period)", f"Domain: {domain}"]
+        ]
+        
+        score_table = Table(score_data, colWidths=[3.5*inch, 3.5*inch])
+        score_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), HexColor("#f8fafc")),
+            ('TEXTCOLOR', (0,0), (0,0), HexColor(score_color)), # Score highlights
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 12),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('BOX', (0,0), (-1,-1), 1.5, HexColor("#e5e7eb")), # Thicker box
+            ('PADDING', (0,0), (-1,-1), 14),
+        ]))
+        story.append(score_table)
+        story.append(Spacer(1, 20))
+
+        # --- PAGE 1: EXECUTIVE BRIEF ---
         story.append(Paragraph("Executive Brief", styles["ExecSection"]))
         for line in payload["summary"]:
             clean_line = line.lstrip("- ").lstrip("• ")
             story.append(Paragraph(f"• {clean_line}", styles["ExecBody"]))
 
         story.append(Spacer(1, 16))
+        
+        # --- PAGE 1: KEY METRICS ---
         story.append(Paragraph("Key Metrics", styles["ExecSection"]))
 
         table_data = [["Metric", "Value"]]
         
-        # 🛡️ HARD FILTER: Filter KPIs to remove objects/dicts
+        # Filter KPIs to remove objects/dicts (Keep only clean scalars)
         safe_kpis = {}
         for k, v in payload["kpis"].items():
             if isinstance(v, (str, int, float, type(None))):
                 safe_kpis[k] = v
 
+        # Limit to top 12 metrics
         for k, v in list(safe_kpis.items())[:12]:
             is_rate = any(x in k.lower() for x in ["rate", "ratio", "margin", "conversion", "yield"])
             val_fmt = format_percent(v) if is_rate else format_number(v)
             table_data.append([k.replace("_", " ").title(), val_fmt])
 
-        if table_data:
+        if len(table_data) > 1:
             table = Table(table_data, colWidths=[4 * inch, 2 * inch])
-            table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, self.BORDER), ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("PADDING", (0, 0), (-1, -1), 8), ("ALIGN", (1, 0), (1, -1), "RIGHT")]))
+            table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER), 
+                ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG), 
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), 
+                ("PADDING", (0, 0), (-1, -1), 8), 
+                ("ALIGN", (1, 0), (1, -1), "RIGHT")
+            ]))
             story.append(table)
 
-        # PAGE 2-3 VISUALS
+        # --- PAGE 2-3: VISUALS ---
         visuals = payload["visuals"]
         if visuals:
             story.append(PageBreak())
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
-            for vis in visuals[:4]:
+            # Increased limit from 4 to 8 to show Drill-Down tables
+            for vis in visuals[:8]:
                 img_path = Path(vis.get("path", ""))
                 if img_path.exists():
                     try:
@@ -126,36 +173,50 @@ class ExecutivePDFRenderer:
                         aspect = ih / float(iw)
                         display_width = 6 * inch
                         display_height = display_width * aspect
-                        if display_height > 4 * inch:
-                            display_height = 4 * inch
+                        
+                        # Cap large images
+                        if display_height > 5 * inch:
+                            display_height = 5 * inch
                             display_width = display_height / aspect
+                        
                         story.append(Image(str(img_path), width=display_width, height=display_height))
                         story.append(Paragraph(vis.get("caption", ""), styles["ExecCaption"]))
-                        story.append(Spacer(1, 12))
+                        story.append(Spacer(1, 16))
                     except: pass
 
-        # PAGE 4 INSIGHTS
+        # --- PAGE 4: INSIGHTS ---
         story.append(PageBreak())
         story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
         if not payload["insights"]: story.append(Paragraph("No critical risks detected.", styles["ExecBody"]))
+        
         for ins in payload["insights"]:
             color_hex = "#dc2626" if ins['level'] == "CRITICAL" else "#ea580c" if ins['level'] == "RISK" else "#1f2937"
             story.append(Paragraph(f"<font color='{color_hex}'><b>{ins['level']}:</b></font> <b>{ins['title']}</b>", styles["ExecBody"]))
             story.append(Paragraph(f"{ins['so_what']}", styles["ExecBody"]))
             story.append(Spacer(1, 10))
 
-        # PAGE 5 RECOMMENDATIONS
+        # --- PAGE 5: RECOMMENDATIONS ---
         story.append(PageBreak())
         story.append(Paragraph("Recommendations", styles["ExecSection"]))
         if not payload["recommendations"]: story.append(Paragraph("Continue monitoring operations.", styles["ExecBody"]))
+        
         for rec in payload["recommendations"]:
+            # Format Action Item
             story.append(Paragraph(f"<b>{rec.get('priority','HIGH')}:</b> {rec.get('action','Action required')}", styles["ExecBody"]))
-            if rec.get("timeline"): story.append(Paragraph(f"<i>Timeline: {rec['timeline']}</i>", styles["ExecBody"]))
-            if rec.get("owner"): story.append(Paragraph(f"<i>Owner: {rec['owner']}</i>", styles["ExecBody"]))
+            
+            # Details block (Timeline, Owner, Goal)
+            details = []
+            if rec.get("timeline"): details.append(f"Timeline: {rec['timeline']}")
+            if rec.get("owner"): details.append(f"Owner: {rec['owner']}")
             if rec.get("expected_outcome") or rec.get("success_kpi"): 
-                story.append(Paragraph(f"<i>Goal: {rec.get('expected_outcome') or rec.get('success_kpi')}</i>", styles["ExecBody"]))
-            story.append(Spacer(1, 10))
+                details.append(f"Goal: {rec.get('expected_outcome') or rec.get('success_kpi')}")
+            
+            if details:
+                story.append(Paragraph(f"<i>{' | '.join(details)}</i>", styles["ExecBody"]))
+            
+            story.append(Spacer(1, 12))
 
+        # BUILD PDF
         doc.build(story)
         if not output_path.exists(): raise RuntimeError("PDF build completed but file not found")
         return output_path
