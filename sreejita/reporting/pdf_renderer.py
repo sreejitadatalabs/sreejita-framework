@@ -88,9 +88,10 @@ class ExecutivePDFRenderer:
         story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d %H:%M UTC}", styles["ExecBody"]))
         story.append(Spacer(1, 12))
 
-        # 🔥 BOARD VIEW SCORECARD (New Feature)
+        # 🔥 BOARD VIEW SCORECARD
         kpis = payload.get("kpis", {})
         score = kpis.get("board_confidence_score", "N/A")
+        breakdown = kpis.get("board_score_breakdown", {}) # Retrieve breakdown dict
         maturity = kpis.get("maturity_level", "Unknown")
         trend = kpis.get("board_confidence_trend", "→")
         domain = payload['meta'].get('domain', 'Healthcare')
@@ -120,6 +121,32 @@ class ExecutivePDFRenderer:
             ('PADDING', (0,0), (-1,-1), 14),
         ]))
         story.append(score_table)
+
+        # 🔧 SCORE BREAKDOWN TABLE (Mandatory for 10/10)
+        if breakdown and isinstance(breakdown, dict):
+            story.append(Spacer(1, 8))
+            
+            # Header
+            bd_data = [[Paragraph("<b>Score Drivers</b>", styles["ExecBody"]), Paragraph("<b>Impact</b>", styles["ExecBody"])]]
+            
+            # Rows
+            for reason, points in breakdown.items():
+                color = "green" if points > 0 else "red"
+                sign = "+" if points > 0 else ""
+                bd_data.append([
+                    Paragraph(f"{reason}", styles["ExecBody"]),
+                    Paragraph(f"<font color='{color}'><b>{sign}{points}</b></font>", styles["ExecBody"])
+                ])
+            
+            t2 = Table(bd_data, colWidths=[5*inch, 2*inch])
+            t2.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, HexColor("#e5e7eb")),
+                ('BACKGROUND', (0,0), (-1,0), HexColor("#f3f4f6")),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ]))
+            story.append(t2)
+
         story.append(Spacer(1, 20))
 
         # --- PAGE 1: EXECUTIVE BRIEF ---
@@ -163,8 +190,8 @@ class ExecutivePDFRenderer:
         if visuals:
             story.append(PageBreak())
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
-            # Increased limit from 4 to 8 to show Drill-Down tables
-            for vis in visuals[:8]:
+            # Limit to 6 visuals for clean layout
+            for vis in visuals[:6]:
                 img_path = Path(vis.get("path", ""))
                 if img_path.exists():
                     try:
