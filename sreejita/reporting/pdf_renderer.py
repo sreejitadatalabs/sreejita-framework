@@ -82,6 +82,9 @@ class ExecutivePDFRenderer:
         styles.add(ParagraphStyle(name="ExecSection", fontName="Helvetica-Bold", fontSize=16, spaceBefore=20, spaceAfter=12, textColor=self.PRIMARY))
         styles.add(ParagraphStyle(name="ExecBody", fontName="Helvetica", fontSize=11, leading=15, spaceAfter=8))
         styles.add(ParagraphStyle(name="ExecCaption", fontName="Helvetica-Oblique", fontSize=9, alignment=TA_CENTER, textColor=HexColor("#6b7280"), spaceAfter=12))
+        
+        # 🔥 NEW STYLE: Contextual interpretation text
+        styles.add(ParagraphStyle(name="ScoreContext", fontName="Helvetica-Oblique", fontSize=10, textColor=HexColor("#4b5563"), alignment=TA_CENTER, spaceBefore=6))
 
         # --- PAGE 1: HEADER & SCORECARD ---
         story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
@@ -95,6 +98,10 @@ class ExecutivePDFRenderer:
         maturity = kpis.get("maturity_level", "Unknown")
         trend = kpis.get("board_confidence_trend", "→")
         domain = payload['meta'].get('domain', 'Healthcare')
+        
+        # GAP 1 & 5 FIX: Fetch Interpretations
+        interpretation = kpis.get("board_confidence_interpretation", "")
+        trend_expl = kpis.get("trend_explanation", "")
 
         # Dynamic Color Logic
         score_color = "#10b981" # Green
@@ -121,6 +128,14 @@ class ExecutivePDFRenderer:
             ('PADDING', (0,0), (-1,-1), 14),
         ]))
         story.append(score_table)
+
+        # 🔥 NEW: Render Score Interpretation (Gap 1)
+        if interpretation:
+            story.append(Paragraph(interpretation, styles["ScoreContext"]))
+        
+        # 🔥 NEW: Render Trend Explanation (Gap 5)
+        if trend_expl:
+             story.append(Paragraph(f"<i>({trend_expl})</i>", styles["ScoreContext"]))
 
         # GAP 4: MATURITY LEGEND
         legend_style = ParagraphStyle(name="Legend", fontName="Helvetica-Oblique", fontSize=8, textColor=HexColor("#6b7280"), alignment=TA_CENTER)
