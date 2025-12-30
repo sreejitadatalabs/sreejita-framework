@@ -48,8 +48,7 @@ def build_narrative(
     recommendations: List[Dict[str, Any]],
 ) -> NarrativeResult:
     """
-    Deterministic Executive Narrative Engine v6.0 (Platinum Edition)
-    Features: Financial Injection + 90-Day Strategic Focus
+    Narrative Engine v6.1 (Contextualized & Quantified)
     """
     kpis = kpis or {}
     insights = insights or []
@@ -59,126 +58,95 @@ def build_narrative(
     financial = []
     risks = []
     actions = []
-    
-    # Context variable to hold calculated savings for injection into recommendations
     calculated_savings = None 
 
-    # -------------------------------------------------
-    # DOMAIN INTELLIGENCE: HEALTHCARE
-    # -------------------------------------------------
     if domain == "healthcare":
         
-        # 1. Context Transparency
-        if kpis.get("dataset_shape") == "aggregated_operational":
-            summary.append(
-                "NOTICE: This assessment is based on aggregated operational data; conclusions reflect broad trends rather than individual patient journeys."
-            )
+        # --- 1. CONTEXTUALIZED SCORE ---
+        score = kpis.get("board_confidence_score", 50)
+        if score < 50:
+            summary.append(f"GOVERNANCE ALERT: Score of {score}/100 indicates critical operational risk requiring immediate executive intervention.")
+        elif score < 70:
+            summary.append(f"Score ({score}/100) indicates operational instability; targeted improvements are necessary.")
 
-        # --- 2. Operational Efficiency & Financial Translation ---
+        # Context Transparency (Keep this)
+        if kpis.get("dataset_shape") == "aggregated_operational":
+            summary.append("NOTICE: This assessment is based on aggregated operational data; conclusions reflect broad trends.")
+
+        # --- 2. OPERATIONAL & FINANCIAL IMPACT ---
         avg_los = kpis.get("avg_los")
         total_patients = kpis.get("total_patients", 0)
-        
-        # Robust Cost Calculation
-        cost_per_day = kpis.get("avg_cost_per_day")
-        if not cost_per_day and avg_los and kpis.get("avg_cost_per_patient"):
-            cost_per_day = kpis["avg_cost_per_patient"] / avg_los
-        if not cost_per_day:
-            cost_per_day = 2000 # Safe fallback
+        cost_per_day = kpis.get("avg_cost_per_day", 2000)
 
         if avg_los:
-            target = B["avg_los"]["good"]       # 5.0
-            critical = B["avg_los"]["critical"] # 9.0
+            target = B["avg_los"]["good"]       
             
-            # 💰 UNIVERSAL FINANCIAL CALCULATION
-            # Calculate impact if we are above TARGET (5.0), not just Critical (9.0)
             if avg_los > target:
                 excess_days = avg_los - target
+                # Quantify the Impact
                 opportunity_loss = excess_days * cost_per_day * total_patients
                 loss_str = f"${opportunity_loss/1_000_000:.1f}M" if opportunity_loss > 1_000_000 else f"${opportunity_loss/1_000:.0f}K"
-                
-                # SAVE THIS VALUE FOR INJECTION
                 calculated_savings = loss_str
                 
-                financial_msg = f"Efficiency Opportunity: Reducing LOS to benchmark ({target}d) would recover an estimated **{loss_str}** in annualized capacity costs."
-                financial.append(financial_msg)
+                # Force Impact into Summary
+                summary.append(f"FINANCIAL IMPACT: Excess LOS represents a {loss_str} annualized opportunity cost.")
+                financial.append(f"Reducing LOS to {target} days would recover {loss_str} in capacity value.")
 
-                # NARRATIVE LOGIC FIX
-                # Separate Critical Crisis from Standard Inefficiency
-                if avg_los > critical:
-                    summary.append(f"CRITICAL: Average LOS ({avg_los:.1f} days) is at crisis levels, exceeding benchmark by {excess_days:.1f} days.")
-                    risks.append("Severe bed capacity constraints eroding margin.")
+                if avg_los > B["avg_los"]["critical"]:
+                    summary.append(f"CRITICAL: Average LOS ({avg_los:.1f}d) exceeds crisis threshold ({B['avg_los']['critical']}d).")
                 else:
-                    # This captures the 6.3 vs 5.0 case correctly now
-                    summary.append(f"Efficiency Gap: Average LOS ({avg_los:.1f} days) underperforms the {B['avg_los']['source']} benchmark ({target} days).")
-            
+                    summary.append(f"Efficiency Gap: Average LOS ({avg_los:.1f}d) underperforms benchmark ({target}d).")
             else:
-                summary.append(f"Strong Efficiency: LOS ({avg_los:.1f} days) outperforms the {B['avg_los']['source']} benchmark ({target} days).")
+                summary.append(f"Efficiency: LOS ({avg_los:.1f}d) is performing well against benchmark ({target}d).")
 
-        # --- 3. Clinical Quality (Readmission) ---
+        # --- 3. CLINICAL QUALITY ---
         readm = kpis.get("readmission_rate")
         if readm:
             limit = B["readmission_rate"]["critical"]
             if readm > limit:
-                summary.append(f"Quality Alert: Readmission rate ({readm:.1%}) exceeds the {B['readmission_rate']['source']} limit of {limit:.0%}.")
+                summary.append(f"Quality Alert: Readmission rate ({readm:.1%}) exceeds limit of {limit:.0%}.")
                 risks.append(f"High readmission rate ({readm:.1%}) risks value-based payment penalties.")
                 actions.append(ActionItem("Implement discharge transition audit", "Nursing Leadership", "Immediate", f"Reduce readmissions < {B['readmission_rate']['good']:.0%}"))
 
-        # --- 4. Financial Health (CRITICAL FIX) ---
+        # --- 4. FINANCIAL HEALTH ---
         avg_cost = kpis.get("avg_cost_per_patient")
         benchmark_cost = kpis.get("benchmark_cost", 15000) 
-        
-        if avg_cost:
-            # Logic: If Cost > Benchmark, it is ALWAYS a variance. No 1.2x buffer.
-            if avg_cost > benchmark_cost:
-                diff = avg_cost - benchmark_cost
-                summary.append(f"Financial Alert: Avg cost (${avg_cost:,.0f}) exceeds benchmark (${benchmark_cost:,.0f}) by ${diff:,.0f}.")
-                financial.append(f"High cost per episode is eroding margin potential.")
-                
-            elif avg_cost < benchmark_cost:
-                summary.append(f"Financial Stability: Direct cost per patient (${avg_cost:,.0f}) remains efficiently below benchmark.")
+        if avg_cost and avg_cost > benchmark_cost:
+             diff = avg_cost - benchmark_cost
+             summary.append(f"Financial Alert: Cost per patient (${avg_cost:,.0f}) is ${diff:,.0f} above the approved benchmark.")
 
-        # --- 5. Data Trust ---
+        # --- 5. DATA TRUST ---
         comp = kpis.get("data_completeness", 1.0)
         if comp < 0.9:
-            risks.append(f"Data Reliability: Key clinical fields are {100-comp*100:.0f}% incomplete, limiting precision.")
+            risks.append(f"Data Reliability: Key clinical fields are {100-comp*100:.0f}% incomplete.")
 
-        # --- 6. Root Cause Injection ---
-        # If we found specific insights in healthcare.py, lift them to the summary
+        # --- 6. INSIGHT INTEGRATION (Replaces old Root Cause Injection) ---
         for insight in insights:
-            if insight['level'] == 'CRITICAL' and 'Bottleneck' in insight['title']:
-                # Avoid duplicates
-                if "Severe Discharge Bottleneck" not in str(summary):
-                    summary.append(f"Root Cause: {insight['so_what']}")
+            # Lift high-priority insights to summary (Root Causes, Quality Gaps)
+            if insight['level'] == 'CRITICAL' or insight['title'] == "Quality Blind Spot":
+                # Check for duplicates before adding
+                msg = f"{insight['title']}: {insight['so_what']}"
+                # Simple dedupe check
+                if msg not in summary:
+                    summary.append(msg)
 
-    # -------------------------------------------------
-    # UNIVERSAL FALLBACKS
-    # -------------------------------------------------
-    if not summary:
-        summary.append("Operational indicators are within expected thresholds.")
-    
-    if not financial:
-        if kpis.get("avg_cost_per_patient"):
-             financial.append(f"Current cost structure is sustainable at ${kpis['avg_cost_per_patient']:,.0f}/patient.")
-        else:
-             financial.append("No immediate material financial risks detected.")
+    # Universal Fallbacks
+    if not summary: summary.append("Operational indicators are within expected thresholds.")
+    if not financial: 
+        if kpis.get("avg_cost_per_patient"): financial.append(f"Current cost structure is sustainable at ${kpis['avg_cost_per_patient']:,.0f}/patient.")
+        else: financial.append("No immediate material financial risks detected.")
 
-    # -------------------------------------------------
-    # RECOMMENDATIONS ENGINE (Financial + Strategic Tagging)
-    # -------------------------------------------------
-    for rec in recommendations[:5]: # Increase limit to 5
+    # Recommendations Engine
+    for rec in recommendations[:5]: 
         if isinstance(rec, dict):
             action_text = rec.get("action", "Review metrics")
             outcome = rec.get("expected_outcome", "Improve KPI")
             timeline = rec.get("timeline", "")
             
-            # 🔥 INJECT FINANCIAL CONTEXT
-            # If we calculated a savings opportunity, and this action is about discharge/LOS, attach the $$$
-            if calculated_savings and any(x in action_text.lower() for x in ["discharge", "los", "length of stay"]):
-                outcome = f"{outcome} (Est. Opportunity: {calculated_savings})"
+            if calculated_savings and any(x in action_text.lower() for x in ["discharge", "los", "pathways"]):
+                outcome = f"{outcome} (Est. Impact: {calculated_savings})"
 
-            # ⚡ INJECT 90-DAY STRATEGIC TAG
-            # If timeline suggests immediate/short-term action, tag it for the Board
-            is_short_term = any(x in timeline.lower() for x in ["30 days", "immediate", "90 days", "q1", "quarterly"])
+            is_short_term = any(x in timeline.lower() for x in ["30 days", "immediate", "90 days", "q1"])
             prefix = "⚡ [90-DAY FOCUS] " if is_short_term else ""
 
             actions.append(ActionItem(
