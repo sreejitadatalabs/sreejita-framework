@@ -12,8 +12,7 @@ from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 # IMPORT THE TRUTH
-from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS
-
+from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
 # =====================================================
 # CONSTANTS & STANDARDS
 # =====================================================
@@ -272,11 +271,19 @@ class HealthcareDomain(BaseDomain):
                 raw_kpis["total_billing"] = df[c["cost"]].sum()
                 raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
                 
-                # 🚨 TIGHTENED BENCHMARK (1.1x Median)
-                raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 1.1
-                raw_kpis["benchmark_source_cost"] = "Internal Median (1.1x)" # Transparency
+                # 🚨 GOVERNANCE FIX: External Anchoring
+                internal_bench = df[c["cost"]].median() * 1.1
+                external_cap = HEALTHCARE_EXTERNAL_LIMITS["avg_cost_per_patient"]["soft_cap"]
                 
-                if raw_kpis.get("avg_los"): 
+                # The logic: Use internal unless it violates external sanity
+                if internal_bench > external_cap:
+                    raw_kpis["benchmark_cost"] = external_cap
+                    raw_kpis["benchmark_source_cost"] = "External Cap (CMS/OECD)"
+                else:
+                    raw_kpis["benchmark_cost"] = internal_bench
+                    raw_kpis["benchmark_source_cost"] = "Internal Median (1.1x)"
+                
+                if raw_kpis.get("avg_los") and raw_kpis["avg_los"] > 0: 
                     raw_kpis["avg_cost_per_day"] = raw_kpis["avg_cost_per_patient"] / raw_kpis["avg_los"]
 
             if c["facility"]:
