@@ -48,7 +48,8 @@ def build_narrative(
     recommendations: List[Dict[str, Any]],
 ) -> NarrativeResult:
     """
-    Deterministic Executive Narrative Engine v5.1 (Logic & Financial Fix)
+    Deterministic Executive Narrative Engine v6.0 (Platinum Edition)
+    Features: Financial Injection + 90-Day Strategic Focus
     """
     kpis = kpis or {}
     insights = insights or []
@@ -157,21 +158,29 @@ def build_narrative(
         else:
              financial.append("No immediate material financial risks detected.")
 
-    # Process Recommendations (INTELLIGENT INJECTION)
+    # -------------------------------------------------
+    # RECOMMENDATIONS ENGINE (Financial + Strategic Tagging)
+    # -------------------------------------------------
     for rec in recommendations[:5]: # Increase limit to 5
         if isinstance(rec, dict):
             action_text = rec.get("action", "Review metrics")
             outcome = rec.get("expected_outcome", "Improve KPI")
+            timeline = rec.get("timeline", "")
             
             # 🔥 INJECT FINANCIAL CONTEXT
             # If we calculated a savings opportunity, and this action is about discharge/LOS, attach the $$$
             if calculated_savings and any(x in action_text.lower() for x in ["discharge", "los", "length of stay"]):
                 outcome = f"{outcome} (Est. Opportunity: {calculated_savings})"
 
+            # ⚡ INJECT 90-DAY STRATEGIC TAG
+            # If timeline suggests immediate/short-term action, tag it for the Board
+            is_short_term = any(x in timeline.lower() for x in ["30 days", "immediate", "90 days", "q1", "quarterly"])
+            prefix = "⚡ [90-DAY FOCUS] " if is_short_term else ""
+
             actions.append(ActionItem(
-                action=action_text,
+                action=f"{prefix}{action_text}",
                 owner=rec.get("owner", "Operations"),
-                timeline=rec.get("timeline", "Quarterly"),
+                timeline=timeline,
                 success_kpi=outcome
             ))
 
