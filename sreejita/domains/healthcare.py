@@ -267,7 +267,7 @@ class HealthcareDomain(BaseDomain):
             if c["cost"]:
                 raw_kpis["total_billing"] = df[c["cost"]].sum()
                 raw_kpis["avg_cost_per_patient"] = df[c["cost"]].mean()
-                raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 2.0
+                raw_kpis["benchmark_cost"] = df[c["cost"]].median() * 1.1
                 if raw_kpis.get("avg_los"): 
                     raw_kpis["avg_cost_per_day"] = raw_kpis["avg_cost_per_patient"] / raw_kpis["avg_los"]
 
@@ -345,20 +345,39 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "los.png", "Stay duration & adherence", 0.95)
             except: pass
 
-        # 3. Cost Drivers
+        # 3. DYNAMIC COST DRIVERS (Smart Title & Color Logic)
+        
         if c["diagnosis"] and c["cost"]:
             try:
+                # Ensure we have data to plot
                 if not df[c["cost"]].dropna().empty:
                     fig, ax = plt.subplots(figsize=(8, 4))
+                    
+                    # 1. Calculate Mean Cost per Diagnosis (Top 5)
                     stats = df.groupby(c["diagnosis"])[c["cost"]].mean().nlargest(5)
+                    
+                    # 2. Define Colors: Red for #1, Orange for the rest
                     colors = ['#d62728' if i == 0 else '#ff7f0e' for i in range(len(stats))]
-                    stats.plot(kind="bar", ax=ax, color=colors)
+                    
+                    # 3. Plot
+                    stats.plot(kind="bar", ax=ax, color=colors, alpha=0.9)
+                    
+                    # 4. Dynamic Title (Pulls the name of the top condition)
                     top_condition = stats.idxmax()
-                    ax.set_title(f"Highest Cost Driver: {top_condition}", fontweight='bold')
+                    ax.set_title(f"Highest Cost Driver: {top_condition}", fontweight='bold', fontsize=11)
+                    
+                    # 5. Format Y-Axis ($ K/M) and X-Axis
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+                    ax.set_xlabel("Medical Condition")
+                    ax.set_ylabel("Avg Cost per Patient")
                     plt.xticks(rotation=45, ha='right')
+                    
+                    # 6. Grid for readability
+                    ax.grid(axis='y', linestyle='--', alpha=0.3)
+                    
                     save(fig, "cost.png", "Cost drivers by condition", 0.90)
-            except: pass
+            except Exception as e:
+                pass # Silently fail if data shape doesn't match expectation
 
         # 4. Readmission
         if c["readmitted"] and c["diagnosis"] and pd.api.types.is_numeric_dtype(df[c["readmitted"]]):
