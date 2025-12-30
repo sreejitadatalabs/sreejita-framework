@@ -387,7 +387,7 @@ class HealthcareDomain(BaseDomain):
                 ax.axvline(VISUAL_BENCHMARK_LOS, color='red', linestyle='--', linewidth=1.5, label=f'Goal ({VISUAL_BENCHMARK_LOS}d)')
                 ax.legend()
                 ax.set_title("LOS Distribution vs Goal", fontweight='bold')
-                save(fig, "los.png", "Stay duration & adherence", 0.95)
+                save(fig, "los.png", "Stay duration distribution. Wide spread indicates lack of standardization.", 0.95)
             except: pass
 
         # 3. Cost Drivers (Smart Title)
@@ -402,7 +402,7 @@ class HealthcareDomain(BaseDomain):
                     ax.set_title(f"Highest Cost Driver: {top_condition}", fontweight='bold')
                     ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
                     plt.xticks(rotation=45, ha='right')
-                    save(fig, "cost.png", "Cost drivers by condition", 0.90)
+                    save(fig, "cost.png", "Cost drivers by condition. Top conditions represent 80% of opportunity.", 0.90)
             except: pass
 
         # 4. Readmission
