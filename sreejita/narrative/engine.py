@@ -27,20 +27,6 @@ class NarrativeResult:
 # INTELLIGENCE LOGIC
 # =====================================================
 
-def classify_severity(value, metric, thresholds, reverse=False):
-    """
-    Classifies a value as INFO, WARNING, or CRITICAL.
-    """
-    if value is None: return "INFO"
-    t = thresholds.get(metric, {})
-    if reverse:
-        if value < t.get("critical", 0): return "CRITICAL"
-        if value < t.get("warning", 0): return "WARNING"
-    else:
-        if value >= t.get("critical", float("inf")): return "CRITICAL"
-        if value >= t.get("warning", float("inf")): return "WARNING"
-    return "INFO"
-
 def build_narrative(
     domain: str,
     kpis: Dict[str, Any],
@@ -127,7 +113,8 @@ def build_narrative(
 
         # --- 5. INSIGHT INTEGRATION ---
         for insight in insights:
-            if insight['title'] == "Excess Days Breakdown":
+            # [FIXED] Updated Title Match to "Excess Length of Stay Drivers" (Was "Excess Days Breakdown")
+            if insight['title'] == "Excess Length of Stay Drivers":
                  clean_text = insight['so_what'].replace("<br/>", "; ")
                  summary.append(f"IMPACT MATH: {clean_text}")
             elif insight['level'] == 'CRITICAL':
@@ -139,6 +126,12 @@ def build_narrative(
     if not financial: 
         if kpis.get("avg_cost_per_patient"): financial.append(f"Current cost structure is sustainable at ${kpis['avg_cost_per_patient']:,.0f}/patient.")
         else: financial.append("No immediate material financial risks detected.")
+
+    # [FIXED] Populate Risks List (Was Empty)
+    if "CRITICAL" in str(summary) or "GOVERNANCE RISK" in str(summary):
+        risks.append("Material operational risks detected requiring immediate mitigation.")
+    if "Blind Spot" in str(summary):
+        risks.append("Data completeness gaps limit full safety validation.")
 
     # Recommendations Engine
     for rec in recommendations[:5]: 
