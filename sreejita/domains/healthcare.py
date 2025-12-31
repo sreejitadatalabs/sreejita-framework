@@ -144,21 +144,67 @@ class HealthcareMapping:
     # VARIANCE
     # -------------------------
     def variance(self) -> Optional[float]:
-        if self.c.get("cost"):
-            metric = self.c["cost"]
-        elif self.c.get("los"):
-            metric = self.c["los"]
-        elif self.c.get("duration"):
-            metric = self.c["duration"]
-        else:
+        """
+        Measures normalized performance variance across entities.
+    
+        Rules:
+        - Uses cost → LOS → duration (in that order)
+        - Evaluates BOTH facility and doctor (if available)
+        - Requires minimum group diversity
+        - Caps output to [0, 1]
+        - Returns the strongest valid variance signal
+        """
+    
+        # -------------------------------------------------
+        # 1. METRIC SELECTION (PRIORITY ORDER)
+        # -------------------------------------------------
+        metric = None
+        for k in ("cost", "los", "duration"):
+            col = self.c.get(k)
+            if col and col in self.df.columns:
+                metric = col
+                break
+    
+        if not metric:
             return None
     
-        for g in ["facility", "doctor"]:
-            if self.c.get(g) and metric in self.df.columns:
-                stats = self.df.groupby(self.c[g])[metric].mean()
-                if stats.mean() > 0:
-                    return min(stats.std() / stats.mean(), 1.0)
-        return None
+        # -------------------------------------------------
+        # 2. GROUP-LEVEL VARIANCE EVALUATION
+        # -------------------------------------------------
+        variances: List[float] = []
+    
+        for group_key in ("facility", "doctor"):
+            group_col = self.c.get(group_key)
+    
+            if not group_col or group_col not in self.df.columns:
+                continue
+    
+            grouped = (
+                self.df[[group_col, metric]]
+                .dropna()
+                .groupby(group_col)[metric]
+                .mean()
+            )
+    
+            # Require meaningful comparison
+            if len(grouped) < 3:
+                continue
+    
+            mean_val = grouped.mean()
+            std_val = grouped.std()
+    
+            if mean_val and mean_val > 0 and np.isfinite(std_val):
+                normalized = std_val / mean_val
+                variances.append(min(normalized, 1.0))
+    
+        # -------------------------------------------------
+        # 3. FINAL DECISION
+        # -------------------------------------------------
+        if not variances:
+            return None
+    
+        # Use strongest (worst-case) operational variance
+        return max(variances)
 
     # -------------------------
     # TREND
@@ -189,8 +235,17 @@ def detect_subdomain_and_capabilities(
 
     caps = {HealthcareCapability.DATA_QUALITY}
 
-    def usable(col, min_ratio=0.3):
-        return col and col in df.columns and df[col].notna().mean() >= min_ratio
+    def usable(col, min_ratio=0.1):
+        """
+        Capability presence check.
+        Low threshold by design to support mixed & aggregated datasets.
+        """
+        return (
+            col
+            and col in df.columns
+            and df[col].notna().any()
+            and df[col].notna().mean() >= min_ratio
+        )
 
     # -----------------------
     # CAPABILITIES
@@ -418,55 +473,108 @@ class HealthcareDomain(BaseDomain):
         # Never return mutated original reference
         return df
         
-    def calculate_kpis(self, df):
+    def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Calculates factual, domain-level KPIs ONLY.
+    
+        Guarantees:
+        - No executive interpretation
+        - No KPI ranking
+        - No presentation logic
+        - Fully sub-domain & mixed-dataset safe
+        """
+    
+        # -------------------------------------------------
+        # 1. SUB-DOMAIN & CAPABILITY DETECTION
+        # -------------------------------------------------
         sub, caps = detect_subdomain_and_capabilities(df, self.cols)
         m = HealthcareMapping(df, self.cols)
-
-        kpis = {
+    
+        # -------------------------------------------------
+        # 2. BASE KPIs (ALWAYS SAFE)
+        # -------------------------------------------------
+        kpis: Dict[str, Any] = {
             "sub_domain": sub.value,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": m.volume(),
         }
-
+    
+        # -------------------------------------------------
+        # 3. TIME / DURATION KPIs
+        # -------------------------------------------------
         if HealthcareCapability.TIME in caps:
             kpis["avg_duration"] = m.avg_duration()
+    
             duration_threshold = {
-                HealthcareSubDomain.HOSPITAL: 7,
-                HealthcareSubDomain.DIAGNOSTICS: 60,   # minutes
-                HealthcareSubDomain.CLINIC: 1,         # days
-                HealthcareSubDomain.PHARMACY: 0,       # not applicable
-                HealthcareSubDomain.PUBLIC_HEALTH: 0,
+                HealthcareSubDomain.HOSPITAL: 7,        # days
+                HealthcareSubDomain.DIAGNOSTICS: 60,    # minutes
+                HealthcareSubDomain.CLINIC: 1,          # days
+                HealthcareSubDomain.PHARMACY: 0,        # N/A
+                HealthcareSubDomain.PUBLIC_HEALTH: 0,   # N/A
             }.get(sub, 7)
-
+    
             if duration_threshold > 0:
                 kpis["long_duration_rate"] = m.long_duration_rate(duration_threshold)
-                
+    
+        # -------------------------------------------------
+        # 4. COST KPIs
+        # -------------------------------------------------
         if HealthcareCapability.COST in caps:
             kpis["total_cost"] = m.total_cost()
             kpis["avg_unit_cost"] = m.avg_unit_cost()
-
+    
+        # -------------------------------------------------
+        # 5. QUALITY KPIs
+        # -------------------------------------------------
         if HealthcareCapability.QUALITY in caps:
             kpis["adverse_event_rate"] = m.adverse_rate()
-
+    
+        # -------------------------------------------------
+        # 6. VARIANCE KPIs
+        # -------------------------------------------------
         if HealthcareCapability.VARIANCE in caps:
             kpis["variance_score"] = m.variance()
-
+    
+        # -------------------------------------------------
+        # 7. TREND SIGNALS (FACTUAL, NOT INTERPRETED)
+        # -------------------------------------------------
+        if self.time_col:
+            # Duration trend
+            dur_col = self.cols.get("los") or self.cols.get("duration")
+            if dur_col and dur_col in df.columns:
+                kpis["avg_duration_trend"] = m.trend(self.time_col, dur_col)
+    
+            # Cost trend
+            if self.cols.get("cost") and self.cols["cost"] in df.columns:
+                kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
+    
+            # Volume trend (use strongest identifier)
+            vol_col = self.cols.get("pid") or self.cols.get("encounter")
+            if vol_col and vol_col in df.columns:
+                kpis["volume_trend"] = m.trend(self.time_col, vol_col)
+    
+        # -------------------------------------------------
+        # 8. GOVERNANCE SCORE (STILL FACTUAL)
+        # -------------------------------------------------
         score, breakdown = compute_score(kpis, sub, caps)
         kpis.update({
             "board_confidence_score": score,
             "board_score_breakdown": breakdown,
-            "maturity_level": "Gold" if score >= 85 else "Silver" if score >= 70 else "Bronze",
+            "maturity_level": (
+                "Gold" if score >= 85
+                else "Silver" if score >= 70
+                else "Bronze"
+            ),
         })
+    
         # -------------------------------------------------
-        # EXECUTIVE KPI SELECTION (REPORT LAYER CONTRACT)
+        # 9. EXECUTIVE METADATA (NO SELECTION HERE)
         # -------------------------------------------------
-        primary_kpis = select_executive_kpis(kpis, sub)
-        
         kpis["_executive"] = {
-            "primary_kpis": primary_kpis,
-            "sub_domain": sub.value,
+            "sub_domain": sub.value
         }
+    
         return kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
@@ -1041,87 +1149,6 @@ class HealthcareDomain(BaseDomain):
     
         return recommendations
 
-    # =====================================================
-    # KPI PRIORITIZATION (EXECUTIVE SURFACING)
-    # =====================================================
-    
-    EXECUTIVE_KPI_PRIORITY = {
-        HealthcareSubDomain.HOSPITAL: [
-            "board_confidence_score",
-            "avg_duration",
-            "long_duration_rate",
-            "adverse_event_rate",
-            "avg_unit_cost",
-        ],
-        HealthcareSubDomain.CLINIC: [
-            "board_confidence_score",
-            "total_volume",
-            "avg_duration",
-            "avg_unit_cost",
-        ],
-        HealthcareSubDomain.DIAGNOSTICS: [
-            "board_confidence_score",
-            "total_volume",
-            "avg_duration",
-            "adverse_event_rate",
-        ],
-        HealthcareSubDomain.PHARMACY: [
-            "board_confidence_score",
-            "total_volume",
-            "avg_unit_cost",
-        ],
-        HealthcareSubDomain.PUBLIC_HEALTH: [
-            "board_confidence_score",
-            "total_volume",
-            "data_completeness",
-        ],
-    }
-    
-    
-    def select_executive_kpis(
-        kpis: Dict[str, Any],
-        sub_domain: HealthcareSubDomain,
-        max_kpis: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """
-        Selects 3–5 executive KPIs based on healthcare sub-domain.
-        """
-    
-        priority_keys = EXECUTIVE_KPI_PRIORITY.get(
-            sub_domain, EXECUTIVE_KPI_PRIORITY[HealthcareSubDomain.MIXED]
-        )
-    
-        selected = []
-    
-        for key in priority_keys:
-            if key in kpis and kpis[key] is not None:
-                selected.append({
-                    "name": key.replace("_", " ").title(),
-                    "value": kpis[key],
-                })
-    
-            if len(selected) >= max_kpis:
-                break
-    
-        # Fallback: numeric KPIs by magnitude
-        if len(selected) < 3:
-            numeric = [
-                (k, v)
-                for k, v in kpis.items()
-                if isinstance(v, (int, float))
-            ]
-            numeric.sort(key=lambda x: abs(x[1]), reverse=True)
-    
-            for k, v in numeric:
-                if len(selected) >= max_kpis:
-                    break
-                if k not in {s["name"].lower().replace(" ", "_") for s in selected}:
-                    selected.append({
-                        "name": k.replace("_", " ").title(),
-                        "value": v,
-                    })
-    
-        return selected[:max_kpis]
 # =====================================================
 # 7. DOMAIN REGISTRATION
 # =====================================================
