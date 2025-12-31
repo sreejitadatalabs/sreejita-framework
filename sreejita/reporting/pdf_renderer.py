@@ -197,7 +197,8 @@ class ExecutivePDFRenderer:
         # PRIMARY KPIs (TOP 3–5)
         # =================================================
         rows = [["Metric", "Value"]]
-        for item in payload["primary_kpis"][:5]:
+        primary = payload.get("primary_kpis") or payload.get("executive", {}).get("primary_kpis", [])
+        for item in primary[:5]:
             if "name" in item and "value" in item:
                 rows.append([
                     item["name"],
