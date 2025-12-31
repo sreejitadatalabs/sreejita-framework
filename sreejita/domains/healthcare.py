@@ -144,9 +144,18 @@ class HealthcareMapping:
     # VARIANCE
     # -------------------------
     def variance(self) -> Optional[float]:
+        if self.c.get("cost"):
+            metric = self.c["cost"]
+        elif self.c.get("los"):
+            metric = self.c["los"]
+        elif self.c.get("duration"):
+            metric = self.c["duration"]
+        else:
+            return None
+    
         for g in ["facility", "doctor"]:
-            if self.c.get(g) and self.c.get("cost"):
-                stats = self.df.groupby(self.c[g])[self.c["cost"]].mean()
+            if self.c.get(g) and metric in self.df.columns:
+                stats = self.df.groupby(self.c[g])[metric].mean()
                 if stats.mean() > 0:
                     return min(stats.std() / stats.mean(), 1.0)
         return None
@@ -173,33 +182,51 @@ class HealthcareMapping:
 # 4. SUBDOMAIN & CAPABILITY DETECTION
 # =====================================================
 
-def detect_subdomain_and_capabilities(cols: Dict[str, str]) -> Tuple[HealthcareSubDomain, Set[HealthcareCapability]]:
-    caps = {HealthcareCapability.DATA_QUALITY, HealthcareCapability.VOLUME}
+def detect_subdomain_and_capabilities(
+    df: pd.DataFrame,
+    cols: Dict[str, str]
+) -> Tuple[HealthcareSubDomain, Set[HealthcareCapability]]:
 
-    if cols.get("los") or cols.get("duration"):
+    caps = {HealthcareCapability.DATA_QUALITY}
+
+    def usable(col, min_ratio=0.3):
+        return col and col in df.columns and df[col].notna().mean() >= min_ratio
+
+    # -----------------------
+    # CAPABILITIES
+    # -----------------------
+    if usable(cols.get("pid")) or usable(cols.get("encounter")):
+        caps.add(HealthcareCapability.VOLUME)
+
+    if usable(cols.get("los")) or usable(cols.get("duration")):
         caps.add(HealthcareCapability.TIME)
-    if cols.get("cost"):
+
+    if usable(cols.get("cost")):
         caps.add(HealthcareCapability.COST)
-    if cols.get("readmitted") or cols.get("flag"):
+
+    if usable(cols.get("readmitted")) or usable(cols.get("flag")):
         caps.add(HealthcareCapability.QUALITY)
-    if cols.get("facility") or cols.get("doctor"):
+
+    if usable(cols.get("facility")) or usable(cols.get("doctor")):
         caps.add(HealthcareCapability.VARIANCE)
 
-    if cols.get("los"):
+    # -----------------------
+    # SUB-DOMAIN (ORDER MATTERS)
+    # -----------------------
+    if usable(cols.get("los")):
         sub = HealthcareSubDomain.HOSPITAL
-    elif cols.get("test_id") or cols.get("specimen"):
+    elif usable(cols.get("duration")):
         sub = HealthcareSubDomain.DIAGNOSTICS
-    elif cols.get("drug") or cols.get("rx"):
+    elif usable(cols.get("cost")) and not usable(cols.get("los")):
         sub = HealthcareSubDomain.PHARMACY
-    elif cols.get("population"):
+    elif usable(cols.get("population")):
         sub = HealthcareSubDomain.PUBLIC_HEALTH
-    elif cols.get("encounter"):
+    elif usable(cols.get("encounter")):
         sub = HealthcareSubDomain.CLINIC
     else:
         sub = HealthcareSubDomain.MIXED
 
     return sub, caps
-
 
 # =====================================================
 # 5. UNIVERSAL SCORE
@@ -220,7 +247,20 @@ def compute_score(kpis, sub, caps):
             score += 5
 
     return max(0, min(100, score)), breakdown
-
+def _normalize_boolean_like(series: pd.Series) -> pd.Series:
+    """
+    Converts Yes/No, True/False, Y/N into 1/0 safely.
+    Leaves numeric values unchanged.
+    """
+    if series.dtype == object:
+        return series.map(
+            lambda x: (
+                1 if str(x).strip().lower() in {"yes", "y", "true", "1"} else
+                0 if str(x).strip().lower() in {"no", "n", "false", "0"} else
+                np.nan
+            )
+        )
+    return series
 
 # =====================================================
 # 6. HEALTHCARE DOMAIN
@@ -230,30 +270,156 @@ class HealthcareDomain(BaseDomain):
     name = "healthcare"
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Universal Healthcare Preprocess
+    
+        Responsibilities:
+        - Detect dataset shape (context only)
+        - Resolve columns across ALL healthcare sub-domains
+        - Normalize datatypes safely
+        - Derive missing but inferable fields (LOS / duration)
+        - Set time column for trends
+        """
+    
+        # -------------------------------------------------
+        # 1. DATASET SHAPE (CONTEXT ONLY)
+        # -------------------------------------------------
         self.shape_info = detect_dataset_shape(df)
-
+        self.shape = self.shape_info.get("shape")
+    
+        # -------------------------------------------------
+        # 2. UNIVERSAL COLUMN RESOLUTION
+        # -------------------------------------------------
         self.cols = {
-            "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
-            "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id"),
-            "los": resolve_column(df, "length_of_stay"),
-            "duration": resolve_column(df, "turnaround_time"),
-            "cost": resolve_column(df, "total_cost") or resolve_column(df, "amount"),
-            "readmitted": resolve_column(df, "readmitted"),
-            "facility": resolve_column(df, "facility"),
-            "doctor": resolve_column(df, "doctor"),
-            "date": resolve_column(df, "date") or resolve_column(df, "admit_date"),
+            # Identity / Volume
+            "pid": (
+                resolve_column(df, "patient_id")
+                or resolve_column(df, "mrn")
+                or resolve_column(df, "person_id")
+            ),
+            "encounter": (
+                resolve_column(df, "encounter_id")
+                or resolve_column(df, "visit_id")
+                or resolve_column(df, "appointment_id")
+                or resolve_column(df, "test_id")
+            ),
+    
+            # Time / Duration
+            "los": resolve_column(df, "length_of_stay") or resolve_column(df, "los"),
+            "duration": (
+                resolve_column(df, "turnaround_time")
+                or resolve_column(df, "duration")
+                or resolve_column(df, "wait_time")
+            ),
+    
+            # Financial
+            "cost": (
+                resolve_column(df, "total_cost")
+                or resolve_column(df, "billing_amount")
+                or resolve_column(df, "charges")
+                or resolve_column(df, "amount")
+            ),
+    
+            # Quality
+            "readmitted": (
+                resolve_column(df, "readmitted")
+                or resolve_column(df, "readmission")
+                or resolve_column(df, "flag")
+                or resolve_column(df, "error")
+            ),
+    
+            # Grouping / Variance
+            "facility": (
+                resolve_column(df, "facility")
+                or resolve_column(df, "hospital")
+                or resolve_column(df, "location")
+                or resolve_column(df, "site")
+                or resolve_column(df, "center")
+            ),
+            "doctor": (
+                resolve_column(df, "doctor")
+                or resolve_column(df, "provider")
+                or resolve_column(df, "physician")
+            ),
+    
+            # Dates (UNIVERSAL)
+            "admit": (
+                resolve_column(df, "admit_date")
+                or resolve_column(df, "admission_date")
+                or resolve_column(df, "arrival_date")
+            ),
+            "discharge": (
+                resolve_column(df, "discharge_date")
+                or resolve_column(df, "release_date")
+            ),
+            "date": (
+                resolve_column(df, "date")
+                or resolve_column(df, "event_date")
+                or resolve_column(df, "visit_date")
+                or resolve_column(df, "test_date")
+                or resolve_column(df, "report_date")
+            ),
         }
-
-        if self.cols.get("date"):
-            df[self.cols["date"]] = pd.to_datetime(df[self.cols["date"]], errors="coerce")
-            self.time_col = self.cols["date"]
-        else:
-            self.time_col = None
-
+    
+        # -------------------------------------------------
+        # 3. TYPE NORMALIZATION (CRITICAL)
+        # -------------------------------------------------
+        for key in ("los", "duration", "cost"):
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+    
+        # Readmission / flags → numeric 0/1
+        flag_col = self.cols.get("readmitted")
+        if flag_col and flag_col in df.columns:
+            df[flag_col] = (
+                df[flag_col]
+                .astype(str)
+                .str.lower()
+                .map({
+                    "1": 1, "0": 0,
+                    "yes": 1, "no": 0,
+                    "true": 1, "false": 0,
+                    "y": 1, "n": 0
+                })
+            )
+    
+        # -------------------------------------------------
+        # 4. DERIVED LOS (ADMIT → DISCHARGE)
+        # -------------------------------------------------
+        if not self.cols.get("los") and self.cols.get("admit") and self.cols.get("discharge"):
+            try:
+                admit = pd.to_datetime(df[self.cols["admit"]], errors="coerce")
+                discharge = pd.to_datetime(df[self.cols["discharge"]], errors="coerce")
+    
+                df["_derived_los"] = (discharge - admit).dt.days
+                self.cols["los"] = "_derived_los"
+            except Exception:
+                pass
+    
+        # -------------------------------------------------
+        # 5. TIME COLUMN RESOLUTION (FOR TRENDS)
+        # -------------------------------------------------
+        self.time_col = None
+    
+        for key in ("date", "admit"):
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                try:
+                    df[col] = pd.to_datetime(df[col], errors="coerce")
+                    self.time_col = col
+                    break
+                except Exception:
+                    continue
+    
+        # -------------------------------------------------
+        # 6. FINAL SAFETY CLEANUP
+        # -------------------------------------------------
+        # Never return mutated original reference
         return df
-
+        
     def calculate_kpis(self, df):
-        sub, caps = detect_subdomain_and_capabilities(self.cols)
+        sub, caps = detect_subdomain_and_capabilities(df, self.cols)
         m = HealthcareMapping(df, self.cols)
 
         kpis = {
@@ -265,8 +431,17 @@ class HealthcareDomain(BaseDomain):
 
         if HealthcareCapability.TIME in caps:
             kpis["avg_duration"] = m.avg_duration()
-            kpis["long_duration_rate"] = m.long_duration_rate(7)
+            duration_threshold = {
+                HealthcareSubDomain.HOSPITAL: 7,
+                HealthcareSubDomain.DIAGNOSTICS: 60,   # minutes
+                HealthcareSubDomain.CLINIC: 1,         # days
+                HealthcareSubDomain.PHARMACY: 0,       # not applicable
+                HealthcareSubDomain.PUBLIC_HEALTH: 0,
+            }.get(sub, 7)
 
+            if duration_threshold > 0:
+                kpis["long_duration_rate"] = m.long_duration_rate(duration_threshold)
+                
         if HealthcareCapability.COST in caps:
             kpis["total_cost"] = m.total_cost()
             kpis["avg_unit_cost"] = m.avg_unit_cost()
@@ -335,18 +510,19 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # 2. VOLUME DISTRIBUTION
         # =================================================
-        try:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            df.groupby(df.index // max(len(df)//20, 1)).size().hist(ax=ax, bins=10)
-            ax.set_title("Volume Distribution")
-            save(
-                fig,
-                "volume_dist.png",
-                "Distribution of record volume across segments.",
-                0.90
-            )
-        except Exception:
-            pass
+        if self.time_col and self.time_col in df.columns:
+            try:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                df[self.time_col].dt.to_period("M").value_counts().sort_index().plot(kind="bar", ax=ax)
+                ax.set_title("Monthly Activity Distribution", fontweight="bold")
+                save(
+                    fig,
+                    "volume_distribution.png",
+                    "Distribution of activity volume across periods.",
+                    0.90
+                )
+            except Exception:
+                pass
     
         # =================================================
         # 3. DURATION DISTRIBUTION (LOS / TAT / WAIT)
@@ -669,14 +845,18 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # GUARANTEE: MINIMUM 7 INSIGHTS
         # =================================================
+        seen_titles = set(i["title"] for i in insights)
         while len(insights) < 7:
-            add(
-                "INFO",
-                f"Operational Observation #{len(insights)+1}",
-                "No additional statistically significant anomalies detected in available data.",
-                "System Generated"
-            )
-    
+            title = f"Operational Observation #{len(insights)+1}"
+            if title not in seen_titles:
+                add(
+                    "INFO",
+                    title,
+                    "No additional statistically significant anomalies detected in available data.",
+                    "System Generated"
+                )
+                seen_titles.add(title) 
+                
         return insights
 
     def generate_recommendations(
