@@ -29,7 +29,30 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload.setdefault("recommendations", [])
     return payload
 
+def format_kpi_value(key, value):
+    if value is None:
+        return "-"
 
+    if isinstance(value, (int, float)):
+        k = key.lower()
+
+        if "rate" in k or "ratio" in k:
+            return f"{value:.1%}"
+
+        if "los" in k or "days" in k:
+            return f"{value:.1f} days"
+
+        if "cost" in k or "billing" in k:
+            if value >= 1_000_000:
+                return f"${value/1_000_000:.1f}M"
+            if value >= 1_000:
+                return f"${value/1_000:.1f}K"
+            return f"${value:,.0f}"
+
+        return f"{value:,.0f}"
+
+    return str(value)
+    
 def fmt(val):
     if val is None or val == "":
         return "-"
@@ -100,13 +123,32 @@ class ExecutivePDFRenderer:
         # -------------------------------------------------
         # COVER
         # -------------------------------------------------
-        story.append(Paragraph("Sreejita Executive Report", styles["ExecTitle"]))
         story.append(Paragraph(
-            f"Generated: {datetime.utcnow():%Y-%m-%d %H:%M UTC}",
-            styles["ExecBody"]
+            "SREEJITA INTELLIGENCE FRAMEWORK™",
+            styles["Title"]
         ))
+    
+        story.append(Paragraph(
+                "Executive Healthcare Performance Report",
+                styles["Section"]
+            ))
+        
+        story.append(Paragraph(
+            f"Domain: Healthcare Operations<br/>"
+            f"Confidence Level: {payload.get('scorecard', {}).get('risk_label', 'N/A')}<br/>"
+            f"Generated: {datetime.utcnow():%Y-%m-%d}",
+            styles["Body"]
+        ))
+        
         story.append(Spacer(1, 12))
-
+        
+        story.append(Paragraph(
+            "Prepared by: <b>Sreejita Data Labs</b>",
+            styles["Body"]
+        ))
+        
+        story.append(PageBreak())
+    
         # -------------------------------------------------
         # EXECUTIVE SUMMARY
         # -------------------------------------------------
@@ -123,7 +165,7 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
             table_data = [["Metric", "Value"]]
             for item in payload["primary_kpis"][:5]:
-                table_data.append([item.get("name", "-"), fmt(item.get("value"))])
+                table_data.append([item.get("name", "-"), format_kpi_value(item.get("name", ""), item.get("value"))
 
             t = Table(table_data, colWidths=[4 * inch, 2 * inch])
             t.setStyle(TableStyle([
