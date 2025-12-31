@@ -14,7 +14,7 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER
+# PAYLOAD NORMALIZER (STRICT CONTRACT)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +30,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =====================================================
-# FORMATTERS
+# KPI FORMATTER (EXECUTIVE-SAFE)
 # =====================================================
 
 def format_kpi_value(key: str, value: Any) -> str:
@@ -59,7 +59,7 @@ def format_kpi_value(key: str, value: Any) -> str:
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER
+# EXECUTIVE PDF RENDERER (FINAL)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -93,7 +93,7 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # SAFE CUSTOM STYLES
+        # SAFE STYLE REGISTRATION
         # -------------------------------------------------
         def _add_style(name, **kwargs):
             if name not in styles:
@@ -134,10 +134,8 @@ class ExecutivePDFRenderer:
         story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["ExecTitle"]))
         story.append(Paragraph("Executive Healthcare Performance Report", styles["ExecSection"]))
 
-        risk = "-"
-        snapshot = payload.get("executive_snapshot")
-        if snapshot:
-            risk = snapshot.get("overall_risk", "-")
+        snapshot = payload.get("executive_snapshot") or {}
+        risk = snapshot.get("overall_risk", "-")
 
         story.append(Paragraph(
             f"Domain: Healthcare Operations<br/>"
@@ -147,7 +145,10 @@ class ExecutivePDFRenderer:
         ))
 
         story.append(Spacer(1, 12))
-        story.append(Paragraph("Prepared by: <b>Sreejita Data Labs</b>", styles["ExecBody"]))
+        story.append(Paragraph(
+            "Prepared by: <b>Sreejita Data Labs</b>",
+            styles["ExecBody"]
+        ))
         story.append(PageBreak())
 
         # =================================================
@@ -181,7 +182,6 @@ class ExecutivePDFRenderer:
                 "50–69 = 🟠 Orange | <50 = 🔴 Red",
                 styles["ExecCaption"],
             ))
-
             story.append(PageBreak())
 
         # =================================================
@@ -196,33 +196,31 @@ class ExecutivePDFRenderer:
         # =================================================
         # PRIMARY KPIs (TOP 3–5)
         # =================================================
-        if payload["primary_kpis"]:
-            rows = [["Metric", "Value"]]
-            for item in payload["primary_kpis"][:5]:
-                if "name" in item and "value" in item:
-                    rows.append([
-                        item["name"],
-                        format_kpi_value(item["name"], item["value"]),
-                    ])
+        rows = [["Metric", "Value"]]
+        for item in payload["primary_kpis"][:5]:
+            if "name" in item and "value" in item:
+                rows.append([
+                    item["name"],
+                    format_kpi_value(item["name"], item["value"]),
+                ])
 
-            if len(rows) > 1:
-                story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
-                table = Table(rows, colWidths=[4 * inch, 2 * inch])
-                table.setStyle(TableStyle([
-                    ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
-                    ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("PADDING", (0, 0), (-1, -1), 8),
-                ]))
-                story.append(table)
-                story.append(PageBreak())
+        if len(rows) > 1:
+            story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
+            table = Table(rows, colWidths=[4 * inch, 2 * inch])
+            table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+                ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("PADDING", (0, 0), (-1, -1), 8),
+            ]))
+            story.append(table)
+            story.append(PageBreak())
 
         # =================================================
         # VISUAL EVIDENCE (MAX 6)
         # =================================================
         if payload["visuals"]:
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
-
             for vis in payload["visuals"][:6]:
                 path = Path(vis.get("path", ""))
                 if path.exists():
@@ -231,7 +229,6 @@ class ExecutivePDFRenderer:
                     h = min((ih / iw) * w, 5 * inch)
                     story.append(Image(str(path), width=w, height=h))
                     story.append(Paragraph(vis.get("caption", ""), styles["ExecCaption"]))
-
             story.append(PageBreak())
 
         # =================================================
@@ -259,7 +256,10 @@ class ExecutivePDFRenderer:
             ))
 
             for idx, r in enumerate(payload["recommendations"][:5], start=1):
-                story.append(Paragraph(f"{idx}. {r.get('action','Action required')}", styles["ExecBody"]))
+                story.append(Paragraph(
+                    f"{idx}. {r.get('action','Action required')}",
+                    styles["ExecBody"],
+                ))
 
                 meta = []
                 if r.get("timeline"):
@@ -274,8 +274,5 @@ class ExecutivePDFRenderer:
 
                 story.append(Spacer(1, 10))
 
-        # =================================================
-        # BUILD
-        # =================================================
         doc.build(story)
         return output_path
