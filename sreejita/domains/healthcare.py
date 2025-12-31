@@ -14,6 +14,11 @@ from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
+# IMPORT THE TRUTH
+from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
+
+# [FIX] Define Visual Benchmark to prevent NameError in generate_visuals
+VISUAL_BENCHMARK_LOS = 5.0
 
 # =====================================================
 # 1. HEALTHCARE UNIVERSAL ENUMS
@@ -143,67 +148,49 @@ class HealthcareMapping:
     # -------------------------
     # VARIANCE
     # -------------------------
+    # -------------------------
+    # VARIANCE
+    # -------------------------
     def variance(self) -> Optional[float]:
         """
         Measures normalized performance variance across entities.
-    
-        Rules:
-        - Uses cost → LOS → duration (in that order)
-        - Evaluates BOTH facility and doctor (if available)
-        - Requires minimum group diversity
-        - Caps output to [0, 1]
-        - Returns the strongest valid variance signal
         """
-    
-        # -------------------------------------------------
-        # 1. METRIC SELECTION (PRIORITY ORDER)
-        # -------------------------------------------------
+        # 1. Metric Selection
         metric = None
         for k in ("cost", "los", "duration"):
             col = self.c.get(k)
             if col and col in self.df.columns:
                 metric = col
                 break
-    
-        if not metric:
-            return None
-    
-        # -------------------------------------------------
-        # 2. GROUP-LEVEL VARIANCE EVALUATION
-        # -------------------------------------------------
+        
+        if not metric: return None
+
+        # 2. Group Variance (Facility / Doctor / Device)
         variances: List[float] = []
-    
-        for group_key in ("facility", "doctor"):
+        
+        # [UPDATE] Added 'device' to grouping keys for Digital Health support
+        for group_key in ("facility", "doctor", "device"):
             group_col = self.c.get(group_key)
-    
-            if not group_col or group_col not in self.df.columns:
-                continue
-    
+
+            if not group_col or group_col not in self.df.columns: continue
+
             grouped = (
                 self.df[[group_col, metric]]
                 .dropna()
                 .groupby(group_col)[metric]
                 .mean()
             )
-    
-            # Require meaningful comparison
-            if len(grouped) < 3:
-                continue
-    
+
+            if len(grouped) < 3: continue
+
             mean_val = grouped.mean()
             std_val = grouped.std()
-    
+
             if mean_val and mean_val > 0 and np.isfinite(std_val):
                 normalized = std_val / mean_val
                 variances.append(min(normalized, 1.0))
-    
-        # -------------------------------------------------
-        # 3. FINAL DECISION
-        # -------------------------------------------------
-        if not variances:
-            return None
-    
-        # Use strongest (worst-case) operational variance
+
+        if not variances: return None
         return max(variances)
 
     # -------------------------
@@ -390,6 +377,7 @@ class HealthcareDomain(BaseDomain):
                 or resolve_column(df, "provider")
                 or resolve_column(df, "physician")
             ),
+            "diagnosis": resolve_column(df, "diagnosis") or resolve_column(df, "condition"),
     
             # Dates (UNIVERSAL)
             "admit": (
@@ -408,15 +396,39 @@ class HealthcareDomain(BaseDomain):
                 or resolve_column(df, "test_date")
                 or resolve_column(df, "report_date")
             ),
+            # [NEW] Appointment Efficiency (Clinic)
+            "status": resolve_column(df, "appointment_status") or resolve_column(df, "visit_status") or resolve_column(df, "status"),
+            
+            # [NEW] Diagnostics (Labs)
+            "result": resolve_column(df, "result_value") or resolve_column(df, "result") or resolve_column(df, "value"),
+            "min_val": resolve_column(df, "normal_min") or resolve_column(df, "ref_min"),
+            "max_val": resolve_column(df, "normal_max") or resolve_column(df, "ref_max"),
+
+            # [NEW] Pharmacy
+            "fill_date": resolve_column(df, "fill_date") or resolve_column(df, "dispense_date"),
+            "supply": resolve_column(df, "days_supply") or resolve_column(df, "qty"),
+            "drug": resolve_column(df, "drug_name") or resolve_column(df, "medication"),
+
+            # [NEW] Public Health & Device
+            "population": resolve_column(df, "population") or resolve_column(df, "census"),
+            "device": resolve_column(df, "device_id") or resolve_column(df, "model"),
         }
     
         # -------------------------------------------------
         # 3. TYPE NORMALIZATION (CRITICAL)
         # -------------------------------------------------
-        for key in ("los", "duration", "cost"):
+        for key in ("los", "duration", "cost", "supply", "population"):
             col = self.cols.get(key)
             if col and col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 2. Date Conversion
+        for k in ["date", "admit", "discharge", "fill_date"]:
+            col = self.cols.get(k)
+            if col and col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+        
+        self.time_col = self.cols.get("date")
     
         # Readmission / flags → numeric 0/1
         flag_col = self.cols.get("readmitted")
@@ -445,22 +457,7 @@ class HealthcareDomain(BaseDomain):
                 self.cols["los"] = "_derived_los"
             except Exception:
                 pass
-    
-        # -------------------------------------------------
-        # 5. TIME COLUMN RESOLUTION (FOR TRENDS)
-        # -------------------------------------------------
-        self.time_col = None
-    
-        for key in ("date", "admit"):
-            col = self.cols.get(key)
-            if col and col in df.columns:
-                try:
-                    df[col] = pd.to_datetime(df[col], errors="coerce")
-                    self.time_col = col
-                    break
-                except Exception:
-                    continue
-    
+        
         # -------------------------------------------------
         # 6. FINAL SAFETY CLEANUP
         # -------------------------------------------------
@@ -470,20 +467,20 @@ class HealthcareDomain(BaseDomain):
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
         Calculates factual, domain-level KPIs ONLY.
-    
+        
         Guarantees:
         - No executive interpretation
         - No KPI ranking
         - No presentation logic
         - Fully sub-domain & mixed-dataset safe
         """
-    
+        
         # -------------------------------------------------
         # 1. SUB-DOMAIN & CAPABILITY DETECTION
         # -------------------------------------------------
         sub, caps = detect_subdomain_and_capabilities(df, self.cols)
         m = HealthcareMapping(df, self.cols)
-    
+
         # -------------------------------------------------
         # 2. BASE KPIs (ALWAYS SAFE)
         # -------------------------------------------------
@@ -492,103 +489,135 @@ class HealthcareDomain(BaseDomain):
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": m.volume(),
+            "total_patients": m.volume(), # Legacy compat
         }
-    
+
         # -------------------------------------------------
         # 3. TIME / DURATION KPIs
         # -------------------------------------------------
         if HealthcareCapability.TIME in caps:
             kpis["avg_duration"] = m.avg_duration()
-    
+            
+            # Dynamic thresholding based on sub-domain
             duration_threshold = {
                 HealthcareSubDomain.HOSPITAL: 7,        # days
                 HealthcareSubDomain.DIAGNOSTICS: 60,    # minutes
                 HealthcareSubDomain.CLINIC: 1,          # days
-                HealthcareSubDomain.PHARMACY: 0,        # N/A
-                HealthcareSubDomain.PUBLIC_HEALTH: 0,   # N/A
             }.get(sub, 7)
-    
+
             if duration_threshold > 0:
                 kpis["long_duration_rate"] = m.long_duration_rate(duration_threshold)
-    
+            
+            # Legacy mapping for engine compatibility
+            kpis["avg_los"] = kpis["avg_duration"] 
+            kpis["long_stay_rate"] = kpis.get("long_duration_rate")
+
         # -------------------------------------------------
         # 4. COST KPIs
         # -------------------------------------------------
         if HealthcareCapability.COST in caps:
             kpis["total_cost"] = m.total_cost()
             kpis["avg_unit_cost"] = m.avg_unit_cost()
-    
+            kpis["avg_cost_per_patient"] = kpis["avg_unit_cost"] # Legacy compat
+
         # -------------------------------------------------
         # 5. QUALITY KPIs
         # -------------------------------------------------
         if HealthcareCapability.QUALITY in caps:
             kpis["adverse_event_rate"] = m.adverse_rate()
-    
+            kpis["readmission_rate"] = kpis["adverse_event_rate"] # Legacy compat
+
         # -------------------------------------------------
         # 6. VARIANCE KPIs
         # -------------------------------------------------
         if HealthcareCapability.VARIANCE in caps:
             kpis["variance_score"] = m.variance()
-    
-        # ... inside calculate_kpis, replacing the volume trend block ...
+            kpis["facility_variance_score"] = kpis["variance_score"] # Legacy compat
 
         # -------------------------------------------------
-        # 7. TREND SIGNALS (FACTUAL, NOT INTERPRETED)
+        # 7. UNIVERSAL EXTENSIONS (Advanced Logic)
         # -------------------------------------------------
+        
+        # A. Clinic: Appointment Efficiency
+        if self.cols.get("status") and self.cols["status"] in df.columns:
+            try:
+                s = df[self.cols["status"]].astype(str).str.lower()
+                kpis["no_show_rate"] = s.isin(["no_show", "noshow", "missed", "dna"]).mean()
+            except: pass
+
+        # B. Labs: Diagnostic Outliers
+        rv, lo, hi = self.cols.get("result"), self.cols.get("min_val"), self.cols.get("max_val")
+        if rv and lo and hi and all(c in df.columns for c in [rv, lo, hi]):
+            try:
+                temp = df[[rv, lo, hi]].apply(pd.to_numeric, errors='coerce').dropna()
+                if not temp.empty:
+                    kpis["abnormal_result_rate"] = ((temp[rv] < temp[lo]) | (temp[rv] > temp[hi])).mean()
+            except: pass
+
+        # C. Pharmacy: Refill Adherence
+        pid, fill, supply = self.cols.get("pid"), self.cols.get("fill_date"), self.cols.get("supply")
+        if pid and fill and supply and all(c in df.columns for c in [pid, fill, supply]):
+            try:
+                temp = df[[pid, fill, supply]].dropna().sort_values(fill)
+                # Calculate days between fills vs supply
+                temp['gap'] = temp.groupby(pid)[fill].diff().dt.days - temp[supply].shift(1)
+                kpis["late_refill_rate"] = (temp['gap'] > 5).mean()
+            except: pass
+
+        # D. Public Health: Incidence Rate
+        pop_col = self.cols.get("population")
+        if pop_col and pop_col in df.columns:
+            try:
+                pop_val = pd.to_numeric(df[pop_col], errors='coerce').max()
+                if pop_val and pop_val > 0:
+                    kpis["incidence_per_100k"] = (kpis["total_volume"] / pop_val) * 100_000
+            except: pass
+
+        # -------------------------------------------------
+        # 8. TREND SIGNALS
+        # -------------------------------------------------
+        trend_arrow = "→"
         if self.time_col:
-            # Duration trend
+            # Duration Trend
             dur_col = self.cols.get("los") or self.cols.get("duration")
             if dur_col and dur_col in df.columns:
                 kpis["avg_duration_trend"] = m.trend(self.time_col, dur_col)
             
-            # Cost trend
+            # Cost Trend
             if self.cols.get("cost") and self.cols["cost"] in df.columns:
                 kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
             
-            # [FIX] Volume Trend Logic (Count based, not ID based)
+            # Volume Trend (Resample Safe)
             try:
-                # Count records per month
-                vol_series = (
-                    df.set_index(self.time_col)
-                    .resample("ME")
-                    .size()
-                )
-                
-                if len(vol_series) >= 6: # Minimum periods for trend
-                    # Compare last 20% vs first 80% (simple momentum)
-                    split = int(len(vol_series) * 0.8)
-                    hist_avg = vol_series.iloc[:split].mean()
-                    curr_avg = vol_series.iloc[split:].mean()
-                    
-                    if hist_avg > 0:
-                        delta = (curr_avg - hist_avg) / hist_avg
-                        if delta > 0.05: kpis["volume_trend"] = "↑"
-                        elif delta < -0.05: kpis["volume_trend"] = "↓"
-                        else: kpis["volume_trend"] = "→"
-            except: 
-                kpis["volume_trend"] = "→"
-    
+                vol_s = df.set_index(self.time_col).resample("M").size()
+                if len(vol_s) >= 4:
+                    delta = (vol_s.iloc[-1] - vol_s.iloc[0]) / vol_s.iloc[0]
+                    trend_arrow = "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
+                    kpis["volume_trend"] = trend_arrow
+            except: pass
+
         # -------------------------------------------------
-        # 8. GOVERNANCE SCORE (STILL FACTUAL)
+        # 9. SCORING & METADATA
         # -------------------------------------------------
         score, breakdown = compute_score(kpis, sub, caps)
+        
         kpis.update({
             "board_confidence_score": score,
             "board_score_breakdown": breakdown,
-            "maturity_level": (
-                "Gold" if score >= 85
-                else "Silver" if score >= 70
-                else "Bronze"
-            ),
+            "board_confidence_interpretation": _get_score_interpretation(score),
+            "trend_explanation": _get_trend_explanation(trend_arrow),
+            "maturity_level": "Gold" if score >= 85 else "Silver" if score >= 70 else "Bronze",
+            "board_confidence_trend": trend_arrow,
+            "benchmark_context": f"Evaluated against {sub.value.upper()} standards."
         })
-    
-        # -------------------------------------------------
-        # 9. EXECUTIVE METADATA (NO SELECTION HERE)
-        # -------------------------------------------------
+
+        # Executive Selection
+        primary_kpis = self.select_executive_kpis(kpis, sub)
         kpis["_executive"] = {
-            "sub_domain": sub.value
+            "primary_kpis": primary_kpis,
+            "sub_domain": sub.value,
         }
-    
+        
         return kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
