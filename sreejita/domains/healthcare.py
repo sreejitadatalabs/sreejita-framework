@@ -411,8 +411,8 @@ class HealthcareDomain(BaseDomain):
         raw_kpis["visits_per_patient"] = mapping.visits_per_patient()
         
         raw_kpis["avg_los"] = mapping.avg_los()
-        los_threshold = HEALTHCARE_THRESHOLDS.get("long_stay_rate_warning", 7)
-        raw_kpis["long_stay_rate"] = mapping.long_stay_rate(los_threshold)
+        los_days_threshold = HEALTHCARE_THRESHOLDS.get("long_stay_days_warning", 7)
+        raw_kpis["long_stay_rate"] = mapping.long_stay_rate(los_days_threshold)
         
         if raw_kpis.get("avg_los") is not None:
             raw_kpis["benchmark_los"] = HEALTHCARE_THRESHOLDS.get("benchmark_los", 5.0)
@@ -441,7 +441,8 @@ class HealthcareDomain(BaseDomain):
         if self.time_col:
             raw_kpis["los_trend"] = mapping.trend(self.time_col, "los")
             raw_kpis["cost_trend"] = mapping.trend(self.time_col, "cost")
-            raw_kpis["volume_trend"] = mapping.trend(self.time_col, "volume")
+            if self.cols.get("volume"):
+                raw_kpis["volume_trend"] = mapping.trend(self.time_col, "volume")
             if self.care_context == CareContext.INPATIENT:
                 raw_kpis["weekend_admission_rate"] = mapping.weekend_admission_rate(self.time_col)
         
@@ -516,7 +517,7 @@ class HealthcareDomain(BaseDomain):
                 ax.axvline(VISUAL_BENCHMARK_LOS, color='red', linestyle='--', linewidth=1.5, label=f'Goal ({VISUAL_BENCHMARK_LOS}d)')
                 ax.legend()
                 ax.set_title("Cycle Time Distribution", fontweight="bold")
-                save(fig, "duration_dist.png", "Distribution of observed cycle durations.", 0.95)
+                save(fig, "duration_dist.png","Distribution of observed cycle durations → Extreme right-tail LOS drives financial loss.",0.95)
             except: pass
         
         # 3. Cost Drivers
@@ -721,11 +722,10 @@ class HealthcareDomain(BaseDomain):
         while len(insights) < 7:
             insights.append({
                 "level": "INFO",
-                "title": "Operational Observation",
-                "so_what": "No additional statistically significant anomalies detected in this dataset.",
+                "title": f"Operational Observation #{len(insights)+1}",
+                "so_what": "No additional statistically significant anomalies detected.",
                 "source": "System Generated"
             })
-
         return insights
     
     def generate_recommendations(self, df, kpis, insights=None, shape_info=None):
