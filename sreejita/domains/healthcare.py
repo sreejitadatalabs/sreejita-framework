@@ -271,6 +271,7 @@ def detect_subdomain_and_capabilities(
         raw_name = duration_col.lower()
         ACCESS_TOKENS = {"wait", "queue", "access", "turnaround"}
         if any(tok in raw_name for tok in ACCESS_TOKENS):
+    
     caps.add(HealthcareCapability.ACCESS)
 
     # -----------------------
