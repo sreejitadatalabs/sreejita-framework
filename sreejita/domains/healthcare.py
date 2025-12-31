@@ -145,9 +145,21 @@ class HealthcareMapping:
                 return self.df[self.c[k]].mean()
         return None
 
-    # -------------------------
-    # VARIANCE
-    # -------------------------
+    def _get_score_interpretation(score: int) -> str:
+        if score >= 85:
+            return "Strong operational confidence"
+        elif score >= 70:
+            return "Moderate operational confidence"
+        elif score >= 50:
+            return "Elevated operational risk"
+        return "Critical operational risk"
+
+    def _get_trend_explanation(trend: str) -> str:
+        return {
+            "↑": "Performance indicators are deteriorating",
+            "↓": "Performance indicators are improving",
+            "→": "Performance indicators are stable"
+        }.get(trend, "Trend unavailable")
     # -------------------------
     # VARIANCE
     # -------------------------
@@ -258,8 +270,7 @@ def detect_subdomain_and_capabilities(
         raw_name = duration_col.lower()
         ACCESS_TOKENS = {"wait", "queue", "access", "turnaround"}
         if any(tok in raw_name for tok in ACCESS_TOKENS):
-    
-    caps.add(HealthcareCapability.ACCESS)
+            caps.add(HealthcareCapability.ACCESS)
 
     # -----------------------
     # SUB-DOMAIN (ORDER MATTERS)
@@ -428,7 +439,7 @@ class HealthcareDomain(BaseDomain):
             if col and col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
         
-        self.time_col = self.cols.get("date")
+        self.time_col = (self.cols.get("date") or self.cols.get("admit") or self.cols.get("fill_date"))
     
         # Readmission / flags → numeric 0/1
         flag_col = self.cols.get("readmitted")
@@ -489,7 +500,8 @@ class HealthcareDomain(BaseDomain):
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": m.volume(),
-            "total_patients": m.volume(), # Legacy compat
+            "total_entities": m.volume()
+            "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
         }
 
         # -------------------------------------------------
