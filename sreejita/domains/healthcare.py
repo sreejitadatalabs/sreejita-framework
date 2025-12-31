@@ -705,11 +705,30 @@ class HealthcareDomain(BaseDomain):
             caps=kpis.get("capabilities", []),
             total_records=len(df)
         )
+        self._last_kpi_confidence = kpis["_confidence"]
 
         # -------------------------------------------------
-        # 11. EXECUTIVE SELECTION
+        # 11. EXECUTIVE SELECTION (CONFIDENCE-WEIGHTED)
         # -------------------------------------------------
+        
         primary_kpis = self.select_executive_kpis(kpis, sub)
+        
+        confidence_map = kpis.get("_confidence", {})
+        
+        def rank_exec(k):
+            name = k["name"].lower().replace(" ", "_")
+            value = k.get("value")
+        
+            try:
+                magnitude = abs(float(value))
+            except Exception:
+                magnitude = 0.0
+        
+            conf = confidence_map.get(name, 0.6)
+            return magnitude * conf
+        
+        primary_kpis = sorted(primary_kpis, key=rank_exec, reverse=True)
+        
         kpis["_executive"] = {
             "primary_kpis": primary_kpis,
             "sub_domain": sub.value,
@@ -721,17 +740,24 @@ class HealthcareDomain(BaseDomain):
         visuals: List[Dict[str, Any]] = []
         output_dir.mkdir(parents=True, exist_ok=True)
         c = self.cols
-    
+        self._last_kpi_confidence = getattr(self, "_last_kpi_confidence", {})
         # ---------------------------
         # INTERNAL HELPERS
         # ---------------------------
-        def save(fig, name, caption, importance):
+        def save(fig, name, caption, importance, kpi_key=None):
+            confidence_map = getattr(self, "_last_kpi_confidence", {})
+            conf = confidence_map.get(kpi_key, 0.85)
+        
+            weighted_importance = round(importance * conf, 2)
+        
             fig.savefig(output_dir / name, bbox_inches="tight", dpi=120)
             plt.close(fig)
+        
             visuals.append({
                 "path": str(output_dir / name),
                 "caption": caption,
-                "importance": importance
+                "importance": weighted_importance,
+                "confidence": conf
             })
     
         def human_fmt(x, _):
@@ -966,7 +992,29 @@ class HealthcareDomain(BaseDomain):
                     "Data completeness supports confident operational and executive analysis.",
                     "Data Quality Assessment"
                 )
-    
+
+        # =================================================
+        # CONFIDENCE-BASED INTERPRETATION WARNING
+        # =================================================
+        confidence = kpis.get("_confidence", {})
+        
+        low_conf = [
+            k for k, v in confidence.items()
+            if isinstance(v, (int, float)) and v < 0.7
+        ]
+        
+        if low_conf:
+            add(
+                "WARNING",
+                "Interpretation Confidence Notice",
+                (
+                    "Some metrics are derived from limited or unstable data. "
+                    "Use directional judgment for: "
+                    + ", ".join(low_conf[:3])
+                ),
+                "Trust Engine",
+                True
+            )
         # =================================================
         # 2. SCALE & DEMAND PRESSURE
         # =================================================
