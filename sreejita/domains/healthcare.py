@@ -500,7 +500,7 @@ class HealthcareDomain(BaseDomain):
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": m.volume(),
-            "total_entities": m.volume()
+            "total_entities": m.volume(),
             "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
         }
 
