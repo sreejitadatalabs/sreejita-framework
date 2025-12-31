@@ -14,19 +14,38 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (STRICT CONTRACT)
+# PAYLOAD NORMALIZER (STRICT & NESTED-SAFE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Flattens orchestrator → executive payload safely.
+    NEVER crashes.
+    """
     payload = payload if isinstance(payload, dict) else {}
-    payload.setdefault("meta", {})
-    payload.setdefault("executive_snapshot", None)
-    payload.setdefault("primary_kpis", [])
-    payload.setdefault("summary", [])
-    payload.setdefault("visuals", [])
-    payload.setdefault("insights", [])
-    payload.setdefault("recommendations", [])
-    return payload
+
+    # Domain-wrapped payload safety
+    if len(payload) == 1:
+        payload = next(iter(payload.values()), payload)
+
+    executive = payload.get("executive", {}) or {}
+
+    return {
+        "meta": payload.get("meta", {}),
+        "executive_snapshot": (
+            payload.get("executive_snapshot")
+            or executive.get("snapshot")
+            or {}
+        ),
+        "primary_kpis": (
+            payload.get("primary_kpis")
+            or executive.get("primary_kpis", [])
+        ),
+        "summary": payload.get("summary", []) or executive.get("summary", []),
+        "visuals": payload.get("visuals", []),
+        "insights": payload.get("insights", []),
+        "recommendations": payload.get("recommendations", []),
+    }
 
 
 # =====================================================
@@ -41,16 +60,16 @@ def format_kpi_value(key: str, value: Any) -> str:
         k = key.lower()
 
         if "rate" in k or "ratio" in k:
-            return f"{value:.1%}"
+            return f"{value * 100:.1f}%" if value <= 1 else f"{value:.1f}%"
 
-        if "los" in k or "days" in k:
+        if "los" in k or "days" in k or "duration" in k:
             return f"{value:.1f} days"
 
-        if "cost" in k or "billing" in k:
+        if "cost" in k or "billing" in k or "amount" in k:
             if value >= 1_000_000:
                 return f"${value / 1_000_000:.1f}M"
             if value >= 1_000:
-                return f"${value / 1_000:.1f}K"
+                return f"${value / 1_000:.0f}K"
             return f"${value:,.0f}"
 
         return f"{value:,.0f}"
@@ -59,7 +78,7 @@ def format_kpi_value(key: str, value: Any) -> str:
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL — FREEZE)
+# EXECUTIVE PDF RENDERER (FINAL — PRODUCTION)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -70,7 +89,7 @@ class ExecutivePDFRenderer:
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
 
-        # Enforce importance ordering for visuals
+        # Sort visuals by importance
         payload["visuals"] = sorted(
             payload.get("visuals", []),
             key=lambda x: x.get("importance", 0),
@@ -93,13 +112,13 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # SAFE STYLE REGISTRATION
+        # STYLES
         # -------------------------------------------------
-        def _add_style(name, **kwargs):
+        def add_style(name, **kwargs):
             if name not in styles:
                 styles.add(ParagraphStyle(name=name, **kwargs))
 
-        _add_style(
+        add_style(
             "ExecTitle",
             fontSize=22,
             alignment=TA_CENTER,
@@ -107,20 +126,20 @@ class ExecutivePDFRenderer:
             fontName="Helvetica-Bold",
             textColor=self.PRIMARY,
         )
-        _add_style(
+        add_style(
             "ExecSection",
             fontSize=15,
             spaceBefore=18,
             spaceAfter=10,
             fontName="Helvetica-Bold",
         )
-        _add_style(
+        add_style(
             "ExecBody",
             fontSize=11,
             leading=15,
             spaceAfter=6,
         )
-        _add_style(
+        add_style(
             "ExecCaption",
             fontSize=9,
             alignment=TA_CENTER,
@@ -134,78 +153,51 @@ class ExecutivePDFRenderer:
         story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["ExecTitle"]))
         story.append(Paragraph("Executive Healthcare Performance Report", styles["ExecSection"]))
 
-        snapshot = payload.get("executive_snapshot") or {}
+        snapshot = payload.get("executive_snapshot", {})
         risk = snapshot.get("overall_risk", "-")
 
         story.append(Paragraph(
-            f"Domain: Healthcare Operations<br/>"
+            f"Domain: Healthcare<br/>"
             f"Confidence Level: {risk}<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
             styles["ExecBody"],
         ))
 
         story.append(Spacer(1, 12))
-        story.append(Paragraph(
-            "Prepared by: <b>Sreejita Data Labs</b>",
-            styles["ExecBody"],
-        ))
+        story.append(Paragraph("Prepared by: <b>Sreejita Data Labs</b>", styles["ExecBody"]))
         story.append(PageBreak())
 
         # =================================================
-        # EXECUTIVE DECISION SNAPSHOT
+        # EXECUTIVE SNAPSHOT
         # =================================================
         if snapshot:
-            story.append(Paragraph(
-                snapshot.get("title", "EXECUTIVE DECISION SNAPSHOT"),
-                styles["ExecSection"],
-            ))
+            story.append(Paragraph("Executive Decision Snapshot", styles["ExecSection"]))
+            story.append(Paragraph(f"<b>Overall Risk:</b> {risk}", styles["ExecBody"]))
 
-            story.append(Paragraph(
-                f"<b>Overall Risk:</b> {snapshot.get('overall_risk', '-')}",
-                styles["ExecBody"],
-            ))
+            for section, items, bullet in [
+                ("Top Problems", snapshot.get("top_problems", []), "•"),
+                ("Decisions Required", snapshot.get("decisions_required", []), "☐"),
+            ]:
+                if items:
+                    story.append(Spacer(1, 8))
+                    story.append(Paragraph(f"<b>{section}:</b>", styles["ExecBody"]))
+                    for x in items[:3]:
+                        story.append(Paragraph(f"{bullet} {x}", styles["ExecBody"]))
 
-            story.append(Spacer(1, 8))
-            story.append(Paragraph("<b>Top Problems:</b>", styles["ExecBody"]))
-            for p in snapshot.get("top_problems", [])[:3]:
-                story.append(Paragraph(f"• {p}", styles["ExecBody"]))
-
-            story.append(Spacer(1, 8))
-            story.append(Paragraph("<b>Decisions Required:</b>", styles["ExecBody"]))
-            for d in snapshot.get("decisions_required", [])[:3]:
-                story.append(Paragraph(f"☐ {d}", styles["ExecBody"]))
-
-            story.append(Spacer(1, 10))
-            story.append(Paragraph(
-                "<b>Confidence Scale:</b> "
-                "85–100 = 🟢 Green | 70–84 = 🟡 Yellow | "
-                "50–69 = 🟠 Orange | <50 = 🔴 Red",
-                styles["ExecCaption"],
-            ))
-            story.append(PageBreak())
-
-        # =================================================
-        # EXECUTIVE SUMMARY
-        # =================================================
-        if payload["summary"]:
-            story.append(Paragraph("Executive Summary", styles["ExecSection"]))
-            for s in payload["summary"][:5]:
-                story.append(Paragraph(f"• {s}", styles["ExecBody"]))
             story.append(PageBreak())
 
         # =================================================
         # PRIMARY KPIs (TOP 3–5)
         # =================================================
-        rows = [["Metric", "Value"]]
-        primary = payload.get("primary_kpis") or payload.get("executive", {}).get("primary_kpis", [])
-        for item in primary[:5]:
-            if "name" in item and "value" in item:
+        primary = payload.get("primary_kpis", [])
+        if primary:
+            rows = [["Metric", "Value"]]
+            for item in primary[:5]:
                 rows.append([
-                    item["name"],
-                    format_kpi_value(item["name"], item["value"]),
+                    item.get("name", "Metric"),
+                    format_kpi_value(item.get("name", ""), item.get("value")),
                 ])
 
-        if len(rows) > 1:
             story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
             table = Table(rows, colWidths=[4 * inch, 2 * inch])
             table.setStyle(TableStyle([
@@ -218,19 +210,23 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # VISUAL EVIDENCE (MAX 6)
+        # VISUALS (MAX 6)
         # =================================================
         if payload["visuals"]:
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
             for vis in payload["visuals"][:6]:
                 path = Path(vis.get("path", ""))
-                if path.exists():
+                if not path.exists():
+                    continue
+                try:
                     img = utils.ImageReader(str(path))
                     iw, ih = img.getSize()
                     w = 6 * inch
                     h = min((ih / iw) * w, 5 * inch)
                     story.append(Image(str(path), width=w, height=h))
                     story.append(Paragraph(vis.get("caption", ""), styles["ExecCaption"]))
+                except Exception:
+                    continue
             story.append(PageBreak())
 
         # =================================================
@@ -248,32 +244,22 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # RECOMMENDATIONS
+        # RECOMMENDATIONS (TOP 5)
         # =================================================
         if payload["recommendations"]:
             story.append(Paragraph("Recommendations", styles["ExecSection"]))
-            story.append(Paragraph(
-                "<b>The following actions require executive approval to mitigate identified risks.</b>",
-                styles["ExecBody"],
-            ))
-
             for idx, r in enumerate(payload["recommendations"][:5], start=1):
                 story.append(Paragraph(
                     f"{idx}. {r.get('action','Action required')}",
                     styles["ExecBody"],
                 ))
-
-                meta = []
-                if r.get("timeline"):
-                    meta.append(f"Timeline: {r['timeline']}")
-                if r.get("owner"):
-                    meta.append(f"Owner: {r['owner']}")
-                if r.get("expected_outcome"):
-                    meta.append(f"Success: {r['expected_outcome']}")
-
+                meta = " | ".join(filter(None, [
+                    f"Owner: {r.get('owner')}",
+                    f"Timeline: {r.get('timeline')}",
+                    f"Outcome: {r.get('expected_outcome')}",
+                ]))
                 if meta:
-                    story.append(Paragraph(" | ".join(meta), styles["ExecCaption"]))
-
+                    story.append(Paragraph(meta, styles["ExecCaption"]))
                 story.append(Spacer(1, 10))
 
         doc.build(story)
