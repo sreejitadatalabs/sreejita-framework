@@ -2,7 +2,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
-import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
@@ -34,7 +33,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 # FORMATTERS
 # =====================================================
 
-def format_kpi_value(key, value):
+def format_kpi_value(key: str, value: Any) -> str:
     if value is None:
         return "-"
 
@@ -49,9 +48,9 @@ def format_kpi_value(key, value):
 
         if "cost" in k or "billing" in k:
             if value >= 1_000_000:
-                return f"${value/1_000_000:.1f}M"
+                return f"${value / 1_000_000:.1f}M"
             if value >= 1_000:
-                return f"${value/1_000:.1f}K"
+                return f"${value / 1_000:.1f}K"
             return f"${value:,.0f}"
 
         return f"{value:,.0f}"
@@ -94,7 +93,7 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # SAFE CUSTOM STYLES (NO COLLISION)
+        # SAFE CUSTOM STYLES
         # -------------------------------------------------
         def _add_style(name, **kwargs):
             if name not in styles:
@@ -106,73 +105,63 @@ class ExecutivePDFRenderer:
             alignment=TA_CENTER,
             spaceAfter=18,
             fontName="Helvetica-Bold",
-            textColor=self.PRIMARY
+            textColor=self.PRIMARY,
         )
         _add_style(
             "ExecSection",
             fontSize=15,
             spaceBefore=18,
             spaceAfter=10,
-            fontName="Helvetica-Bold"
+            fontName="Helvetica-Bold",
         )
         _add_style(
             "ExecBody",
             fontSize=11,
             leading=15,
-            spaceAfter=6
+            spaceAfter=6,
         )
         _add_style(
             "ExecCaption",
             fontSize=9,
             alignment=TA_CENTER,
             textColor=HexColor("#6b7280"),
-            spaceAfter=12
+            spaceAfter=12,
         )
 
         # =================================================
         # COVER PAGE
         # =================================================
-        story.append(Paragraph(
-            "SREEJITA INTELLIGENCE FRAMEWORK™",
-            styles["ExecTitle"]
-        ))
-
-        story.append(Paragraph(
-            "Executive Healthcare Performance Report",
-            styles["ExecSection"]
-        ))
+        story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["ExecTitle"]))
+        story.append(Paragraph("Executive Healthcare Performance Report", styles["ExecSection"]))
 
         risk = "-"
-        if payload.get("executive_snapshot"):
-            risk = payload["executive_snapshot"].get("overall_risk", "-")
+        snapshot = payload.get("executive_snapshot")
+        if snapshot:
+            risk = snapshot.get("overall_risk", "-")
 
         story.append(Paragraph(
             f"Domain: Healthcare Operations<br/>"
             f"Confidence Level: {risk}<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
-            styles["ExecBody"]
+            styles["ExecBody"],
         ))
 
         story.append(Spacer(1, 12))
-        story.append(Paragraph(
-            "Prepared by: <b>Sreejita Data Labs</b>",
-            styles["ExecBody"]
-        ))
+        story.append(Paragraph("Prepared by: <b>Sreejita Data Labs</b>", styles["ExecBody"]))
         story.append(PageBreak())
 
         # =================================================
         # EXECUTIVE DECISION SNAPSHOT
         # =================================================
-        snapshot = payload.get("executive_snapshot")
         if snapshot:
             story.append(Paragraph(
                 snapshot.get("title", "EXECUTIVE DECISION SNAPSHOT"),
-                styles["ExecSection"]
+                styles["ExecSection"],
             ))
 
             story.append(Paragraph(
                 f"<b>Overall Risk:</b> {snapshot.get('overall_risk', '-')}",
-                styles["ExecBody"]
+                styles["ExecBody"],
             ))
 
             story.append(Spacer(1, 8))
@@ -190,7 +179,7 @@ class ExecutivePDFRenderer:
                 "<b>Confidence Scale:</b> "
                 "85–100 = 🟢 Green | 70–84 = 🟡 Yellow | "
                 "50–69 = 🟠 Orange | <50 = 🔴 Red",
-                styles["ExecCaption"]
+                styles["ExecCaption"],
             ))
 
             story.append(PageBreak())
@@ -200,7 +189,7 @@ class ExecutivePDFRenderer:
         # =================================================
         if payload["summary"]:
             story.append(Paragraph("Executive Summary", styles["ExecSection"]))
-            for s in payload["summary"]:
+            for s in payload["summary"][:5]:
                 story.append(Paragraph(f"• {s}", styles["ExecBody"]))
             story.append(PageBreak())
 
@@ -208,18 +197,17 @@ class ExecutivePDFRenderer:
         # PRIMARY KPIs (TOP 3–5)
         # =================================================
         if payload["primary_kpis"]:
-            story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
-
-            table_data = [["Metric", "Value"]]
+            rows = [["Metric", "Value"]]
             for item in payload["primary_kpis"][:5]:
                 if "name" in item and "value" in item:
-                    table_data.append([
+                    rows.append([
                         item["name"],
-                        format_kpi_value(item["name"], item["value"])
+                        format_kpi_value(item["name"], item["value"]),
                     ])
 
-            if len(table_data) > 1:
-                table = Table(table_data, colWidths=[4 * inch, 2 * inch])
+            if len(rows) > 1:
+                story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
+                table = Table(rows, colWidths=[4 * inch, 2 * inch])
                 table.setStyle(TableStyle([
                     ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
                     ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
@@ -238,8 +226,7 @@ class ExecutivePDFRenderer:
             for vis in payload["visuals"][:6]:
                 path = Path(vis.get("path", ""))
                 if path.exists():
-                    img = utils.ImageReader(str(path))
-                    iw, ih = img.getSize()
+                    iw, ih = utils.ImageReader(str(path)).getSize()
                     w = 6 * inch
                     h = min((ih / iw) * w, 5 * inch)
                     story.append(Image(str(path), width=w, height=h))
@@ -255,7 +242,7 @@ class ExecutivePDFRenderer:
             for i in payload["insights"][:5]:
                 story.append(Paragraph(
                     f"<b>{i.get('level','INFO')}:</b> {i.get('title','')}",
-                    styles["ExecBody"]
+                    styles["ExecBody"],
                 ))
                 story.append(Paragraph(i.get("so_what", ""), styles["ExecBody"]))
                 story.append(Spacer(1, 8))
@@ -268,14 +255,11 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Recommendations", styles["ExecSection"]))
             story.append(Paragraph(
                 "<b>The following actions require executive approval to mitigate identified risks.</b>",
-                styles["ExecBody"]
+                styles["ExecBody"],
             ))
 
             for idx, r in enumerate(payload["recommendations"][:5], start=1):
-                story.append(Paragraph(
-                    f"{idx}. {r.get('action','Action required')}",
-                    styles["ExecBody"]
-                ))
+                story.append(Paragraph(f"{idx}. {r.get('action','Action required')}", styles["ExecBody"]))
 
                 meta = []
                 if r.get("timeline"):
@@ -290,5 +274,8 @@ class ExecutivePDFRenderer:
 
                 story.append(Spacer(1, 10))
 
+        # =================================================
+        # BUILD
+        # =================================================
         doc.build(story)
         return output_path
