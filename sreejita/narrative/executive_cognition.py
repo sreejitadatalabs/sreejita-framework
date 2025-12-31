@@ -39,7 +39,9 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
 # RECOMMENDATION RANKING
 # =====================================================
 
-def rank_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def rank_recommendations(
+    recommendations: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
     Ranks recommendations by executive impact.
     Deterministic, confidence-weighted.
@@ -70,7 +72,7 @@ def rank_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Selects 3–5 KPIs suitable for executive consumption.
-    Falls back to highest-impact numeric KPIs if needed.
+    Canonical first, then magnitude-based fallback.
     """
 
     canonical_keys = [
@@ -91,7 +93,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "value": kpis[key],
             })
 
-    # 2️⃣ Fallback: highest-magnitude numeric KPIs
+    # 2️⃣ Fallback: highest-impact numeric KPIs
     if len(selected) < 3:
         numeric = [
             (k, v) for k, v in kpis.items()
@@ -120,7 +122,9 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 # INSIGHT PRIORITIZATION
 # =====================================================
 
-def extract_top_problems(insights: List[Dict[str, Any]]) -> List[str]:
+def extract_top_problems(
+    insights: List[Dict[str, Any]]
+) -> List[str]:
     """
     Extracts top executive problems by severity.
     """
@@ -134,7 +138,9 @@ def extract_top_problems(insights: List[Dict[str, Any]]) -> List[str]:
 
     ordered = sorted(
         insights or [],
-        key=lambda x: severity_rank.get(x.get("level", "INFO"), 3),
+        key=lambda x: severity_rank.get(
+            x.get("level", "INFO"), 3
+        ),
     )
 
     return [
@@ -159,11 +165,13 @@ def build_decision_snapshot(
     score = kpis.get("board_confidence_score", 0)
     risk = derive_risk_level(score)
 
+    trend = kpis.get("board_confidence_trend", "→")
+
     return {
         "title": "EXECUTIVE DECISION SNAPSHOT",
         "overall_risk": (
             f"{risk['icon']} {risk['label']} "
-            f"(Score: {risk['score']} / 100)"
+            f"(Score: {risk['score']} / 100, Trend: {trend})"
         ),
         "top_problems": extract_top_problems(insights),
         "decisions_required": [
@@ -178,7 +186,9 @@ def build_decision_snapshot(
 # SUCCESS CRITERIA
 # =====================================================
 
-def build_success_criteria(kpis: Dict[str, Any]) -> List[str]:
+def build_success_criteria(
+    kpis: Dict[str, Any]
+) -> List[str]:
     """
     Converts KPIs into measurable executive success signals.
     """
@@ -210,7 +220,11 @@ def build_executive_payload(
 ) -> Dict[str, Any]:
     """
     Single executive-ready cognition object.
-    This is the ONLY object consumed by PDF & UI layers.
+
+    🔒 This is the ONLY object consumed by:
+    - Hybrid report
+    - PDF renderer
+    - UI layer
     """
 
     ranked_actions = rank_recommendations(recommendations)
