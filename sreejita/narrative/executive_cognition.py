@@ -29,14 +29,14 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
                 "label": label,
                 "icon": icon,
                 "score": score,
-                "display": f"{icon} {label} (Score: {score} / 100)"
+                "display": f"{icon} {label} (Score: {score} / 100)",
             }
 
     return {
         "label": "CRITICAL",
         "icon": "🔴",
         "score": score,
-        "display": f"🔴 CRITICAL (Score: {score} / 100)"
+        "display": f"🔴 CRITICAL (Score: {score} / 100)",
     }
 
 
@@ -44,7 +44,9 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
 # RECOMMENDATION RANKING (EXECUTIVE SAFE)
 # =====================================================
 
-def rank_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def rank_recommendations(
+    recommendations: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
     Deterministic executive ranking.
     """
@@ -71,16 +73,18 @@ def rank_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str
 
 
 # =====================================================
-# EXECUTIVE KPI SELECTION (DOMAIN-AGNOSTIC)
+# EXECUTIVE KPI SELECTION (SUB-DOMAIN AWARE, SOFT)
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Selects 3–5 KPIs by executive relevance.
-    Rules:
-    - Prefer confidence & scale KPIs
-    - Fall back to magnitude
-    - Never exceed 5
+
+    Strategy:
+    - Confidence & maturity first
+    - Scale & cost next
+    - Duration / quality last
+    - Fallback to magnitude
     """
 
     if not isinstance(kpis, dict):
@@ -106,21 +110,25 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         if key in kpis and kpis[key] is not None:
             selected.append({
                 "name": key.replace("_", " ").title(),
-                "value": kpis[key]
+                "value": kpis[key],
             })
 
         if len(selected) >= 5:
             break
 
-    # 2️⃣ Fallback: largest numeric signals
+    # 2️⃣ Fallback: highest-magnitude numeric KPIs
     if len(selected) < 3:
         numeric = [
-            (k, v) for k, v in kpis.items()
+            (k, v)
+            for k, v in kpis.items()
             if isinstance(v, (int, float)) and v is not None
         ]
         numeric.sort(key=lambda x: abs(x[1]), reverse=True)
 
-        existing = {x["name"].lower().replace(" ", "_") for x in selected}
+        existing = {
+            x["name"].lower().replace(" ", "_")
+            for x in selected
+        }
 
         for k, v in numeric:
             if len(selected) >= 5:
@@ -128,7 +136,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
             if k not in existing:
                 selected.append({
                     "name": k.replace("_", " ").title(),
-                    "value": v
+                    "value": v,
                 })
 
     return selected[:5]
@@ -138,7 +146,9 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 # INSIGHT PRIORITIZATION
 # =====================================================
 
-def extract_top_problems(insights: List[Dict[str, Any]]) -> List[str]:
+def extract_top_problems(
+    insights: List[Dict[str, Any]]
+) -> List[str]:
     """
     Returns top 3 executive problems by severity.
     """
@@ -152,7 +162,7 @@ def extract_top_problems(insights: List[Dict[str, Any]]) -> List[str]:
 
     ordered = sorted(
         insights or [],
-        key=lambda x: severity_rank.get(x.get("level", "INFO"), 3)
+        key=lambda x: severity_rank.get(x.get("level", "INFO"), 3),
     )
 
     return [
@@ -196,7 +206,9 @@ def build_decision_snapshot(
 # SUCCESS CRITERIA
 # =====================================================
 
-def build_success_criteria(kpis: Dict[str, Any]) -> List[str]:
+def build_success_criteria(
+    kpis: Dict[str, Any]
+) -> List[str]:
     """
     Converts KPIs into outcome-oriented success signals.
     """
@@ -232,15 +244,16 @@ def build_executive_payload(
     """
 
     ranked_actions = rank_recommendations(recommendations)
+    primary_kpis = select_executive_kpis(kpis)
 
     return {
-        # 🔑 Snapshot for executives
+        # 🔑 Snapshot
         "snapshot": build_decision_snapshot(
             kpis, insights, recommendations
         ),
 
         # 🔑 KPIs (3–5)
-        "primary_kpis": select_executive_kpis(kpis),
+        "primary_kpis": primary_kpis,
 
         # 🔑 Problem framing
         "top_problems": extract_top_problems(insights),
@@ -253,4 +266,10 @@ def build_executive_payload(
 
         # 🔑 Outcome framing
         "success_criteria": build_success_criteria(kpis),
+
+        # 🔒 INTERNAL METADATA (for orchestrator / PDF safety)
+        "_executive": {
+            "primary_kpis": primary_kpis,
+            "sub_domain": kpis.get("sub_domain"),
+        },
     }
