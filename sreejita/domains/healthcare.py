@@ -183,7 +183,7 @@ class HealthcareMapping:
         variances: List[float] = []
         
         # [UPDATE] Added 'device' to grouping keys for Digital Health support
-        for group_key in ("facility", "doctor", "device"):
+        for group_key in ("facility", "doctor", "device", "encounter"):
             group_col = self.c.get(group_key)
 
             if not group_col or group_col not in self.df.columns: continue
@@ -274,8 +274,10 @@ def detect_subdomain_and_capabilities(
     duration_col = cols.get("duration")
 
     if duration_col and duration_col in df.columns:
-        raw_name = duration_col.lower()
-        ACCESS_TOKENS = {"wait", "queue", "access", "turnaround"}
+        # Check if the actual column header implies waiting or access issues
+        raw_name = str(duration_col).lower()
+        ACCESS_TOKENS = {"wait", "queue", "access", "turnaround", "delay", "lag", "appointment"}
+        
         if any(tok in raw_name for tok in ACCESS_TOKENS):
             caps.add(HealthcareCapability.ACCESS)
 
@@ -506,7 +508,7 @@ class HealthcareDomain(BaseDomain):
             "sub_domain": sub.value,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
-            "total_volume": len(df),
+            "total_volume": (m.volume() if sub == HealthcareSubDomain.PUBLIC_HEALTH else len(df)),
             "total_records": len(df),
             "total_entities": m.volume(),
             "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
@@ -659,8 +661,8 @@ class HealthcareDomain(BaseDomain):
             # Only rate numeric metrics, ignore metadata strings
             if isinstance(v, (int, float)):
                 # Heuristic: Confidence is data_completeness boosted slightly, capped at 1.0
-                kpi_confidence[k] = round(min(1.0, completeness + 0.2), 2)
-
+                boost = 0.2 if len(df) >= 100 else 0.1
+                kpi_confidence[k] = round(min(1.0, completeness + boost), 2)
         kpis["_confidence"] = kpi_confidence
 
         # Executive Selection
