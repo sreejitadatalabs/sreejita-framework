@@ -27,7 +27,6 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload.setdefault("visuals", [])
     payload.setdefault("insights", [])
     payload.setdefault("recommendations", [])
-    payload.setdefault("scorecard", {})
     return payload
 
 
@@ -71,6 +70,14 @@ class ExecutivePDFRenderer:
 
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
+
+        # 🔑 Enforce importance ordering for visuals
+        payload["visuals"] = sorted(
+            payload.get("visuals", []),
+            key=lambda x: x.get("importance", 0),
+            reverse=True
+        )
+
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +94,7 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # SAFE CUSTOM STYLES (NO NAME COLLISION)
+        # SAFE CUSTOM STYLES
         # -------------------------------------------------
         styles.add(ParagraphStyle(
             name="ExecTitle",
@@ -119,7 +126,7 @@ class ExecutivePDFRenderer:
         ))
 
         # =================================================
-        # COVER PAGE (BRANDED)
+        # COVER PAGE
         # =================================================
         story.append(Paragraph(
             "SREEJITA INTELLIGENCE FRAMEWORK™",
@@ -131,9 +138,13 @@ class ExecutivePDFRenderer:
             styles["ExecSection"]
         ))
 
+        risk = "-"
+        if payload.get("executive_snapshot"):
+            risk = payload["executive_snapshot"].get("overall_risk", "-")
+
         story.append(Paragraph(
             f"Domain: Healthcare Operations<br/>"
-            f"Confidence Level: {payload['scorecard'].get('risk_label', 'N/A')}<br/>"
+            f"Confidence Level: {risk}<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
             styles["ExecBody"]
         ))
@@ -148,12 +159,14 @@ class ExecutivePDFRenderer:
         story.append(PageBreak())
 
         # =================================================
-        # EXECUTIVE DECISION SNAPSHOT (PAGE 1)
+        # EXECUTIVE DECISION SNAPSHOT
         # =================================================
         snapshot = payload.get("executive_snapshot")
         if snapshot:
-            story.append(Paragraph(snapshot.get("title", "EXECUTIVE DECISION SNAPSHOT"),
-                                   styles["ExecSection"]))
+            story.append(Paragraph(
+                snapshot.get("title", "EXECUTIVE DECISION SNAPSHOT"),
+                styles["ExecSection"]
+            ))
 
             story.append(Paragraph(
                 f"<b>Overall Risk:</b> {snapshot.get('overall_risk', '-')}",
@@ -200,10 +213,11 @@ class ExecutivePDFRenderer:
 
             table_data = [["Metric", "Value"]]
             for item in payload["primary_kpis"][:5]:
-                table_data.append([
-                    item.get("name", "-"),
-                    format_kpi_value(item.get("name", ""), item.get("value"))
-                ])
+                if "name" in item and "value" in item:
+                    table_data.append([
+                        item["name"],
+                        format_kpi_value(item["name"], item["value"])
+                    ])
 
             table = Table(table_data, colWidths=[4 * inch, 2 * inch])
             table.setStyle(TableStyle([
@@ -231,12 +245,15 @@ class ExecutivePDFRenderer:
                     h = min((ih / iw) * w, 5 * inch)
 
                     story.append(Image(str(path), width=w, height=h))
-                    story.append(Paragraph(vis.get("caption", ""), styles["ExecCaption"]))
+                    story.append(Paragraph(
+                        vis.get("caption", ""),
+                        styles["ExecCaption"]
+                    ))
 
             story.append(PageBreak())
 
         # =================================================
-        # INSIGHTS (TOP 3–5 ONLY)
+        # INSIGHTS (TOP 3–5)
         # =================================================
         if payload["insights"]:
             story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
@@ -246,13 +263,16 @@ class ExecutivePDFRenderer:
                     f"<b>{i.get('level','INFO')}:</b> {i.get('title','')}",
                     styles["ExecBody"]
                 ))
-                story.append(Paragraph(i.get("so_what", ""), styles["ExecBody"]))
+                story.append(Paragraph(
+                    i.get("so_what", ""),
+                    styles["ExecBody"]
+                ))
                 story.append(Spacer(1, 8))
 
             story.append(PageBreak())
 
         # =================================================
-        # RECOMMENDATIONS (DECISION FRAMED)
+        # RECOMMENDATIONS
         # =================================================
         if payload["recommendations"]:
             story.append(Paragraph("Recommendations", styles["ExecSection"]))
@@ -276,7 +296,10 @@ class ExecutivePDFRenderer:
                     meta.append(f"Success: {r['expected_outcome']}")
 
                 if meta:
-                    story.append(Paragraph(" | ".join(meta), styles["ExecCaption"]))
+                    story.append(Paragraph(
+                        " | ".join(meta),
+                        styles["ExecCaption"]
+                    ))
 
                 story.append(Spacer(1, 10))
 
