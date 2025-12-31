@@ -31,6 +31,7 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
                 "score": score,
             }
 
+    # Absolute fallback
     return {"label": "CRITICAL", "icon": "🔴", "score": score}
 
 
@@ -38,7 +39,7 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
 # RECOMMENDATION RANKING
 # =====================================================
 
-def rank_recommendations(recommendations: List[Dict]) -> List[Dict]:
+def rank_recommendations(recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Ranks recommendations by executive impact.
     Deterministic, confidence-weighted.
@@ -63,13 +64,13 @@ def rank_recommendations(recommendations: List[Dict]) -> List[Dict]:
 
 
 # =====================================================
-# EXECUTIVE KPI SELECTION
+# EXECUTIVE KPI SELECTION (3–5 ONLY)
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Selects 3–5 KPIs suitable for executive consumption.
-    Uses dynamic fallback if canonical KPIs are missing.
+    Falls back to highest-impact numeric KPIs if needed.
     """
 
     canonical_keys = [
@@ -90,7 +91,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "value": kpis[key],
             })
 
-    # 2️⃣ Fallback: highest-impact numeric KPIs
+    # 2️⃣ Fallback: highest-magnitude numeric KPIs
     if len(selected) < 3:
         numeric = [
             (k, v) for k, v in kpis.items()
@@ -98,12 +99,15 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         ]
         numeric.sort(key=lambda x: abs(x[1]), reverse=True)
 
-        existing_keys = {x["name"].lower().replace(" ", "_") for x in selected}
+        existing = {
+            x["name"].lower().replace(" ", "_")
+            for x in selected
+        }
 
         for k, v in numeric:
             if len(selected) >= 5:
                 break
-            if k not in existing_keys:
+            if k not in existing:
                 selected.append({
                     "name": k.replace("_", " ").title(),
                     "value": v,
@@ -116,9 +120,9 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 # INSIGHT PRIORITIZATION
 # =====================================================
 
-def extract_top_problems(insights: List[Dict]) -> List[str]:
+def extract_top_problems(insights: List[Dict[str, Any]]) -> List[str]:
     """
-    Extracts top executive problems in severity order.
+    Extracts top executive problems by severity.
     """
 
     severity_rank = {
@@ -145,8 +149,8 @@ def extract_top_problems(insights: List[Dict]) -> List[str]:
 
 def build_decision_snapshot(
     kpis: Dict[str, Any],
-    insights: List[Dict],
-    recommendations: List[Dict],
+    insights: List[Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
     Constructs a decisive, scan-ready executive snapshot.
@@ -155,12 +159,13 @@ def build_decision_snapshot(
     score = kpis.get("board_confidence_score", 0)
     risk = derive_risk_level(score)
 
-    top_problems = extract_top_problems(insights)
-
     return {
         "title": "EXECUTIVE DECISION SNAPSHOT",
-        "overall_risk": f"{risk['icon']} {risk['label']} (Score: {risk['score']} / 100)",
-        "top_problems": top_problems,
+        "overall_risk": (
+            f"{risk['icon']} {risk['label']} "
+            f"(Score: {risk['score']} / 100)"
+        ),
+        "top_problems": extract_top_problems(insights),
         "decisions_required": [
             "Approve corrective initiative",
             "Assign executive owner",
@@ -187,7 +192,9 @@ def build_success_criteria(kpis: Dict[str, Any]) -> List[str]:
         if len(criteria) >= 4:
             break
         if isinstance(v, (int, float)) and v > 0:
-            criteria.append(f"{k.replace('_', ' ').title()} → Improve vs baseline")
+            criteria.append(
+                f"{k.replace('_', ' ').title()} → Improve vs baseline"
+            )
 
     return criteria
 
@@ -198,11 +205,12 @@ def build_success_criteria(kpis: Dict[str, Any]) -> List[str]:
 
 def build_executive_payload(
     kpis: Dict[str, Any],
-    insights: List[Dict],
-    recommendations: List[Dict],
+    insights: List[Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
     Single executive-ready cognition object.
+    This is the ONLY object consumed by PDF & UI layers.
     """
 
     ranked_actions = rank_recommendations(recommendations)
