@@ -489,7 +489,7 @@ class HealthcareDomain(BaseDomain):
                 df.set_index(self.time_col).resample("M").size().plot(ax=ax, linewidth=2)
                 ax.set_title("Activity Volume Over Time", fontweight="bold")
                 ax.grid(True, alpha=0.2)
-                save(fig, "vol_trend.png", "Observed activity volume across time.", 0.99)
+                save(fig, "vol_trend.png", "Observed activity volume across time → Sustained high throughput amplifies LOS-driven capacity loss.", 0.99)
             except: pass
         
         # 2. LOS
