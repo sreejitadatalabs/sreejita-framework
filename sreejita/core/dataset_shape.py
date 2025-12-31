@@ -10,7 +10,7 @@ import pandas as pd
 class DatasetShape(str, Enum):
     """
     Structural shape of the dataset.
-    This is CONTEXT only — never business logic.
+    CONTEXT only — never business logic.
     """
     ROW_LEVEL_CLINICAL = "row_level_clinical"
     AGGREGATED_OPERATIONAL = "aggregated_operational"
@@ -31,13 +31,6 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
     - No thresholds
     - No ML
     - Deterministic & explainable
-
-    Returns:
-        {
-            "shape": DatasetShape,
-            "score": Dict[DatasetShape, int],
-            "signals": Dict[str, bool]
-        }
     """
 
     if df is None or df.empty:
@@ -64,30 +57,67 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
         "time_dimension": False,
         "aggregation_keywords": False,
         "financial_keywords": False,
+        "entity_keywords": False,     # NEW
+        "population_keywords": False, # NEW
     }
 
     # -------------------------------------------------
     # ROW-LEVEL CLINICAL SIGNALS
     # -------------------------------------------------
     if any(
-        any(k in c for k in ["patient", "mrn", "pid", "encounter", "visit", "admission"])
+        any(k in c for k in [
+            "patient", "mrn", "pid",
+            "encounter", "visit", "admission"
+        ])
         for c in cols
     ):
         score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
         signals["patient_identifier"] = True
 
     if any(
-        any(k in c for k in ["date", "time", "admit", "arrival", "discharge"])
+        any(k in c for k in [
+            "date", "time", "admit",
+            "arrival", "discharge", "sample_date"
+        ])
         for c in cols
     ):
         score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
         signals["time_dimension"] = True
 
     # -------------------------------------------------
+    # ENTITY-LEVEL (DIAGNOSTICS / FACILITY / REGION)
+    # -------------------------------------------------
+    if any(
+        any(k in c for k in [
+            "test", "lab", "specimen",
+            "facility", "center", "provider"
+        ])
+        for c in cols
+    ):
+        score[DatasetShape.ROW_LEVEL_CLINICAL] += 1
+        signals["entity_keywords"] = True
+
+    # -------------------------------------------------
+    # POPULATION / PUBLIC HEALTH SIGNALS
+    # -------------------------------------------------
+    if any(
+        any(k in c for k in [
+            "population", "region", "district",
+            "state", "country", "incidence", "prevalence"
+        ])
+        for c in cols
+    ):
+        score[DatasetShape.AGGREGATED_OPERATIONAL] += 2
+        signals["population_keywords"] = True
+
+    # -------------------------------------------------
     # AGGREGATED OPERATIONAL SIGNALS
     # -------------------------------------------------
     if any(
-        any(k in c for k in ["total", "count", "volume", "census", "avg", "mean"])
+        any(k in c for k in [
+            "total", "count", "volume",
+            "census", "avg", "mean", "rate"
+        ])
         for c in cols
     ):
         score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
@@ -97,16 +127,19 @@ def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
     # FINANCIAL SUMMARY SIGNALS
     # -------------------------------------------------
     if any(
-        any(k in c for k in ["revenue", "cost", "billing", "charges", "amount", "expense"])
+        any(k in c for k in [
+            "revenue", "cost", "billing",
+            "charges", "amount", "expense",
+            "claim", "payment"
+        ])
         for c in cols
     ):
-        score[DatasetShape.FINANCIAL_SUMMARY] += 2
+        score[DatasetShape.FINANCIAL_SUMMARY] += 3
         signals["financial_keywords"] = True
 
     # -------------------------------------------------
     # FINAL DECISION (PRIORITIZED)
     # -------------------------------------------------
-    # Rule-based override: clinical beats aggregated if strong
     if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 4:
         shape = DatasetShape.ROW_LEVEL_CLINICAL
     else:
