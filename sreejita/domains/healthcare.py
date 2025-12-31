@@ -222,24 +222,6 @@ EXPECTED_METRICS = {
     CareContext.UNKNOWN: {}
 }
 
-def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
-    cols = [c.lower().strip().replace(" ", "_") for c in df.columns]
-    score = {k: 0 for k in DatasetShape}
-
-    if any(x in c for c in cols for x in ["patient", "mrn", "pid", "id", "name", "encounter", "visit"]): 
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
-    if any(x in c for c in cols for x in ["admit", "admission", "date", "joining", "test_date", "arrival"]): 
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
-    if any(x in c for c in cols for x in ["total", "volume", "census", "visits"]): 
-        score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
-    if any(x in c for c in cols for x in ["revenue", "bill", "cost", "fee", "amount"]): 
-        score[DatasetShape.FINANCIAL_SUMMARY] += 2
-
-    best = max(score, key=score.get)
-    if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 3: best = DatasetShape.ROW_LEVEL_CLINICAL
-    if score[best] == 0: best = DatasetShape.UNKNOWN
-    return {"shape": best, "score": score}
-
 def _get_trend_explanation(trend_arrow):
     if trend_arrow == "→": return "Flat trend indicates no sustained improvement over prior period."
     if trend_arrow == "↑": return "Increasing trend requires immediate variance control."
@@ -503,7 +485,7 @@ class HealthcareDomain(BaseDomain):
         if self.time_col:
             try:
                 fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(self.time_col).resample("ME").size().plot(ax=ax, linewidth=2)
+                df.set_index(self.time_col).resample("M").size().plot(ax=ax, linewidth=2)
                 ax.set_title("Activity Volume Over Time", fontweight="bold")
                 ax.grid(True, alpha=0.2)
                 save(fig, "vol_trend.png", "Observed activity volume across time.", 0.99)
@@ -610,15 +592,43 @@ class HealthcareDomain(BaseDomain):
                 save(fig, "category_mix.png", "Composition by category type.", 0.55)
             except: pass
         
-        # 11. Temporal
-        if self.time_col:
+        # 11. Temporal (Weekday Pattern) — SAFE, NO DF MUTATION
+        if self.time_col and self.time_col in df.columns:
             try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df["_dow"] = df[self.time_col].dt.day_name()
-                df["_dow"].value_counts().reindex(["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]).plot(kind="bar", ax=ax)
-                ax.set_title("Temporal Pattern")
-                save(fig, "temporal_pattern.png", "Activity distribution by weekday.", 0.50)
-            except: pass
+                # Drop null timestamps safely
+                time_series = df[self.time_col].dropna()
+        
+                if not time_series.empty:
+                    # Extract weekday names WITHOUT writing back to df
+                    dow = time_series.dt.day_name()
+        
+                    # Enforce logical weekday order
+                    weekday_order = [
+                        "Monday", "Tuesday", "Wednesday",
+                        "Thursday", "Friday", "Saturday", "Sunday"
+                    ]
+        
+                    counts = (
+                        dow.value_counts()
+                           .reindex(weekday_order, fill_value=0)
+                    )
+        
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    counts.plot(kind="bar", ax=ax)
+        
+                    ax.set_title("Temporal Activity Pattern", fontweight="bold")
+                    ax.set_xlabel("Day of Week")
+                    ax.set_ylabel("Volume")
+                    ax.grid(axis="y", alpha=0.3)
+        
+                    save(
+                        fig,
+                        "temporal_pattern.png",
+                        "Activity distribution by weekday → Highlights operational load concentration.",
+                        0.50
+                    )
+            except Exception:
+                pass
         
         return sorted(visuals, key=lambda x: x["importance"], reverse=True)
     
@@ -722,7 +732,7 @@ class HealthcareDomain(BaseDomain):
         while len(insights) < 7:
             insights.append({
                 "level": "INFO",
-                "title": f"Operational Observation #{len(insights)+1}",
+                "title": f"Operational Stability Observed #{len(insights)+1}",
                 "so_what": "No additional statistically significant anomalies detected.",
                 "source": "System Generated"
             })
