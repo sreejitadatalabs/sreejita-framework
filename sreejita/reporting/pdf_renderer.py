@@ -71,7 +71,7 @@ class ExecutivePDFRenderer:
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
 
-        # 🔑 Enforce importance ordering for visuals
+        # Enforce importance ordering for visuals
         payload["visuals"] = sorted(
             payload.get("visuals", []),
             key=lambda x: x.get("importance", 0),
@@ -94,36 +94,40 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # SAFE CUSTOM STYLES
+        # SAFE CUSTOM STYLES (NO COLLISION)
         # -------------------------------------------------
-        styles.add(ParagraphStyle(
-            name="ExecTitle",
+        def _add_style(name, **kwargs):
+            if name not in styles:
+                styles.add(ParagraphStyle(name=name, **kwargs))
+
+        _add_style(
+            "ExecTitle",
             fontSize=22,
             alignment=TA_CENTER,
             spaceAfter=18,
             fontName="Helvetica-Bold",
             textColor=self.PRIMARY
-        ))
-        styles.add(ParagraphStyle(
-            name="ExecSection",
+        )
+        _add_style(
+            "ExecSection",
             fontSize=15,
             spaceBefore=18,
             spaceAfter=10,
             fontName="Helvetica-Bold"
-        ))
-        styles.add(ParagraphStyle(
-            name="ExecBody",
+        )
+        _add_style(
+            "ExecBody",
             fontSize=11,
             leading=15,
             spaceAfter=6
-        ))
-        styles.add(ParagraphStyle(
-            name="ExecCaption",
+        )
+        _add_style(
+            "ExecCaption",
             fontSize=9,
             alignment=TA_CENTER,
             textColor=HexColor("#6b7280"),
             spaceAfter=12
-        ))
+        )
 
         # =================================================
         # COVER PAGE
@@ -150,12 +154,10 @@ class ExecutivePDFRenderer:
         ))
 
         story.append(Spacer(1, 12))
-
         story.append(Paragraph(
             "Prepared by: <b>Sreejita Data Labs</b>",
             styles["ExecBody"]
         ))
-
         story.append(PageBreak())
 
         # =================================================
@@ -174,19 +176,16 @@ class ExecutivePDFRenderer:
             ))
 
             story.append(Spacer(1, 8))
-
             story.append(Paragraph("<b>Top Problems:</b>", styles["ExecBody"]))
-            for p in snapshot.get("top_problems", []):
+            for p in snapshot.get("top_problems", [])[:3]:
                 story.append(Paragraph(f"• {p}", styles["ExecBody"]))
 
             story.append(Spacer(1, 8))
-
             story.append(Paragraph("<b>Decisions Required:</b>", styles["ExecBody"]))
-            for d in snapshot.get("decisions_required", []):
+            for d in snapshot.get("decisions_required", [])[:3]:
                 story.append(Paragraph(f"☐ {d}", styles["ExecBody"]))
 
             story.append(Spacer(1, 10))
-
             story.append(Paragraph(
                 "<b>Confidence Scale:</b> "
                 "85–100 = 🟢 Green | 70–84 = 🟡 Yellow | "
@@ -219,16 +218,16 @@ class ExecutivePDFRenderer:
                         format_kpi_value(item["name"], item["value"])
                     ])
 
-            table = Table(table_data, colWidths=[4 * inch, 2 * inch])
-            table.setStyle(TableStyle([
-                ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
-                ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("PADDING", (0, 0), (-1, -1), 8),
-            ]))
-
-            story.append(table)
-            story.append(PageBreak())
+            if len(table_data) > 1:
+                table = Table(table_data, colWidths=[4 * inch, 2 * inch])
+                table.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+                    ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("PADDING", (0, 0), (-1, -1), 8),
+                ]))
+                story.append(table)
+                story.append(PageBreak())
 
         # =================================================
         # VISUAL EVIDENCE (MAX 6)
@@ -243,12 +242,8 @@ class ExecutivePDFRenderer:
                     iw, ih = img.getSize()
                     w = 6 * inch
                     h = min((ih / iw) * w, 5 * inch)
-
                     story.append(Image(str(path), width=w, height=h))
-                    story.append(Paragraph(
-                        vis.get("caption", ""),
-                        styles["ExecCaption"]
-                    ))
+                    story.append(Paragraph(vis.get("caption", ""), styles["ExecCaption"]))
 
             story.append(PageBreak())
 
@@ -257,18 +252,13 @@ class ExecutivePDFRenderer:
         # =================================================
         if payload["insights"]:
             story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
-
             for i in payload["insights"][:5]:
                 story.append(Paragraph(
                     f"<b>{i.get('level','INFO')}:</b> {i.get('title','')}",
                     styles["ExecBody"]
                 ))
-                story.append(Paragraph(
-                    i.get("so_what", ""),
-                    styles["ExecBody"]
-                ))
+                story.append(Paragraph(i.get("so_what", ""), styles["ExecBody"]))
                 story.append(Spacer(1, 8))
-
             story.append(PageBreak())
 
         # =================================================
@@ -296,15 +286,9 @@ class ExecutivePDFRenderer:
                     meta.append(f"Success: {r['expected_outcome']}")
 
                 if meta:
-                    story.append(Paragraph(
-                        " | ".join(meta),
-                        styles["ExecCaption"]
-                    ))
+                    story.append(Paragraph(" | ".join(meta), styles["ExecCaption"]))
 
                 story.append(Spacer(1, 10))
 
-        # =================================================
-        # BUILD DOCUMENT
-        # =================================================
         doc.build(story)
         return output_path
