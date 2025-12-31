@@ -10,6 +10,7 @@ from matplotlib.ticker import FuncFormatter
 from sreejita.core.column_resolver import resolve_column
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
+from sreejita.core.dataset_shape import detect_dataset_shape
 
 # =====================================================
 # HEALTHCARE DOMAIN MAPPING (DOMAIN-SIDE ONLY)
