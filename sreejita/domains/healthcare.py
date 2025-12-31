@@ -830,13 +830,9 @@ class HealthcareDomain(BaseDomain):
     ) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
     
-        # -------------------------------------------------
-        # CONTEXT
-        # -------------------------------------------------
         sub_domain = kpis.get("sub_domain", "unknown")
         caps = set(kpis.get("capabilities", []))
     
-        # Helper
         def add(level, title, so_what, source="System Analysis", executive=False):
             insights.append({
                 "level": level,
@@ -847,175 +843,218 @@ class HealthcareDomain(BaseDomain):
             })
     
         # =================================================
-        # 1. DATA QUALITY FOUNDATION (ALWAYS)
+        # 1. DATA TRUST FOUNDATION (ALWAYS FIRST)
         # =================================================
         dc = kpis.get("data_completeness")
         if isinstance(dc, (int, float)):
-            if dc < 0.85:
+            if dc < 0.80:
+                add(
+                    "CRITICAL",
+                    "Low Data Reliability",
+                    "Key fields contain significant missing values. Decisions based on this data carry elevated risk.",
+                    "Data Quality Assessment",
+                    True
+                )
+            elif dc < 0.90:
                 add(
                     "RISK",
-                    "Data Quality Constraint",
-                    "A material portion of required fields is missing. Analytical confidence and downstream decision reliability are reduced.",
-                    "Data Integrity Check",
+                    "Moderate Data Gaps Detected",
+                    "Some data incompleteness exists. Findings should be reviewed with caution.",
+                    "Data Quality Assessment"
+                )
+            else:
+                add(
+                    "INFO",
+                    "High Data Reliability",
+                    "Data completeness supports confident operational and executive analysis.",
+                    "Data Quality Assessment"
+                )
+    
+        # =================================================
+        # 2. SCALE & DEMAND PRESSURE
+        # =================================================
+        vol = kpis.get("total_volume")
+        if isinstance(vol, (int, float)):
+            if vol > 100_000:
+                add(
+                    "INFO",
+                    "Large-Scale Operations Detected",
+                    "High activity volume amplifies the financial and operational impact of inefficiencies.",
+                    "Demand Analysis",
                     True
                 )
             else:
                 add(
                     "INFO",
-                    "Sufficient Data Coverage",
-                    "Available data is sufficiently complete to support reliable operational analysis.",
-                    "Data Integrity Check"
+                    "Moderate Operational Scale",
+                    "Observed volume suggests localized or specialized operations.",
+                    "Demand Analysis"
                 )
     
         # =================================================
-        # 2. VOLUME SIGNAL (UNIVERSAL)
+        # 3. TIME / FLOW BOTTLENECKS
         # =================================================
-        vol = kpis.get("total_volume") or kpis.get("total_patients") or kpis.get("total_encounters")
-        if isinstance(vol, (int, float)):
-            add(
-                "INFO",
-                "Operational Demand Observed",
-                f"Observed activity volume is {int(vol):,}. Scale effects amplify the impact of inefficiencies.",
-                "Volume Analysis"
-            )
+        long_rate = kpis.get("long_duration_rate")
+        avg_dur = kpis.get("avg_duration")
+    
+        if isinstance(long_rate, (int, float)):
+            if long_rate > 0.25:
+                add(
+                    "CRITICAL",
+                    "Severe Flow Bottleneck",
+                    "A significant share of cases exceed expected processing time, constraining throughput and capacity.",
+                    "Flow Analysis",
+                    True
+                )
+            elif long_rate > 0.10:
+                add(
+                    "WARNING",
+                    "Emerging Flow Inefficiency",
+                    "A noticeable portion of cases are delayed, indicating early-stage bottlenecks.",
+                    "Flow Analysis"
+                )
+            else:
+                add(
+                    "INFO",
+                    "Process Flow Within Norms",
+                    "Most cases complete within expected time ranges.",
+                    "Flow Analysis"
+                )
     
         # =================================================
-        # 3. TIME / DURATION BOTTLENECK
+        # 4. COST & ECONOMIC PRESSURE
         # =================================================
-        long_rate = kpis.get("long_duration_rate") or kpis.get("long_stay_rate")
-        avg_dur = kpis.get("avg_duration") or kpis.get("avg_los")
-    
-        if isinstance(long_rate, (int, float)) and long_rate > 0.2:
-            label = kpis.get("duration_label", "process duration")
-            add(
-                "CRITICAL",
-                "Process Bottleneck Identified",
-                f"A high proportion of records exhibit extended {label}. This directly constrains throughput and capacity.",
-                "Duration Distribution",
-                True
-            )
-        elif isinstance(avg_dur, (int, float)):
-            add(
-                "INFO",
-                "Stable Process Timing",
-                "Average process duration remains within expected operational bounds.",
-                "Duration Analysis"
-            )
-    
-        # =================================================
-        # 4. COST PRESSURE SIGNAL
-        # =================================================
-        avg_cost = kpis.get("avg_unit_cost") or kpis.get("avg_cost_per_patient")
+        avg_cost = kpis.get("avg_unit_cost")
         cost_trend = kpis.get("cost_trend")
     
-        if isinstance(avg_cost, (int, float)) and cost_trend == "↑":
-            add(
-                "WARNING",
-                "Rising Unit Cost Trend",
-                "Average cost per unit is increasing over time, indicating emerging financial pressure.",
-                "Cost Trend Analysis",
-                True
-            )
-        elif isinstance(avg_cost, (int, float)):
-            add(
-                "INFO",
-                "Cost Levels Observed",
-                "Unit cost levels appear stable based on available data.",
-                "Cost Analysis"
-            )
+        if isinstance(avg_cost, (int, float)):
+            if cost_trend == "↑":
+                add(
+                    "WARNING",
+                    "Unit Cost Escalation",
+                    "Rising unit costs indicate growing financial pressure requiring intervention.",
+                    "Cost Dynamics",
+                    True
+                )
+            elif cost_trend == "↓":
+                add(
+                    "INFO",
+                    "Improving Cost Efficiency",
+                    "Recent trends suggest better cost control and efficiency gains.",
+                    "Cost Dynamics"
+                )
+            else:
+                add(
+                    "INFO",
+                    "Stable Cost Structure",
+                    "Unit cost levels remain stable over the observed period.",
+                    "Cost Dynamics"
+                )
     
         # =================================================
-        # 5. QUALITY / RISK SIGNAL
+        # 5. QUALITY & RISK SIGNALS
         # =================================================
         quality_rate = (
             kpis.get("adverse_event_rate")
-            or kpis.get("readmission_rate")
+            or kpis.get("no_show_rate")
+            or kpis.get("out_of_range_result_rate")
         )
     
         if isinstance(quality_rate, (int, float)):
-            if quality_rate > 0.15:
-                label = kpis.get("quality_label", "adverse events")
+            if quality_rate > 0.20:
                 add(
                     "CRITICAL",
                     "Elevated Quality Risk",
-                    f"Observed rate of {label} is materially elevated, increasing operational and reputational risk.",
-                    "Quality Signal",
+                    "Observed quality-related events exceed acceptable thresholds, increasing operational and reputational exposure.",
+                    "Quality Signals",
                     True
+                )
+            elif quality_rate > 0.10:
+                add(
+                    "RISK",
+                    "Moderate Quality Degradation",
+                    "Quality indicators show early warning signs of instability.",
+                    "Quality Signals"
                 )
             else:
                 add(
                     "INFO",
-                    "Quality Signals Within Range",
-                    "Observed quality-related event rates do not indicate systemic instability.",
-                    "Quality Signal"
+                    "Quality Performance Stable",
+                    "Quality-related indicators remain within expected bounds.",
+                    "Quality Signals"
                 )
     
         # =================================================
-        # 6. VARIANCE SIGNAL (FACILITY / PROVIDER / CATEGORY)
+        # 6. VARIABILITY & EXECUTION CONSISTENCY
         # =================================================
-        var_score = kpis.get("variance_score") or kpis.get("facility_variance_score")
-        if isinstance(var_score, (int, float)) and var_score > 0.5:
-            add(
-                "RISK",
-                "High Operational Variability",
-                "Significant variation exists across entities, indicating inconsistent execution and opportunity for standardization.",
-                "Variance Analysis",
-                True
-            )
-        else:
-            add(
-                "INFO",
-                "Controlled Operational Variability",
-                "Performance variation across entities appears limited.",
-                "Variance Analysis"
-            )
-    
-        # =================================================
-        # 7. TREND MOMENTUM SIGNAL
-        # =================================================
-        trend = (
-            kpis.get("avg_duration_trend")
-            or kpis.get("los_trend")
-            or kpis.get("volume_trend")
-        )
-    
-        if trend == "↑":
-            add(
-                "WARNING",
-                "Negative Momentum Detected",
-                "Recent trend indicates worsening performance trajectory requiring attention.",
-                "Trend Analysis"
-            )
-        elif trend == "↓":
-            add(
-                "INFO",
-                "Positive Momentum Detected",
-                "Recent trend indicates improving operational performance.",
-                "Trend Analysis"
-            )
-        else:
-            add(
-                "INFO",
-                "Stable Performance Trend",
-                "No sustained directional trend detected in recent periods.",
-                "Trend Analysis"
-            )
-    
-        # =================================================
-        # GUARANTEE: MINIMUM 7 INSIGHTS
-        # =================================================
-        seen_titles = set(i["title"] for i in insights)
-        while len(insights) < 7:
-            title = f"Operational Observation #{len(insights)+1}"
-            if title not in seen_titles:
+        var = kpis.get("variance_score")
+        if isinstance(var, (int, float)):
+            if var > 0.60:
+                add(
+                    "RISK",
+                    "Highly Inconsistent Execution",
+                    "Significant performance variation exists across entities, indicating weak standardization.",
+                    "Variance Analysis",
+                    True
+                )
+            elif var > 0.30:
+                add(
+                    "WARNING",
+                    "Moderate Execution Variability",
+                    "Some inconsistency exists across entities, suggesting improvement opportunities.",
+                    "Variance Analysis"
+                )
+            else:
                 add(
                     "INFO",
-                    title,
-                    "No additional statistically significant anomalies detected in available data.",
-                    "System Generated"
+                    "Consistent Operational Execution",
+                    "Performance appears relatively uniform across observed entities.",
+                    "Variance Analysis"
                 )
-                seen_titles.add(title) 
-                
+    
+        # =================================================
+        # 7. MOMENTUM & TRAJECTORY
+        # =================================================
+        momentum = (
+            kpis.get("volume_trend")
+            or kpis.get("avg_duration_trend")
+            or kpis.get("cost_trend")
+        )
+    
+        if momentum == "↑":
+            add(
+                "WARNING",
+                "Negative Performance Momentum",
+                "Recent trends indicate deteriorating performance that may accelerate without intervention.",
+                "Trend Analysis",
+                True
+            )
+        elif momentum == "↓":
+            add(
+                "INFO",
+                "Positive Performance Momentum",
+                "Recent trends indicate improving operational performance.",
+                "Trend Analysis"
+            )
+        else:
+            add(
+                "INFO",
+                "Stable Performance Trajectory",
+                "No strong directional trend detected in recent periods.",
+                "Trend Analysis"
+            )
+    
+        # =================================================
+        # 8. GUARANTEE MINIMUM EXECUTIVE COVERAGE
+        # =================================================
+        while len(insights) < 8:
+            add(
+                "INFO",
+                f"Operational Observation #{len(insights) + 1}",
+                "No additional statistically significant anomalies detected.",
+                "System Generated"
+            )
+    
         return insights
 
     def generate_recommendations(
