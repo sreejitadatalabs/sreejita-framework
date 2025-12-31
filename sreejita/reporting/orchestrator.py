@@ -8,7 +8,7 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
-# 🧠 EXECUTIVE COGNITION (DECISION INTELLIGENCE)
+# 🧠 EXECUTIVE COGNITION
 from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
@@ -22,7 +22,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
 
     if suffix == ".csv":
-        for enc in (None, "latin-1", "cp1252"):
+        for enc in (None, "utf-8", "latin-1", "cp1252"):
             try:
                 return pd.read_csv(path, encoding=enc)
             except Exception:
@@ -67,24 +67,31 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA
+    # 1. LOAD DATA (IMMUTABLE BASE)
     # -------------------------------------------------
-    df = _read_tabular_file_safe(input_path)
+    base_df = _read_tabular_file_safe(input_path)
+
+    if base_df.empty:
+        log.warning("Input file is empty: %s", input_path)
 
     # -------------------------------------------------
     # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     try:
-        shape_info = detect_dataset_shape(df)
+        shape_info = detect_dataset_shape(base_df)
         log.info("Dataset shape detected: %s", shape_info.get("shape"))
     except Exception as e:
-        log.warning("Shape detection failed: %s", e)
-        shape_info = {"shape": "unknown", "score": {}}
+        log.exception("Shape detection failed")
+        shape_info = {
+            "shape": "unknown",
+            "score": {},
+            "signals": {}
+        }
 
     # -------------------------------------------------
     # 3. DOMAIN DECISION
     # -------------------------------------------------
-    decision = decide_domain(df)
+    decision = decide_domain(base_df)
     domain = decision.selected_domain
     engine = decision.engine
 
@@ -101,14 +108,21 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "recommendations": [],
                 "visuals": [],
                 "shape": shape_info,
-                "executive": {},   # 🔑 keep contract consistent
+                "executive": {},
             }
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (DEFENSIVE)
+    # 4. DOMAIN EXECUTION (DEFENSIVE & ISOLATED)
     # -------------------------------------------------
     try:
+        # 🧠 ISOLATE DATAFRAME
+        df = base_df.copy(deep=True)
+
+        # Attach shape context to engine (optional, safe)
+        engine.shape_info = shape_info
+        engine.shape = shape_info.get("shape")
+
         # Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
@@ -116,13 +130,13 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         # KPIs (MANDATORY)
         kpis = engine.calculate_kpis(df) or {}
 
-        # Insights (shape-aware, backward-safe)
+        # Insights (backward-safe)
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info) or []
         except TypeError:
             insights = engine.generate_insights(df, kpis) or []
 
-        # Recommendations (shape-aware, backward-safe)
+        # Recommendations (backward-safe)
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -132,7 +146,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs) or []
 
-        # 🧠 EXECUTIVE COGNITION (DECISION LAYER)
+        # 🧠 EXECUTIVE COGNITION (ALWAYS SAFE)
         executive_payload = build_executive_payload(
             kpis=kpis,
             insights=insights,
@@ -141,10 +155,25 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
-        raise RuntimeError(f"Domain processing failed for '{domain}': {e}")
+
+        # ❗ DO NOT CRASH THE SYSTEM
+        return {
+            domain: {
+                "kpis": {},
+                "insights": [{
+                    "level": "CRITICAL",
+                    "title": "Domain Processing Failure",
+                    "so_what": str(e),
+                }],
+                "recommendations": [],
+                "visuals": [],
+                "shape": shape_info,
+                "executive": {},
+            }
+        }
 
     # -------------------------------------------------
-    # 5. VISUAL GENERATION (FAIL-SAFE)
+    # 5. VISUAL GENERATION (HARDENED)
     # -------------------------------------------------
     visuals = []
 
@@ -159,8 +188,22 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             generated = []
 
         for v in generated:
-            if isinstance(v, dict) and v.get("path") and Path(v["path"]).exists():
-                visuals.append(v)
+            if not isinstance(v, dict):
+                continue
+
+            path = v.get("path")
+            if not path:
+                continue
+
+            p = Path(path)
+            if not p.is_absolute():
+                p = visuals_dir / p
+
+            if p.exists():
+                visuals.append({
+                    **v,
+                    "path": str(p)
+                })
 
     # -------------------------------------------------
     # 6. AUTHORITATIVE PAYLOAD (CONTRACT SAFE)
@@ -173,7 +216,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "visuals": visuals,
             "shape": shape_info,
 
-            # 🔥 EXECUTIVE DECISION INTELLIGENCE
+            # 🧠 EXECUTIVE DECISION INTELLIGENCE
             "executive": executive_payload,
         }
-    }
+            }
