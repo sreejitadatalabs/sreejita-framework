@@ -9,7 +9,7 @@ from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
 # 🧠 EXECUTIVE COGNITION (DECISION INTELLIGENCE)
-from sreejita.executive.executive_cognition import build_executive_payload
+from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
 
