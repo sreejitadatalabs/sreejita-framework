@@ -79,7 +79,21 @@ SUBDOMAIN_EXPECTATIONS = {
     },
 }
 
+def _get_score_interpretation(score: int) -> str:
+        if score >= 85:
+            return "Strong operational confidence"
+        elif score >= 70:
+            return "Moderate operational confidence"
+        elif score >= 50:
+            return "Elevated operational risk"
+        return "Critical operational risk"
 
+def _get_trend_explanation(trend: str) -> str:
+        return {
+            "↑": "Performance indicators are deteriorating",
+            "↓": "Performance indicators are improving",
+            "→": "Performance indicators are stable"
+        }.get(trend, "Trend unavailable")
 # =====================================================
 # 3. FACT MAPPING (PURE DATA)
 # =====================================================
@@ -144,22 +158,6 @@ class HealthcareMapping:
             if self.c.get(k):
                 return self.df[self.c[k]].mean()
         return None
-
-    def _get_score_interpretation(score: int) -> str:
-        if score >= 85:
-            return "Strong operational confidence"
-        elif score >= 70:
-            return "Moderate operational confidence"
-        elif score >= 50:
-            return "Elevated operational risk"
-        return "Critical operational risk"
-
-    def _get_trend_explanation(trend: str) -> str:
-        return {
-            "↑": "Performance indicators are deteriorating",
-            "↓": "Performance indicators are improving",
-            "→": "Performance indicators are stable"
-        }.get(trend, "Trend unavailable")
     # -------------------------
     # VARIANCE
     # -------------------------
@@ -167,6 +165,10 @@ class HealthcareMapping:
         """
         Measures normalized performance variance across entities.
         """
+        # Prevents statistical noise from triggering governance alerts.
+        if self.volume() < 30:
+            return None
+            
         # 1. Metric Selection
         metric = None
         for k in ("cost", "los", "duration"):
@@ -257,6 +259,12 @@ def detect_subdomain_and_capabilities(
 
     if usable(cols.get("cost")):
         caps.add(HealthcareCapability.COST)
+
+    if usable(cols.get("status")):
+        caps.add(HealthcareCapability.QUALITY)
+
+    if usable(cols.get("result")):
+        caps.add(HealthcareCapability.QUALITY)
 
     if usable(cols.get("readmitted")) or usable(cols.get("flag")):
         caps.add(HealthcareCapability.QUALITY)
@@ -500,6 +508,7 @@ class HealthcareDomain(BaseDomain):
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": m.volume(),
+            "total_records": len(df),
             "total_entities": m.volume(),
             "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
         }
@@ -572,7 +581,7 @@ class HealthcareDomain(BaseDomain):
             try:
                 temp = df[[pid, fill, supply]].dropna().sort_values(fill)
                 # Calculate days between fills vs supply
-                temp['gap'] = temp.groupby(pid)[fill].diff().dt.days - temp[supply].shift(1)
+                temp['gap'] = temp.groupby(pid)[fill].diff().dt.days - temp.groupby(pid)[supply].shift(1)
                 kpis["late_refill_rate"] = (temp['gap'] > 5).mean()
             except: pass
 
@@ -580,7 +589,7 @@ class HealthcareDomain(BaseDomain):
         pop_col = self.cols.get("population")
         if pop_col and pop_col in df.columns:
             try:
-                pop_val = pd.to_numeric(df[pop_col], errors='coerce').max()
+                pop_val = pd.to_numeric(df[pop_col], errors='coerce').dropna().iloc[0]
                 if pop_val and pop_val > 0:
                     kpis["incidence_per_100k"] = (kpis["total_volume"] / pop_val) * 100_000
             except: pass
