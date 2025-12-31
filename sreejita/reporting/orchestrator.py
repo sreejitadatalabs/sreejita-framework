@@ -11,6 +11,15 @@ from sreejita.core.dataset_shape import detect_dataset_shape
 # 🧠 EXECUTIVE COGNITION
 from sreejita.narrative.executive_cognition import build_executive_payload
 
+
+# =====================================================
+# LOGGER (DEFENSIVE)
+# =====================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 log = logging.getLogger("sreejita.orchestrator")
 
 
@@ -48,13 +57,13 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
     Responsibilities:
     - Load data
-    - Detect dataset shape
+    - Detect dataset shape (context only)
     - Select domain
-    - Run domain engine
-    - Produce executive cognition payload
+    - Execute domain engine
+    - Generate executive cognition payload
 
     Explicitly does NOT:
-    - Interpret results
+    - Interpret KPIs
     - Rank KPIs
     - Format outputs
     """
@@ -79,13 +88,18 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(base_df)
+        shape_val = shape_info.get("shape")
+        if hasattr(shape_val, "value"):
+            shape_info["shape"] = shape_val.value
+
         log.info("Dataset shape detected: %s", shape_info.get("shape"))
-    except Exception as e:
+
+    except Exception:
         log.exception("Shape detection failed")
         shape_info = {
             "shape": "unknown",
             "score": {},
-            "signals": {}
+            "signals": {},
         }
 
     # -------------------------------------------------
@@ -103,7 +117,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "insights": [{
                     "level": "RISK",
                     "title": "Unknown Domain",
-                    "so_what": "No suitable domain engine could be identified."
+                    "so_what": "No suitable domain engine could be identified.",
                 }],
                 "recommendations": [],
                 "visuals": [],
@@ -113,13 +127,13 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (DEFENSIVE & ISOLATED)
+    # 4. DOMAIN EXECUTION (ISOLATED & DEFENSIVE)
     # -------------------------------------------------
     try:
-        # 🧠 ISOLATE DATAFRAME
+        # Isolate dataframe
         df = base_df.copy(deep=True)
 
-        # Attach shape context to engine (optional, safe)
+        # Attach shape context (safe)
         engine.shape_info = shape_info
         engine.shape = shape_info.get("shape")
 
@@ -146,17 +160,16 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs) or []
 
-        # 🧠 EXECUTIVE COGNITION (ALWAYS SAFE)
+        # 🧠 EXECUTIVE COGNITION (SAFE, PURE)
         executive_payload = build_executive_payload(
             kpis=kpis,
             insights=insights,
-            recommendations=recommendations
+            recommendations=recommendations,
         )
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
 
-        # ❗ DO NOT CRASH THE SYSTEM
         return {
             domain: {
                 "kpis": {},
@@ -191,18 +204,18 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             if not isinstance(v, dict):
                 continue
 
-            path = v.get("path")
-            if not path:
+            raw_path = v.get("path")
+            if not raw_path:
                 continue
 
-            p = Path(path)
+            p = Path(raw_path)
             if not p.is_absolute():
                 p = visuals_dir / p
 
             if p.exists():
                 visuals.append({
                     **v,
-                    "path": str(p)
+                    "path": str(p),
                 })
 
     # -------------------------------------------------
@@ -223,4 +236,4 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "sub_domain": kpis.get("_executive", {}).get("sub_domain"),
             },
         }
-            }
+    }
