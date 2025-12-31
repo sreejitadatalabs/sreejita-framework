@@ -6,11 +6,10 @@ from dataclasses import asdict
 
 from sreejita.reporting.base import BaseReport
 from sreejita.narrative.engine import build_narrative
-from sreejita.narrative.executive_cognition import build_executive_payload
 
 
 # =====================================================
-# HYBRID REPORT ENGINE (v3.7 — STABLE)
+# HYBRID REPORT ENGINE (v3.7 — FINAL)
 # =====================================================
 
 class HybridReport(BaseReport):
@@ -18,15 +17,15 @@ class HybridReport(BaseReport):
     Hybrid Report Engine
 
     Responsibilities:
-    - Orchestrate domain → narrative → executive cognition
-    - Render Markdown (human-readable)
-    - Produce UI / PDF-safe payload
+    - Render Markdown report
+    - Package executive-ready payload
+    - NEVER compute intelligence
     """
 
     name = "hybrid"
 
     # -------------------------------------------------
-    # ENGINE ENTRY POINT
+    # BUILD MARKDOWN REPORT
     # -------------------------------------------------
     def build(
         self,
@@ -60,7 +59,7 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # EXECUTIVE SNAPSHOT (TOP OF REPORT)
+    # EXECUTIVE SNAPSHOT (PAGE 1 CONTENT)
     # -------------------------------------------------
     def _write_executive_snapshot(self, f, payload: Dict[str, Any]):
         snap = payload.get("decision_snapshot")
@@ -68,23 +67,29 @@ class HybridReport(BaseReport):
             return
 
         f.write("## Executive Decision Snapshot\n\n")
-        risk = snap.get("overall_risk", {})
+
+        f.write(f"**Overall Risk:** {snap.get('overall_risk', '-')}\n\n")
+
+        if snap.get("top_problems"):
+            f.write("### Top Problems\n")
+            for p in snap["top_problems"]:
+                f.write(f"- {p}\n")
+
+        if snap.get("top_actions"):
+            f.write("\n### Top Actions (90 Days)\n")
+            for a in snap["top_actions"]:
+                f.write(f"- {a}\n")
+
+        if snap.get("decisions_required"):
+            f.write("\n### Decisions Required\n")
+            for d in snap["decisions_required"]:
+                f.write(f"- [ ] {d}\n")
+
         f.write(
-            f"**Overall Risk:** {risk.get('icon','')} "
-            f"{risk.get('label','UNKNOWN')} ({risk.get('score','-')}/100)\n\n"
+            "\n**Confidence Scale:** "
+            "85–100 = 🟢 Green | 70–84 = 🟡 Yellow | "
+            "50–69 = 🟠 Orange | <50 = 🔴 Red\n"
         )
-
-        f.write("### Top Problems\n")
-        for p in snap.get("top_problems", []):
-            f.write(f"- {p}\n")
-
-        f.write("\n### Top Actions (90 Days)\n")
-        for a in snap.get("top_actions", []):
-            f.write(f"- {a}\n")
-
-        f.write("\n### Decisions Required\n")
-        for d in snap.get("decisions_required", []):
-            f.write(f"- [ ] {d}\n")
 
         f.write("\n---\n\n")
 
@@ -111,6 +116,7 @@ class HybridReport(BaseReport):
             f.write("\n### Action Plan\n")
             f.write("| Action | Owner | Timeline | Success Metric |\n")
             f.write("| :--- | :--- | :--- | :--- |\n")
+
             for a in narrative.action_plan:
                 row = a if isinstance(a, dict) else asdict(a)
                 f.write(
@@ -129,16 +135,14 @@ class HybridReport(BaseReport):
         kpis = result.get("kpis", {}) or {}
         visuals = result.get("visuals", []) or []
 
-        # KPIs (render, not decide)
         if kpis:
             f.write("### Key Metrics\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
-            for k, v in kpis.items():
+            for k, v in list(kpis.items())[:12]:
                 f.write(f"| {k.replace('_',' ').title()} | {self._format_value(k, v)} |\n")
             f.write("\n")
 
-        # Visuals (top 6 already sorted by domain)
         if visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
@@ -150,7 +154,10 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
         f.write("# Sreejita Executive Report\n\n")
-        f.write(f"**Run ID:** `{run_id}` | **Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n")
+        f.write(
+            f"**Run ID:** `{run_id}` | "
+            f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n"
+        )
         if metadata:
             for k, v in metadata.items():
                 f.write(f"- **{k.replace('_',' ').title()}**: {v}\n")
@@ -169,7 +176,7 @@ class HybridReport(BaseReport):
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
-            if "rate" in key or "ratio" in key:
+            if "rate" in key:
                 return f"{v:.1%}"
             if abs(v) >= 1_000_000:
                 return f"{v/1_000_000:.1f}M"
@@ -184,6 +191,10 @@ class HybridReport(BaseReport):
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Thin glue layer.
+    Intelligence is already computed by orchestrator.
+    """
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config.get("run_dir", "./runs"))
@@ -202,11 +213,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         recommendations=primary.get("recommendations", []),
     )
 
-    executive_payload = build_executive_payload(
-        primary.get("kpis", {}),
-        primary.get("insights", []),
-        primary.get("recommendations", []),
-    )
+    executive_payload = primary.get("executive", {})
 
     md_path = engine.build(
         domain_results=domain_results,
@@ -225,6 +232,11 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
             "visuals": primary.get("visuals", []),
             "insights": narrative.key_findings,
             "recommendations": primary.get("recommendations", []),
+            "scorecard": {
+                "risk_label": executive_payload
+                .get("decision_snapshot", {})
+                .get("overall_risk", "-")
+            },
         },
         "run_dir": str(run_dir),
     }
