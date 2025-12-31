@@ -217,6 +217,10 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "shape": shape_info,
 
             # 🧠 EXECUTIVE DECISION INTELLIGENCE
-            "executive": executive_payload,
+            "executive": {
+                **executive_payload,
+                "primary_kpis": kpis.get("_executive", {}).get("primary_kpis", []),
+                "sub_domain": kpis.get("_executive", {}).get("sub_domain"),
+            },
         }
             }
