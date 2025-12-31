@@ -171,7 +171,7 @@ class HealthcareMapping:
             
         # 1. Metric Selection
         metric = None
-        for k in ("cost", "los", "duration"):
+        for k in ("los", "duration", "cost"):
             col = self.c.get(k)
             if col and col in self.df.columns:
                 metric = col
@@ -260,13 +260,12 @@ def detect_subdomain_and_capabilities(
     if usable(cols.get("cost")):
         caps.add(HealthcareCapability.COST)
 
-    if usable(cols.get("status")):
-        caps.add(HealthcareCapability.QUALITY)
-
-    if usable(cols.get("result")):
-        caps.add(HealthcareCapability.QUALITY)
-
-    if usable(cols.get("readmitted")) or usable(cols.get("flag")):
+    if (
+        usable(cols.get("status"))
+        or usable(cols.get("result"))
+        or usable(cols.get("readmitted"))
+        or usable(cols.get("flag"))
+    ):
         caps.add(HealthcareCapability.QUALITY)
 
     if usable(cols.get("facility")) or usable(cols.get("doctor")):
@@ -507,7 +506,7 @@ class HealthcareDomain(BaseDomain):
             "sub_domain": sub.value,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
-            "total_volume": m.volume(),
+            "total_volume": len(df),
             "total_records": len(df),
             "total_entities": m.volume(),
             "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
@@ -589,9 +588,18 @@ class HealthcareDomain(BaseDomain):
         pop_col = self.cols.get("population")
         if pop_col and pop_col in df.columns:
             try:
-                pop_val = pd.to_numeric(df[pop_col], errors='coerce').dropna().iloc[0]
-                if pop_val and pop_val > 0:
-                    kpis["incidence_per_100k"] = (kpis["total_volume"] / pop_val) * 100_000
+                pop_series = pd.to_numeric(df[pop_col], errors='coerce').dropna()
+                
+                if not pop_series.empty:
+                    # [FIX] Handle repeated/varying population values safely
+                    if len(pop_series.unique()) == 1:
+                        pop_val = pop_series.iloc[0]
+                    else:
+                        # Use median to avoid outliers or summing repeated rows
+                        pop_val = pop_series.median()
+
+                    if pop_val > 0:
+                        kpis["incidence_per_100k"] = (kpis["total_volume"] / pop_val) * 100_000
             except: pass
 
         # -------------------------------------------------
@@ -609,11 +617,19 @@ class HealthcareDomain(BaseDomain):
                 kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
             
             # Volume Trend (Resample Safe)
+            # Volume Trend (Resample Safe)
             try:
                 vol_s = df.set_index(self.time_col).resample("M").size()
                 if len(vol_s) >= 4:
-                    delta = (vol_s.iloc[-1] - vol_s.iloc[0]) / vol_s.iloc[0]
-                    trend_arrow = "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
+                    start_val = vol_s.iloc[0]
+                    # [FIX] Division by Zero Guard
+                    if start_val > 0:
+                        delta = (vol_s.iloc[-1] - start_val) / start_val
+                        trend_arrow = "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
+                    else:
+                        # Cannot calculate trend if starting volume is 0
+                        trend_arrow = "→"
+                    
                     kpis["volume_trend"] = trend_arrow
             except: pass
 
@@ -631,6 +647,21 @@ class HealthcareDomain(BaseDomain):
             "board_confidence_trend": trend_arrow,
             "benchmark_context": f"Evaluated against {sub.value.upper()} standards."
         })
+
+        # -------------------------------------------------
+        # 10. KPI CONFIDENCE METADATA (TRUST LAYER)
+        # -------------------------------------------------
+        # Attaches a trust score to every metric based on underlying data completeness
+        kpi_confidence = {}
+        completeness = kpis.get("data_completeness", 0.5)
+        
+        for k, v in kpis.items():
+            # Only rate numeric metrics, ignore metadata strings
+            if isinstance(v, (int, float)):
+                # Heuristic: Confidence is data_completeness boosted slightly, capped at 1.0
+                kpi_confidence[k] = round(min(1.0, completeness + 0.2), 2)
+
+        kpis["_confidence"] = kpi_confidence
 
         # Executive Selection
         primary_kpis = self.select_executive_kpis(kpis, sub)
@@ -1045,7 +1076,7 @@ class HealthcareDomain(BaseDomain):
         if momentum == "↑":
             add(
                 "WARNING",
-                "Negative Performance Momentum",
+                "Performance Deterioration Detected",
                 "Recent trends indicate deteriorating performance that may accelerate without intervention.",
                 "Trend Analysis",
                 True
