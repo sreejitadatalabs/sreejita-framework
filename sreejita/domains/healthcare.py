@@ -80,20 +80,20 @@ SUBDOMAIN_EXPECTATIONS = {
 }
 
 def _get_score_interpretation(score: int) -> str:
-        if score >= 85:
-            return "Strong operational confidence"
-        elif score >= 70:
-            return "Moderate operational confidence"
-        elif score >= 50:
-            return "Elevated operational risk"
-        return "Critical operational risk"
+    if score >= 85:
+        return "Strong operational confidence"
+    elif score >= 70:
+        return "Moderate operational confidence"
+    elif score >= 50:
+        return "Elevated operational risk"
+    return "Critical operational risk"
 
 def _get_trend_explanation(trend: str) -> str:
-        return {
-            "↑": "Performance indicators are deteriorating",
-            "↓": "Performance indicators are improving",
-            "→": "Performance indicators are stable"
-        }.get(trend, "Trend unavailable")
+    return {
+        "↑": "Performance indicators are deteriorating",
+        "↓": "Performance indicators are improving",
+        "→": "Performance indicators are stable"
+    }.get(trend, "Trend unavailable")
 # =====================================================
 # 3. FACT MAPPING (PURE DATA)
 # =====================================================
