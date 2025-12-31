@@ -59,7 +59,7 @@ def format_kpi_value(key: str, value: Any) -> str:
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL)
+# EXECUTIVE PDF RENDERER (FINAL — FREEZE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -74,7 +74,7 @@ class ExecutivePDFRenderer:
         payload["visuals"] = sorted(
             payload.get("visuals", []),
             key=lambda x: x.get("importance", 0),
-            reverse=True
+            reverse=True,
         )
 
         output_path = Path(output_path)
@@ -147,7 +147,7 @@ class ExecutivePDFRenderer:
         story.append(Spacer(1, 12))
         story.append(Paragraph(
             "Prepared by: <b>Sreejita Data Labs</b>",
-            styles["ExecBody"]
+            styles["ExecBody"],
         ))
         story.append(PageBreak())
 
@@ -224,7 +224,8 @@ class ExecutivePDFRenderer:
             for vis in payload["visuals"][:6]:
                 path = Path(vis.get("path", ""))
                 if path.exists():
-                    iw, ih = utils.ImageReader(str(path)).getSize()
+                    img = utils.ImageReader(str(path))
+                    iw, ih = img.getSize()
                     w = 6 * inch
                     h = min((ih / iw) * w, 5 * inch)
                     story.append(Image(str(path), width=w, height=h))
