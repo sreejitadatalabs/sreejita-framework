@@ -94,6 +94,53 @@ def _get_trend_explanation(trend: str) -> str:
         "↓": "Performance indicators are improving",
         "→": "Performance indicators are stable"
     }.get(trend, "Trend unavailable")
+
+def compute_kpi_confidence(kpis: Dict[str, Any], caps: List[str], total_records: int) -> Dict[str, float]:
+    """
+    Computes confidence score for each numeric KPI based on:
+    1. Data Completeness
+    2. Sample Size (Volume)
+    3. Operational Stability (Variance)
+    """
+    confidence: Dict[str, float] = {}
+    
+    # Base: Data Completeness
+    data_completeness = float(kpis.get("data_completeness", 0.5))
+
+    # Factor 1: Sample Size Confidence
+    if total_records >= 1000: volume_factor = 1.0
+    elif total_records >= 200: volume_factor = 0.9
+    elif total_records >= 50: volume_factor = 0.8
+    else: volume_factor = 0.6
+
+    # Factor 2: Variance Penalty (High variance = Lower trust in "Average")
+    variance_penalty = 0.0
+    var = kpis.get("variance_score")
+    if isinstance(var, (int, float)):
+        if var > 0.6: variance_penalty = 0.25
+        elif var > 0.3: variance_penalty = 0.15
+
+    # Compute per KPI
+    cap_set = set(c.lower() for c in caps) # Normalize for checking
+    
+    for k, v in kpis.items():
+        if not isinstance(v, (int, float)): continue
+
+        # Start with completeness * volume
+        score = data_completeness * volume_factor
+
+        # Factor 3: Capability Alignment (Penalty if capability is missing)
+        # (Though technically KPI shouldn't exist if capability is missing, this is a safety guard)
+        if k in ["avg_duration", "avg_los"] and "time" not in cap_set: score *= 0.6
+        if k in ["total_cost", "avg_unit_cost"] and "cost" not in cap_set: score *= 0.6
+        if k in ["adverse_event_rate"] and "quality" not in cap_set: score *= 0.6
+
+        # Apply Variance Penalty (Instability reduces confidence in the mean)
+        score = max(0.0, score - variance_penalty)
+
+        confidence[k] = round(min(score, 1.0), 2)
+
+    return confidence
 # =====================================================
 # 3. FACT MAPPING (PURE DATA)
 # =====================================================
@@ -619,7 +666,6 @@ class HealthcareDomain(BaseDomain):
                 kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
             
             # Volume Trend (Resample Safe)
-            # Volume Trend (Resample Safe)
             try:
                 vol_s = df.set_index(self.time_col).resample("M").size()
                 if len(vol_s) >= 4:
@@ -653,19 +699,16 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # 10. KPI CONFIDENCE METADATA (TRUST LAYER)
         # -------------------------------------------------
-        # Attaches a trust score to every metric based on underlying data completeness
-        kpi_confidence = {}
-        completeness = kpis.get("data_completeness", 0.5)
-        
-        for k, v in kpis.items():
-            # Only rate numeric metrics, ignore metadata strings
-            if isinstance(v, (int, float)):
-                # Heuristic: Confidence is data_completeness boosted slightly, capped at 1.0
-                boost = 0.2 if len(df) >= 100 else 0.1
-                kpi_confidence[k] = round(min(1.0, completeness + boost), 2)
-        kpis["_confidence"] = kpi_confidence
+        # Calculates statistical confidence for every metric using the helper
+        kpis["_confidence"] = compute_kpi_confidence(
+            kpis=kpis,
+            caps=kpis.get("capabilities", []),
+            total_records=len(df)
+        )
 
-        # Executive Selection
+        # -------------------------------------------------
+        # 11. EXECUTIVE SELECTION
+        # -------------------------------------------------
         primary_kpis = self.select_executive_kpis(kpis, sub)
         kpis["_executive"] = {
             "primary_kpis": primary_kpis,
