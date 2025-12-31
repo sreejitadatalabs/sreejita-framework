@@ -198,7 +198,7 @@ class ExecutivePDFRenderer:
         # -------------------------------------------------
         if payload["insights"]:
             story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
-            for i in payload["insights"]:
+            for i in payload["insights"][:5]:
                 story.append(Paragraph(
                     f"<b>{i.get('level','INFO')}:</b> {i.get('title','')}",
                     styles["ExecBody"]
