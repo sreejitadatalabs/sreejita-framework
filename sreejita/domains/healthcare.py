@@ -265,8 +265,13 @@ def detect_subdomain_and_capabilities(
     if usable(cols.get("facility")) or usable(cols.get("doctor")):
         caps.add(HealthcareCapability.VARIANCE)
 
-    if usable(cols.get("duration")) and "wait" in str(cols.get("duration")).lower():
-        caps.add(HealthcareCapability.ACCESS)
+    duration_col = cols.get("duration")
+
+    if duration_col and duration_col in df.columns:
+        raw_name = duration_col.lower()
+        ACCESS_TOKENS = {"wait", "queue", "access", "turnaround"}
+        if any(tok in raw_name for tok in ACCESS_TOKENS):
+    caps.add(HealthcareCapability.ACCESS)
 
     # -----------------------
     # SUB-DOMAIN (ORDER MATTERS)
