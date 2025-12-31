@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 
+
 # =====================================================
 # EXECUTIVE RISK MODEL
 # =====================================================
@@ -11,7 +12,8 @@ EXECUTIVE_RISK_BANDS = [
     (0,  "CRITICAL", "🔴"),
 ]
 
-def derive_risk_level(score: int) -> Dict[str, Any]:
+
+def derive_risk_level(score: Any) -> Dict[str, Any]:
     """
     Converts a confidence score into an executive risk band.
     Guaranteed safe return.
@@ -26,10 +28,9 @@ def derive_risk_level(score: int) -> Dict[str, Any]:
             return {
                 "label": label,
                 "icon": icon,
-                "score": score
+                "score": score,
             }
 
-    # Absolute fallback (should never hit)
     return {"label": "CRITICAL", "icon": "🔴", "score": score}
 
 
@@ -43,19 +44,22 @@ def rank_recommendations(recommendations: List[Dict]) -> List[Dict]:
     Deterministic, confidence-weighted.
     """
 
-    def score(r: Dict[str, Any]) -> float:
-        confidence = float(r.get("confidence", 0.5))
+    def _score(rec: Dict[str, Any]) -> float:
+        try:
+            confidence = float(rec.get("confidence", 0.5))
+        except Exception:
+            confidence = 0.5
 
         priority_weight = {
             "CRITICAL": 3.0,
             "HIGH": 2.0,
             "MEDIUM": 1.0,
-            "LOW": 0.5
-        }.get(r.get("priority", "MEDIUM"), 1.0)
+            "LOW": 0.5,
+        }.get(rec.get("priority", "MEDIUM"), 1.0)
 
         return confidence * priority_weight
 
-    return sorted(recommendations or [], key=score, reverse=True)
+    return sorted(recommendations or [], key=_score, reverse=True)
 
 
 # =====================================================
@@ -76,30 +80,33 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         "readmission_rate",
     ]
 
-    selected = []
+    selected: List[Dict[str, Any]] = []
 
+    # 1️⃣ Canonical KPIs first
     for key in canonical_keys:
         if key in kpis and kpis[key] is not None:
             selected.append({
                 "name": key.replace("_", " ").title(),
-                "value": kpis[key]
+                "value": kpis[key],
             })
 
-    # Fallback: highest-magnitude numeric KPIs
+    # 2️⃣ Fallback: highest-impact numeric KPIs
     if len(selected) < 3:
         numeric = [
             (k, v) for k, v in kpis.items()
-            if isinstance(v, (int, float))
+            if isinstance(v, (int, float)) and v is not None
         ]
-        numeric = sorted(numeric, key=lambda x: abs(x[1]), reverse=True)
+        numeric.sort(key=lambda x: abs(x[1]), reverse=True)
+
+        existing_keys = {x["name"].lower().replace(" ", "_") for x in selected}
 
         for k, v in numeric:
             if len(selected) >= 5:
                 break
-            if k not in {x["name"].lower().replace(" ", "_") for x in selected}:
+            if k not in existing_keys:
                 selected.append({
                     "name": k.replace("_", " ").title(),
-                    "value": v
+                    "value": v,
                 })
 
     return selected[:5]
@@ -118,40 +125,49 @@ def extract_top_problems(insights: List[Dict]) -> List[str]:
         "CRITICAL": 0,
         "RISK": 1,
         "WARNING": 2,
-        "INFO": 3
+        "INFO": 3,
     }
 
     ordered = sorted(
         insights or [],
-        key=lambda x: severity_rank.get(x.get("level", "INFO"), 3)
+        key=lambda x: severity_rank.get(x.get("level", "INFO"), 3),
     )
 
-    return [i.get("title", "Unlabeled Issue") for i in ordered[:3]]
+    return [
+        i.get("title", "Unlabeled Issue")
+        for i in ordered[:3]
+    ]
 
 
 # =====================================================
-# DECISION SNAPSHOT
+# DECISION SNAPSHOT (EXECUTIVE-FIRST)
 # =====================================================
 
-def build_decision_snapshot(kpis, insights, recommendations):
+def build_decision_snapshot(
+    kpis: Dict[str, Any],
+    insights: List[Dict],
+    recommendations: List[Dict],
+) -> Dict[str, Any]:
+    """
+    Constructs a decisive, scan-ready executive snapshot.
+    """
+
     score = kpis.get("board_confidence_score", 0)
     risk = derive_risk_level(score)
 
-    critical_insights = [
-        i for i in insights
-        if i.get("level") in ("CRITICAL", "RISK")
-    ][:3]
+    top_problems = extract_top_problems(insights)
 
     return {
         "title": "EXECUTIVE DECISION SNAPSHOT",
-        "overall_risk": f"{risk['icon']} {risk['label']} ({score} / 100)",
-        "top_problems": [i["title"] for i in critical_insights],
+        "overall_risk": f"{risk['icon']} {risk['label']} (Score: {risk['score']} / 100)",
+        "top_problems": top_problems,
         "decisions_required": [
-            "Approve LOS reduction program",
+            "Approve corrective initiative",
             "Assign executive owner",
-            "Approve capacity optimization budget"
-        ]
+            "Approve required resources",
+        ],
     }
+
 
 # =====================================================
 # SUCCESS CRITERIA
@@ -161,28 +177,29 @@ def build_success_criteria(kpis: Dict[str, Any]) -> List[str]:
     """
     Converts KPIs into measurable executive success signals.
     """
-    criteria = []
+    criteria: List[str] = []
 
-    if "board_confidence_score" in kpis:
+    score = kpis.get("board_confidence_score")
+    if isinstance(score, (int, float)):
         criteria.append("Board Confidence Score → >70")
 
     for k, v in kpis.items():
         if len(criteria) >= 4:
             break
         if isinstance(v, (int, float)) and v > 0:
-            criteria.append(f"{k.replace('_', ' ').title()}: improve vs baseline")
+            criteria.append(f"{k.replace('_', ' ').title()} → Improve vs baseline")
 
     return criteria
 
 
 # =====================================================
-# EXECUTIVE PAYLOAD (FINAL OUTPUT)
+# EXECUTIVE PAYLOAD (FINAL CONTRACT)
 # =====================================================
 
 def build_executive_payload(
     kpis: Dict[str, Any],
     insights: List[Dict],
-    recommendations: List[Dict]
+    recommendations: List[Dict],
 ) -> Dict[str, Any]:
     """
     Single executive-ready cognition object.
@@ -196,6 +213,9 @@ def build_executive_payload(
         ),
         "executive_kpis": select_executive_kpis(kpis),
         "top_problems": extract_top_problems(insights),
-        "top_actions": [r.get("action") for r in ranked_actions[:3]],
-        "success_criteria": build_success_criteria(kpis)
+        "top_actions": [
+            r.get("action", "Action required")
+            for r in ranked_actions[:3]
+        ],
+        "success_criteria": build_success_criteria(kpis),
     }
