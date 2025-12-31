@@ -133,33 +133,25 @@ def extract_top_problems(insights: List[Dict]) -> List[str]:
 # DECISION SNAPSHOT
 # =====================================================
 
-def build_decision_snapshot(
-    kpis: Dict[str, Any],
-    insights: List[Dict],
-    recommendations: List[Dict]
-) -> Dict[str, Any]:
-
+def build_decision_snapshot(kpis, insights, recommendations):
     score = kpis.get("board_confidence_score", 0)
     risk = derive_risk_level(score)
 
     critical_insights = [
-        i for i in insights or []
+        i for i in insights
         if i.get("level") in ("CRITICAL", "RISK")
     ][:3]
 
-    top_actions = rank_recommendations(recommendations)[:3]
-
     return {
-        "overall_risk": risk,
-        "top_problems": [i.get("title") for i in critical_insights],
-        "top_actions": [r.get("action") for r in top_actions],
+        "title": "EXECUTIVE DECISION SNAPSHOT",
+        "overall_risk": f"{risk['icon']} {risk['label']} ({score} / 100)",
+        "top_problems": [i["title"] for i in critical_insights],
         "decisions_required": [
-            "Approve corrective initiative",
+            "Approve LOS reduction program",
             "Assign executive owner",
-            "Approve required resources"
+            "Approve capacity optimization budget"
         ]
     }
-
 
 # =====================================================
 # SUCCESS CRITERIA
