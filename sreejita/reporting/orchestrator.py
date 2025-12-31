@@ -8,6 +8,9 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
+# 🧠 EXECUTIVE COGNITION (DECISION INTELLIGENCE)
+from sreejita.executive.executive_cognition import build_executive_payload
+
 log = logging.getLogger("sreejita.orchestrator")
 
 
@@ -42,9 +45,18 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Authoritative orchestration layer.
-    - No intelligence
-    - No formatting
-    - No assumptions
+
+    Responsibilities:
+    - Load data
+    - Detect dataset shape
+    - Select domain
+    - Run domain engine
+    - Produce executive cognition payload
+
+    Explicitly does NOT:
+    - Interpret results
+    - Rank KPIs
+    - Format outputs
     """
 
     input_path = Path(input_path)
@@ -89,6 +101,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "recommendations": [],
                 "visuals": [],
                 "shape": shape_info,
+                "executive": {},   # 🔑 keep contract consistent
             }
         }
 
@@ -100,22 +113,31 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        # KPIs (REQUIRED)
+        # KPIs (MANDATORY)
         kpis = engine.calculate_kpis(df) or {}
 
-        # Insights (SHAPE-AWARE, SAFE)
+        # Insights (shape-aware, backward-safe)
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info) or []
         except TypeError:
             insights = engine.generate_insights(df, kpis) or []
 
-        # Recommendations (SHAPE-AWARE, SAFE)
+        # Recommendations (shape-aware, backward-safe)
         try:
-            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info) or []
+            raw_recs = engine.generate_recommendations(
+                df, kpis, insights, shape_info=shape_info
+            ) or []
         except TypeError:
             raw_recs = engine.generate_recommendations(df, kpis, insights) or []
 
         recommendations = enrich_recommendations(raw_recs) or []
+
+        # 🧠 EXECUTIVE COGNITION (DECISION LAYER)
+        executive_payload = build_executive_payload(
+            kpis=kpis,
+            insights=insights,
+            recommendations=recommendations
+        )
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
@@ -145,10 +167,13 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     # -------------------------------------------------
     return {
         domain: {
-            "kpis": kpis or {},
-            "insights": insights or [],
-            "recommendations": recommendations or [],
-            "visuals": visuals or [],
+            "kpis": kpis,
+            "insights": insights,
+            "recommendations": recommendations,
+            "visuals": visuals,
             "shape": shape_info,
+
+            # 🔥 EXECUTIVE DECISION INTELLIGENCE
+            "executive": executive_payload,
         }
     }
