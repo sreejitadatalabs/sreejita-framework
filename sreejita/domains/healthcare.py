@@ -265,6 +265,9 @@ def detect_subdomain_and_capabilities(
     if usable(cols.get("facility")) or usable(cols.get("doctor")):
         caps.add(HealthcareCapability.VARIANCE)
 
+    if usable(cols.get("duration")) and "wait" in str(cols.get("duration")).lower():
+        caps.add(HealthcareCapability.ACCESS)
+
     # -----------------------
     # SUB-DOMAIN (ORDER MATTERS)
     # -----------------------
@@ -302,21 +305,6 @@ def compute_score(kpis, sub, caps):
             score += 5
 
     return max(0, min(100, score)), breakdown
-def _normalize_boolean_like(series: pd.Series) -> pd.Series:
-    """
-    Converts Yes/No, True/False, Y/N into 1/0 safely.
-    Leaves numeric values unchanged.
-    """
-    if series.dtype == object:
-        return series.map(
-            lambda x: (
-                1 if str(x).strip().lower() in {"yes", "y", "true", "1"} else
-                0 if str(x).strip().lower() in {"no", "n", "false", "0"} else
-                np.nan
-            )
-        )
-    return series
-
 # =====================================================
 # 6. HEALTHCARE DOMAIN
 # =====================================================
@@ -536,6 +524,8 @@ class HealthcareDomain(BaseDomain):
         if HealthcareCapability.VARIANCE in caps:
             kpis["variance_score"] = m.variance()
     
+        # ... inside calculate_kpis, replacing the volume trend block ...
+
         # -------------------------------------------------
         # 7. TREND SIGNALS (FACTUAL, NOT INTERPRETED)
         # -------------------------------------------------
@@ -544,15 +534,33 @@ class HealthcareDomain(BaseDomain):
             dur_col = self.cols.get("los") or self.cols.get("duration")
             if dur_col and dur_col in df.columns:
                 kpis["avg_duration_trend"] = m.trend(self.time_col, dur_col)
-    
+            
             # Cost trend
             if self.cols.get("cost") and self.cols["cost"] in df.columns:
                 kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
-    
-            # Volume trend (use strongest identifier)
-            vol_col = self.cols.get("pid") or self.cols.get("encounter")
-            if vol_col and vol_col in df.columns:
-                kpis["volume_trend"] = m.trend(self.time_col, vol_col)
+            
+            # [FIX] Volume Trend Logic (Count based, not ID based)
+            try:
+                # Count records per month
+                vol_series = (
+                    df.set_index(self.time_col)
+                    .resample("ME")
+                    .size()
+                )
+                
+                if len(vol_series) >= 6: # Minimum periods for trend
+                    # Compare last 20% vs first 80% (simple momentum)
+                    split = int(len(vol_series) * 0.8)
+                    hist_avg = vol_series.iloc[:split].mean()
+                    curr_avg = vol_series.iloc[split:].mean()
+                    
+                    if hist_avg > 0:
+                        delta = (curr_avg - hist_avg) / hist_avg
+                        if delta > 0.05: kpis["volume_trend"] = "↑"
+                        elif delta < -0.05: kpis["volume_trend"] = "↓"
+                        else: kpis["volume_trend"] = "→"
+            except: 
+                kpis["volume_trend"] = "→"
     
         # -------------------------------------------------
         # 8. GOVERNANCE SCORE (STILL FACTUAL)
