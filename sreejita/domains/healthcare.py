@@ -458,7 +458,15 @@ class HealthcareDomain(BaseDomain):
             "board_score_breakdown": breakdown,
             "maturity_level": "Gold" if score >= 85 else "Silver" if score >= 70 else "Bronze",
         })
-
+        # -------------------------------------------------
+        # EXECUTIVE KPI SELECTION (REPORT LAYER CONTRACT)
+        # -------------------------------------------------
+        primary_kpis = select_executive_kpis(kpis, sub)
+        
+        kpis["_executive"] = {
+            "primary_kpis": primary_kpis,
+            "sub_domain": sub.value,
+        }
         return kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
@@ -1032,7 +1040,88 @@ class HealthcareDomain(BaseDomain):
             r.pop("impact_score", None)
     
         return recommendations
+
+    # =====================================================
+    # KPI PRIORITIZATION (EXECUTIVE SURFACING)
+    # =====================================================
     
+    EXECUTIVE_KPI_PRIORITY = {
+        HealthcareSubDomain.HOSPITAL: [
+            "board_confidence_score",
+            "avg_duration",
+            "long_duration_rate",
+            "adverse_event_rate",
+            "avg_unit_cost",
+        ],
+        HealthcareSubDomain.CLINIC: [
+            "board_confidence_score",
+            "total_volume",
+            "avg_duration",
+            "avg_unit_cost",
+        ],
+        HealthcareSubDomain.DIAGNOSTICS: [
+            "board_confidence_score",
+            "total_volume",
+            "avg_duration",
+            "adverse_event_rate",
+        ],
+        HealthcareSubDomain.PHARMACY: [
+            "board_confidence_score",
+            "total_volume",
+            "avg_unit_cost",
+        ],
+        HealthcareSubDomain.PUBLIC_HEALTH: [
+            "board_confidence_score",
+            "total_volume",
+            "data_completeness",
+        ],
+    }
+    
+    
+    def select_executive_kpis(
+        kpis: Dict[str, Any],
+        sub_domain: HealthcareSubDomain,
+        max_kpis: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Selects 3–5 executive KPIs based on healthcare sub-domain.
+        """
+    
+        priority_keys = EXECUTIVE_KPI_PRIORITY.get(
+            sub_domain, EXECUTIVE_KPI_PRIORITY[HealthcareSubDomain.MIXED]
+        )
+    
+        selected = []
+    
+        for key in priority_keys:
+            if key in kpis and kpis[key] is not None:
+                selected.append({
+                    "name": key.replace("_", " ").title(),
+                    "value": kpis[key],
+                })
+    
+            if len(selected) >= max_kpis:
+                break
+    
+        # Fallback: numeric KPIs by magnitude
+        if len(selected) < 3:
+            numeric = [
+                (k, v)
+                for k, v in kpis.items()
+                if isinstance(v, (int, float))
+            ]
+            numeric.sort(key=lambda x: abs(x[1]), reverse=True)
+    
+            for k, v in numeric:
+                if len(selected) >= max_kpis:
+                    break
+                if k not in {s["name"].lower().replace(" ", "_") for s in selected}:
+                    selected.append({
+                        "name": k.replace("_", " ").title(),
+                        "value": v,
+                    })
+    
+        return selected[:max_kpis]
 # =====================================================
 # 7. DOMAIN REGISTRATION
 # =====================================================
