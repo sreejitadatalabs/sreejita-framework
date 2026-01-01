@@ -156,7 +156,7 @@ def _healthcare_summary(
                 f"Extended inpatient stays result in an estimated "
                 f"**{excess_days:.1f} excess days per patient**, translating to approximately "
                 f"**${est_impact:,.0f} in avoidable cost per patient**. "
-                f"Reduccing length-of-stay represents a direct operational and financial opportunity."
+                f"Reducing length-of-stay represents a direct operational and financial opportunity." # [FIXED TYPO]
             )
 
     # ---------------------------
