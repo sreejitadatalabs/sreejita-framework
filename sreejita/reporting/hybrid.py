@@ -255,6 +255,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "markdown": str(md_path),
         "payload": {
             "executive": executive_payload,
+            "executive_snapshot": executive_payload.get("snapshot"),
             "summary": narrative.executive_summary,
             "visuals": primary.get("visuals", []),
             "insights": primary.get("insights", []),
