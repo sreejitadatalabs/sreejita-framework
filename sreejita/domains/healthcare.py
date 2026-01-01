@@ -523,6 +523,10 @@ class HealthcareDomain(BaseDomain):
                 discharge = pd.to_datetime(df[self.cols["discharge"]], errors="coerce")
     
                 df["_derived_los"] = (discharge - admit).dt.days
+
+                # Guard against negative or invalid LOS (edge-case safety)
+                df.loc[df["_derived_los"] < 0, "_derived_los"] = np.nan
+                
                 self.cols["los"] = "_derived_los"
             except Exception:
                 pass
