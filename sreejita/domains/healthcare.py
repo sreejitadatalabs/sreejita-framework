@@ -686,24 +686,6 @@ class HealthcareDomain(BaseDomain):
             total_records=len(df)
         )
         self._last_kpi_confidence = kpis["_confidence"]
-
-        # 10. Executive Selection
-        primary_kpis = self.select_executive_kpis(kpis, sub)
-        confidence_map = kpis.get("_confidence", {})
-        
-        def rank_exec(k):
-            name = k["name"].lower().replace(" ", "_")
-            val = k.get("value")
-            try: mag = abs(float(val))
-            except: mag = 0.0
-            return mag * confidence_map.get(name, 0.6)
-        
-        primary_kpis = sorted(primary_kpis, key=rank_exec, reverse=True)
-        
-        kpis["_executive"] = {
-            "primary_kpis": primary_kpis,
-            "sub_domain": sub.value,
-        }
         
         return kpis
 
