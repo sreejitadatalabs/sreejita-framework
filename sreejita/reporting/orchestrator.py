@@ -76,7 +76,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA (IMMUTABLE BASE)
+    # 1. LOAD DATA
     # -------------------------------------------------
     base_df = _read_tabular_file_safe(input_path)
 
@@ -127,30 +127,24 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (ISOLATED & DEFENSIVE)
+    # 4. DOMAIN EXECUTION
     # -------------------------------------------------
     try:
-        # Isolate dataframe
         df = base_df.copy(deep=True)
 
-        # Attach shape context (safe)
         engine.shape_info = shape_info
         engine.shape = shape_info.get("shape")
 
-        # Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        # KPIs (MANDATORY)
         kpis = engine.calculate_kpis(df) or {}
 
-        # Insights (backward-safe)
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info) or []
         except TypeError:
             insights = engine.generate_insights(df, kpis) or []
 
-        # Recommendations (backward-safe)
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -160,12 +154,20 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs) or []
 
-        # 🧠 EXECUTIVE COGNITION (SAFE, PURE)
+        # 🧠 EXECUTIVE COGNITION (AUTHORITATIVE)
         executive_payload = build_executive_payload(
             kpis=kpis,
             insights=insights,
             recommendations=recommendations,
         )
+
+        # ---------------------------------------------
+        # BOARD READINESS TREND (SAFE DEFAULT)
+        # ---------------------------------------------
+        executive_payload["board_readiness_trend"] = {
+            "previous_score": None,
+            "trend": "→",
+        }
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
@@ -186,7 +188,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 5. VISUAL GENERATION (HARDENED)
+    # 5. VISUAL GENERATION
     # -------------------------------------------------
     visuals = []
 
@@ -219,7 +221,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 })
 
     # -------------------------------------------------
-    # 6. AUTHORITATIVE PAYLOAD (CONTRACT SAFE)
+    # 6. FINAL CONTRACT PAYLOAD (NO OVERRIDES)
     # -------------------------------------------------
     return {
         domain: {
@@ -229,11 +231,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "visuals": visuals,
             "shape": shape_info,
 
-            # 🧠 EXECUTIVE DECISION INTELLIGENCE
-            "executive": {
-                **executive_payload,
-                "primary_kpis": kpis.get("_executive", {}).get("primary_kpis", []),
-                "sub_domain": kpis.get("_executive", {}).get("sub_domain"),
-            },
+            # 🧠 EXECUTIVE = SINGLE SOURCE OF TRUTH
+            "executive": executive_payload,
         }
     }
