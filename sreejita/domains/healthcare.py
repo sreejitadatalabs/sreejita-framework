@@ -17,9 +17,10 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # IMPORT THE TRUTH
 from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
 
-# [FIX] Define Visual Benchmark to prevent NameError in generate_visuals
+# [FIX] Define Visual Benchmark
 VISUAL_BENCHMARK_LOS = HEALTHCARE_EXTERNAL_LIMITS["avg_los"]["soft_cap"]
-MIN_SAMPLE_SIZE = 30  # [FIX] Statistical significance floor
+MIN_SAMPLE_SIZE = 30  # Statistical significance floor
+
 # =====================================================
 # 1. HEALTHCARE UNIVERSAL ENUMS
 # =====================================================
@@ -371,11 +372,16 @@ def compute_score(kpis, sub, caps):
     score = 100
     breakdown = {}
     rules = SUBDOMAIN_EXPECTATIONS[sub]
+    
+    # Scale penalty by data confidence
+    trust = kpis.get("data_completeness", 0.8)
+    penalty_scale = 1.0 if trust > 0.8 else 0.7 
 
     for r in rules["required"]:
         if r not in caps:
-            score -= 15
-            breakdown[f"Missing {r.value}"] = -15
+            pen = int(15 * penalty_scale)
+            score -= pen
+            breakdown[f"Missing {r.value}"] = -pen
 
     for b in rules["bonus"]:
         if b in caps:
@@ -681,7 +687,6 @@ class HealthcareDomain(BaseDomain):
         else: trend_arrow = "→"
 
         # 8. Scoring & Metadata
-        # [FIX 5] Score Scaled by Completeness (Logic inside compute_score updated or inline)
         score, breakdown = compute_score(kpis, sub, caps)
         
         kpis.update({
