@@ -176,7 +176,7 @@ def build_decision_snapshot(
 
     ranked_actions = rank_recommendations(recommendations)
 
-    return {
+    snapshot = {
         "title": "EXECUTIVE DECISION SNAPSHOT",
         "overall_risk": risk["display"],
         "top_problems": extract_top_problems(insights),
@@ -190,6 +190,8 @@ def build_decision_snapshot(
             "Approve required resources",
         ],
     }
+
+    return snapshot
 
 
 # =====================================================
@@ -218,20 +220,23 @@ def build_success_criteria(
 
 
 # =====================================================
-# BOARD READINESS SCORE
+# BOARD READINESS SCORE (SINGLE BOARD NUMBER)
 # =====================================================
 
 def compute_board_readiness_score(
     kpis: Dict[str, Any],
     insights: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    """
+    Computes a single board-readiness score (0–100).
+    """
 
-    # KPI confidence (40)
+    # KPI confidence (40%)
     conf = kpis.get("_confidence", {})
     avg_conf = sum(conf.values()) / len(conf) if conf else 0.6
     kpi_score = avg_conf * 40
 
-    # Insight trust (30)
+    # Insight trust (30%)
     severity_weight = {
         "CRITICAL": 1.0,
         "RISK": 0.8,
@@ -248,7 +253,7 @@ def compute_board_readiness_score(
 
     insight_score = (trusted / total) * 30 if total else 15
 
-    # Coverage (20)
+    # Coverage (20%)
     required = [
         "board_confidence_score",
         "total_volume",
@@ -259,7 +264,7 @@ def compute_board_readiness_score(
     present = sum(1 for k in required if k in kpis and kpis[k] is not None)
     coverage_score = (present / len(required)) * 20
 
-    # Risk penalty
+    # Risk penalty (-10 max)
     criticals = sum(1 for i in insights if i.get("level") == "CRITICAL")
     penalty = 10 if criticals >= 3 else 6 if criticals == 2 else 3 if criticals == 1 else 0
 
@@ -277,7 +282,7 @@ def compute_board_readiness_score(
 
 
 # =====================================================
-# EXECUTIVE PAYLOAD (FINAL, CONFIDENCE-AWARE)
+# EXECUTIVE PAYLOAD (FINAL — CONFIDENCE-AWARE)
 # =====================================================
 
 def build_executive_payload(
@@ -298,6 +303,7 @@ def build_executive_payload(
         conf = confidence_map.get(key, 0.6)
 
         primary_kpis.append({
+            "key": key,
             "name": k["name"],
             "value": k["value"],
             "confidence": round(conf, 2),
@@ -337,6 +343,8 @@ def build_executive_payload(
         ],
         "success_criteria": build_success_criteria(kpis),
         "board_readiness": board_readiness,
+
+        # 🔒 INTERNAL (used by orchestrator / PDF)
         "_executive": {
             "primary_kpis": primary_kpis,
             "sub_domain": kpis.get("sub_domain"),
