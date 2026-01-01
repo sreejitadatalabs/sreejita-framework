@@ -41,6 +41,11 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             payload.get("primary_kpis")
             or executive.get("primary_kpis", [])
         ),
+        "board_readiness": (
+            payload.get("board_readiness")
+            or executive.get("board_readiness", {})
+        ),
+        "board_readiness_trend": payload.get("board_readiness_trend", {}),
         "summary": payload.get("summary", []) or executive.get("summary", []),
         "visuals": payload.get("visuals", []),
         "insights": payload.get("insights", []),
@@ -78,7 +83,19 @@ def format_kpi_value(key: str, value: Any) -> str:
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL — PRODUCTION)
+# KPI CONFIDENCE BADGE
+# =====================================================
+
+def confidence_badge(conf: float) -> str:
+    if conf >= 0.85:
+        return "🟢 High"
+    elif conf >= 0.70:
+        return "🟡 Medium"
+    return "🔴 Low"
+
+
+# =====================================================
+# EXECUTIVE PDF RENDERER (FINAL — BOARD GRADE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -89,7 +106,6 @@ class ExecutivePDFRenderer:
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
 
-        # Sort visuals by importance
         payload["visuals"] = sorted(
             payload.get("visuals", []),
             key=lambda x: x.get("importance", 0),
@@ -187,19 +203,39 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # PRIMARY KPIs (TOP 3–5)
+        # BOARD READINESS (NEW)
+        # =================================================
+        br = payload.get("board_readiness", {})
+        trend = payload.get("board_readiness_trend", {})
+
+        if br:
+            story.append(Paragraph("Board Readiness Assessment", styles["ExecSection"]))
+            story.append(Paragraph(
+                f"<b>Score:</b> {br.get('score','-')} / 100<br/>"
+                f"<b>Status:</b> {br.get('band','-')}<br/>"
+                f"<b>Trend:</b> {trend.get('trend','→')} "
+                f"(Previous: {trend.get('previous_score','N/A')})",
+                styles["ExecBody"]
+            ))
+            story.append(PageBreak())
+
+        # =================================================
+        # PRIMARY KPIs (WITH CONFIDENCE)
         # =================================================
         primary = payload.get("primary_kpis", [])
         if primary:
-            rows = [["Metric", "Value"]]
+            rows = [["Metric", "Value", "Confidence"]]
+
             for item in primary[:5]:
+                conf = float(item.get("confidence", 0.6))
                 rows.append([
                     item.get("name", "Metric"),
                     format_kpi_value(item.get("name", ""), item.get("value")),
+                    confidence_badge(conf),
                 ])
 
             story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
-            table = Table(rows, colWidths=[4 * inch, 2 * inch])
+            table = Table(rows, colWidths=[3.5 * inch, 2 * inch, 1.5 * inch])
             table.setStyle(TableStyle([
                 ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
                 ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
@@ -210,7 +246,7 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # VISUALS (MAX 6)
+        # VISUALS
         # =================================================
         if payload["visuals"]:
             story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
@@ -230,7 +266,7 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # INSIGHTS (TOP 3–5)
+        # INSIGHTS
         # =================================================
         if payload["insights"]:
             story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
@@ -244,7 +280,7 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
 
         # =================================================
-        # RECOMMENDATIONS (TOP 5)
+        # RECOMMENDATIONS
         # =================================================
         if payload["recommendations"]:
             story.append(Paragraph("Recommendations", styles["ExecSection"]))
