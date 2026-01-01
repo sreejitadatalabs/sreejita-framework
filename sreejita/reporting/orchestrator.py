@@ -49,7 +49,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# BOARD READINESS PERSISTENCE (FILE-BASED)
+# BOARD READINESS PERSISTENCE
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -65,18 +65,21 @@ def _load_board_history(run_dir: Path) -> Dict[str, int]:
         with open(path, "r") as f:
             return json.load(f)
     except Exception:
+        log.warning("Board readiness history corrupted. Resetting.")
         return {}
 
 
 def _save_board_history(run_dir: Path, history: Dict[str, int]) -> None:
+    tmp = _history_path(run_dir).with_suffix(".tmp")
     try:
-        with open(_history_path(run_dir), "w") as f:
+        with open(tmp, "w") as f:
             json.dump(history, f, indent=2)
+        tmp.replace(_history_path(run_dir))
     except Exception:
-        pass
+        log.exception("Failed to persist board readiness history")
 
 
-def _compute_trend(previous: int, current: int) -> str:
+def _compute_trend(previous: int | None, current: int | None) -> str:
     if previous is None or current is None:
         return "→"
     if current >= previous + 5:
@@ -98,7 +101,8 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset_key = f"{input_path.stem}"
+    # Prevent filename collisions (csv vs xlsx)
+    dataset_key = f"{input_path.stem}{input_path.suffix}"
 
     # -------------------------------------------------
     # 1. LOAD DATA
@@ -108,7 +112,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         log.warning("Input file is empty: %s", input_path)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE
+    # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(base_df)
@@ -141,6 +145,8 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "executive": {},
             }
         }
+
+    log.info("Domain resolved: %s | Dataset: %s", domain, dataset_key)
 
     # -------------------------------------------------
     # 4. DOMAIN EXECUTION
@@ -177,7 +183,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         )
 
         # -------------------------------------------------
-        # BOARD READINESS TREND + ALERT
+        # BOARD READINESS TREND (POST-COGNITION)
         # -------------------------------------------------
         history = _load_board_history(run_dir)
 
@@ -187,22 +193,20 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         trend = _compute_trend(previous_score, current_score)
 
-        # [FIX] Pass full history list for PDF Sparklines
-        # Take last 5 entries to keep payload clean
+        # Build sparkline history (include current)
         history_values = list(history.values())
         if isinstance(current_score, int):
-             history_values.append(current_score) # Include current in the timeline if desired, or just use history
-        
+            history_values.append(current_score)
+
         executive_payload["board_readiness_trend"] = {
             "previous_score": previous_score,
             "current_score": current_score,
             "trend": trend,
         }
-        
-        # [CRITICAL FIX] This key is required by the PDF renderer
-        executive_payload["board_readiness_history"] = list(history.values())[-10:]
 
-        # 🚨 Inject CRITICAL alert if major drop
+        executive_payload["board_readiness_history"] = history_values[-10:]
+
+        # 🚨 Governance alert (does NOT affect score by design)
         if (
             isinstance(previous_score, int)
             and isinstance(current_score, int)
@@ -251,6 +255,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         try:
             generated = engine.generate_visuals(df, visuals_dir) or []
         except Exception:
+            log.exception("Visual generation failed")
             generated = []
 
         for v in generated:
