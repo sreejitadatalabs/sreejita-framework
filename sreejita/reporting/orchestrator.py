@@ -52,8 +52,12 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 # BOARD READINESS PERSISTENCE (FILE-BASED)
 # =====================================================
 
+def _history_path(run_dir: Path) -> Path:
+    return run_dir / "board_readiness_history.json"
+
+
 def _load_board_history(run_dir: Path) -> Dict[str, int]:
-    path = run_dir / "board_readiness_history.json"
+    path = _history_path(run_dir)
     if not path.exists():
         return {}
 
@@ -65,20 +69,19 @@ def _load_board_history(run_dir: Path) -> Dict[str, int]:
 
 
 def _save_board_history(run_dir: Path, history: Dict[str, int]) -> None:
-    path = run_dir / "board_readiness_history.json"
     try:
-        with open(path, "w") as f:
+        with open(_history_path(run_dir), "w") as f:
             json.dump(history, f, indent=2)
     except Exception:
         pass
 
 
 def _compute_trend(previous: int, current: int) -> str:
-    if previous is None:
+    if previous is None or current is None:
         return "→"
-    if current > previous + 2:
+    if current >= previous + 5:
         return "↑"
-    if current < previous - 2:
+    if current <= previous - 5:
         return "↓"
     return "→"
 
@@ -88,22 +91,6 @@ def _compute_trend(previous: int, current: int) -> str:
 # =====================================================
 
 def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Authoritative orchestration layer.
-
-    Responsibilities:
-    - Load data
-    - Detect dataset shape (context only)
-    - Select domain
-    - Execute domain engine
-    - Generate executive cognition payload
-
-    Explicitly does NOT:
-    - Interpret KPIs
-    - Rank KPIs
-    - Format outputs
-    """
-
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -111,32 +98,26 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    dataset_key = f"{input_path.stem}"
+
     # -------------------------------------------------
-    # 1. LOAD DATA (IMMUTABLE BASE)
+    # 1. LOAD DATA
     # -------------------------------------------------
     base_df = _read_tabular_file_safe(input_path)
-
     if base_df.empty:
         log.warning("Input file is empty: %s", input_path)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY)
+    # 2. DATASET SHAPE
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(base_df)
         shape_val = shape_info.get("shape")
         if hasattr(shape_val, "value"):
             shape_info["shape"] = shape_val.value
-
-        log.info("Dataset shape detected: %s", shape_info.get("shape"))
-
     except Exception:
         log.exception("Shape detection failed")
-        shape_info = {
-            "shape": "unknown",
-            "score": {},
-            "signals": {},
-        }
+        shape_info = {"shape": "unknown", "score": {}, "signals": {}}
 
     # -------------------------------------------------
     # 3. DOMAIN DECISION
@@ -146,7 +127,6 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     engine = decision.engine
 
     if not engine:
-        log.warning("No domain engine resolved.")
         return {
             "unknown": {
                 "kpis": {},
@@ -163,7 +143,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (ISOLATED & DEFENSIVE)
+    # 4. DOMAIN EXECUTION
     # -------------------------------------------------
     try:
         df = base_df.copy(deep=True)
@@ -190,7 +170,6 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs) or []
 
-        # 🧠 EXECUTIVE COGNITION (PURE)
         executive_payload = build_executive_payload(
             kpis=kpis,
             insights=insights,
@@ -198,13 +177,13 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         )
 
         # -------------------------------------------------
-        # BOARD READINESS TREND (PERSISTENT)
+        # BOARD READINESS TREND + ALERT
         # -------------------------------------------------
         history = _load_board_history(run_dir)
 
         board = executive_payload.get("board_readiness", {})
         current_score = board.get("score")
-        previous_score = history.get(domain)
+        previous_score = history.get(dataset_key)
 
         trend = _compute_trend(previous_score, current_score)
 
@@ -214,13 +193,29 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "trend": trend,
         }
 
+        # 🚨 Inject CRITICAL alert if major drop
+        if (
+            isinstance(previous_score, int)
+            and isinstance(current_score, int)
+            and previous_score - current_score >= 10
+        ):
+            insights.insert(0, {
+                "level": "CRITICAL",
+                "title": "Board Readiness Decline",
+                "so_what": (
+                    f"Board readiness dropped from {previous_score} to "
+                    f"{current_score}. Executive escalation required."
+                ),
+                "source": "Executive Governance",
+                "executive_summary_flag": True,
+            })
+
         if isinstance(current_score, int):
-            history[domain] = current_score
+            history[dataset_key] = current_score
             _save_board_history(run_dir, history)
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
-
         return {
             domain: {
                 "kpis": {},
@@ -237,40 +232,27 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 5. VISUAL GENERATION (HARDENED)
+    # 5. VISUAL GENERATION
     # -------------------------------------------------
     visuals = []
-
     if hasattr(engine, "generate_visuals"):
         visuals_dir = run_dir / "visuals" / domain
         visuals_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             generated = engine.generate_visuals(df, visuals_dir) or []
-        except Exception as e:
-            log.error("Visual generation failed for %s: %s", domain, e)
+        except Exception:
             generated = []
 
         for v in generated:
-            if not isinstance(v, dict):
-                continue
-
-            raw_path = v.get("path")
-            if not raw_path:
-                continue
-
-            p = Path(raw_path)
+            p = Path(v.get("path", ""))
             if not p.is_absolute():
                 p = visuals_dir / p
-
             if p.exists():
-                visuals.append({
-                    **v,
-                    "path": str(p),
-                })
+                visuals.append({**v, "path": str(p)})
 
     # -------------------------------------------------
-    # 6. AUTHORITATIVE PAYLOAD (CONTRACT SAFE)
+    # 6. FINAL PAYLOAD
     # -------------------------------------------------
     return {
         domain: {
@@ -279,8 +261,6 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "recommendations": recommendations,
             "visuals": visuals,
             "shape": shape_info,
-
-            # 🧠 EXECUTIVE = SINGLE SOURCE OF TRUTH
             "executive": executive_payload,
         }
     }
