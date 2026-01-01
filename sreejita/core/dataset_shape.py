@@ -3,153 +3,127 @@ from typing import Dict, Any
 import pandas as pd
 
 
-# =====================================================
-# DATASET SHAPE ENUM
-# =====================================================
-
 class DatasetShape(str, Enum):
     """
-    Structural shape of the dataset.
-    CONTEXT only — never business logic.
+    Dataset SHAPE describes the structural nature of the data,
+    NOT the business domain.
     """
     ROW_LEVEL_CLINICAL = "row_level_clinical"
     AGGREGATED_OPERATIONAL = "aggregated_operational"
     FINANCIAL_SUMMARY = "financial_summary"
+    QUALITY_METRICS = "quality_metrics"
     UNKNOWN = "unknown"
 
 
-# =====================================================
-# DATASET SHAPE DETECTOR (DETERMINISTIC)
-# =====================================================
-
 def detect_dataset_shape(df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Detects dataset structure using column signals only.
+    Detects dataset SHAPE (not domain).
 
-    Rules:
-    - No domain assumptions
-    - No thresholds
-    - No ML
-    - Deterministic & explainable
+    GUARANTEES:
+    - Never raises
+    - Deterministic
+    - Explainable
+    - Safe for messy, partial, real-world data
     """
 
-    if df is None or df.empty:
-        return {
-            "shape": DatasetShape.UNKNOWN,
-            "score": {},
-            "signals": {}
+    try:
+        # Normalize columns aggressively for fuzzy matching
+        cols = {
+            c.lower().strip().replace(" ", "_").replace("-", "_")
+            for c in df.columns
+        }
+        row_count = len(df)
+
+        score = {
+            DatasetShape.ROW_LEVEL_CLINICAL: 0,
+            DatasetShape.AGGREGATED_OPERATIONAL: 0,
+            DatasetShape.FINANCIAL_SUMMARY: 0,
+            DatasetShape.QUALITY_METRICS: 0,
         }
 
-    cols = [
-        c.lower().strip().replace(" ", "_")
-        for c in df.columns
-    ]
+        reasons = {k: [] for k in score}
 
-    score = {
-        DatasetShape.ROW_LEVEL_CLINICAL: 0,
-        DatasetShape.AGGREGATED_OPERATIONAL: 0,
-        DatasetShape.FINANCIAL_SUMMARY: 0,
-        DatasetShape.UNKNOWN: 0,
-    }
+        # =================================================
+        # ROW-LEVEL CLINICAL
+        # =================================================
+        if any(tok in c for c in cols for tok in ["patient", "mrn", "subject", "person"]):
+            score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
+            reasons[DatasetShape.ROW_LEVEL_CLINICAL].append("patient identifiers present")
 
-    signals = {
-        "patient_identifier": False,
-        "time_dimension": False,
-        "aggregation_keywords": False,
-        "financial_keywords": False,
-        "entity_keywords": False,     # NEW
-        "population_keywords": False, # NEW
-    }
+        if any(tok in c for c in cols for tok in ["admission", "discharge", "visit_date", "encounter"]):
+            score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
+            reasons[DatasetShape.ROW_LEVEL_CLINICAL].append("admission/discharge dates present")
 
-    # -------------------------------------------------
-    # ROW-LEVEL CLINICAL SIGNALS
-    # -------------------------------------------------
-    if any(
-        any(k in c for k in [
-            "patient", "mrn", "pid",
-            "encounter", "visit", "admission"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 3
-        signals["patient_identifier"] = True
+        if row_count > 300:
+            score[DatasetShape.ROW_LEVEL_CLINICAL] += 1
+            reasons[DatasetShape.ROW_LEVEL_CLINICAL].append("high row count")
 
-    if any(
-        any(k in c for k in [
-            "date", "time", "admit",
-            "arrival", "discharge", "sample_date"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 2
-        signals["time_dimension"] = True
+        # =================================================
+        # AGGREGATED OPERATIONAL
+        # =================================================
+        if any(tok in c for c in cols for tok in ["total", "volume", "visits", "count"]):
+            score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
+            reasons[DatasetShape.AGGREGATED_OPERATIONAL].append("aggregated volume fields present")
 
-    # -------------------------------------------------
-    # ENTITY-LEVEL (DIAGNOSTICS / FACILITY / REGION)
-    # -------------------------------------------------
-    if any(
-        any(k in c for k in [
-            "test", "lab", "specimen",
-            "facility", "center", "provider"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.ROW_LEVEL_CLINICAL] += 1
-        signals["entity_keywords"] = True
+        if any(tok in c for c in cols for tok in ["avg", "average", "mean", "median"]):
+            score[DatasetShape.AGGREGATED_OPERATIONAL] += 2
+            reasons[DatasetShape.AGGREGATED_OPERATIONAL].append("average/summary metrics present")
 
-    # -------------------------------------------------
-    # POPULATION / PUBLIC HEALTH SIGNALS
-    # -------------------------------------------------
-    if any(
-        any(k in c for k in [
-            "population", "region", "district",
-            "state", "country", "incidence", "prevalence"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.AGGREGATED_OPERATIONAL] += 2
-        signals["population_keywords"] = True
+        if row_count < 300:
+            score[DatasetShape.AGGREGATED_OPERATIONAL] += 1
+            reasons[DatasetShape.AGGREGATED_OPERATIONAL].append("low-to-moderate row count")
 
-    # -------------------------------------------------
-    # AGGREGATED OPERATIONAL SIGNALS
-    # -------------------------------------------------
-    if any(
-        any(k in c for k in [
-            "total", "count", "volume",
-            "census", "avg", "mean", "rate"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.AGGREGATED_OPERATIONAL] += 3
-        signals["aggregation_keywords"] = True
+        # =================================================
+        # FINANCIAL SUMMARY
+        # =================================================
+        if any(tok in c for c in cols for tok in ["revenue", "billing", "charge", "cost", "expense"]):
+            score[DatasetShape.FINANCIAL_SUMMARY] += 3
+            reasons[DatasetShape.FINANCIAL_SUMMARY].append("financial amount fields present")
 
-    # -------------------------------------------------
-    # FINANCIAL SUMMARY SIGNALS
-    # -------------------------------------------------
-    if any(
-        any(k in c for k in [
-            "revenue", "cost", "billing",
-            "charges", "amount", "expense",
-            "claim", "payment"
-        ])
-        for c in cols
-    ):
-        score[DatasetShape.FINANCIAL_SUMMARY] += 3
-        signals["financial_keywords"] = True
+        if any(tok in c for c in cols for tok in ["department", "service", "cost_center"]):
+            score[DatasetShape.FINANCIAL_SUMMARY] += 2
+            reasons[DatasetShape.FINANCIAL_SUMMARY].append("financial grouping fields present")
 
-    # -------------------------------------------------
-    # FINAL DECISION (PRIORITIZED)
-    # -------------------------------------------------
-    if score[DatasetShape.ROW_LEVEL_CLINICAL] >= 4:
-        shape = DatasetShape.ROW_LEVEL_CLINICAL
-    else:
-        shape = max(score, key=score.get)
+        # =================================================
+        # QUALITY METRICS
+        # =================================================
+        if any("rate" in c or "ratio" in c for c in cols):
+            score[DatasetShape.QUALITY_METRICS] += 2
+            reasons[DatasetShape.QUALITY_METRICS].append("rate/ratio metrics present")
 
-    if score[shape] == 0:
-        shape = DatasetShape.UNKNOWN
+        if any(tok in c for c in cols for tok in ["readmission", "mortality", "infection", "adverse"]):
+            score[DatasetShape.QUALITY_METRICS] += 3
+            reasons[DatasetShape.QUALITY_METRICS].append("clinical quality indicators present")
 
-    return {
-        "shape": shape,
-        "score": score,
-        "signals": signals
-    }
+        # =================================================
+        # FINAL DECISION
+        # =================================================
+        best_shape = max(score, key=score.get)
+        max_score = score[best_shape]
+
+        if max_score == 0:
+            return {
+                "shape": DatasetShape.UNKNOWN,
+                "confidence": 0.0,
+                "signals": score,
+                "reason": "No strong structural signals detected",
+            }
+
+        # Confidence normalized against reasonable maximum (5)
+        confidence = round(min(max_score / 5.0, 1.0), 2)
+
+        return {
+            "shape": best_shape,
+            "confidence": confidence,
+            "signals": score,
+            "reason": "; ".join(reasons[best_shape]) or "Heuristic match",
+        }
+
+    except Exception:
+        # Absolute safety fallback
+        return {
+            "shape": DatasetShape.UNKNOWN,
+            "confidence": 0.0,
+            "signals": {},
+            "reason": "Shape detection failed safely",
+        }
