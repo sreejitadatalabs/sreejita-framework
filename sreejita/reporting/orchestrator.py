@@ -1,4 +1,5 @@
 import logging
+import json
 from pathlib import Path
 from typing import Dict, Any
 
@@ -48,6 +49,41 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
+# BOARD READINESS PERSISTENCE (FILE-BASED)
+# =====================================================
+
+def _load_board_history(run_dir: Path) -> Dict[str, int]:
+    path = run_dir / "board_readiness_history.json"
+    if not path.exists():
+        return {}
+
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_board_history(run_dir: Path, history: Dict[str, int]) -> None:
+    path = run_dir / "board_readiness_history.json"
+    try:
+        with open(path, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception:
+        pass
+
+
+def _compute_trend(previous: int, current: int) -> str:
+    if previous is None:
+        return "→"
+    if current > previous + 2:
+        return "↑"
+    if current < previous - 2:
+        return "↓"
+    return "→"
+
+
+# =====================================================
 # ORCHESTRATOR — SINGLE SOURCE OF TRUTH
 # =====================================================
 
@@ -76,7 +112,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA
+    # 1. LOAD DATA (IMMUTABLE BASE)
     # -------------------------------------------------
     base_df = _read_tabular_file_safe(input_path)
 
@@ -127,7 +163,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION
+    # 4. DOMAIN EXECUTION (ISOLATED & DEFENSIVE)
     # -------------------------------------------------
     try:
         df = base_df.copy(deep=True)
@@ -154,20 +190,33 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs) or []
 
-        # 🧠 EXECUTIVE COGNITION (AUTHORITATIVE)
+        # 🧠 EXECUTIVE COGNITION (PURE)
         executive_payload = build_executive_payload(
             kpis=kpis,
             insights=insights,
             recommendations=recommendations,
         )
 
-        # ---------------------------------------------
-        # BOARD READINESS TREND (SAFE DEFAULT)
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # BOARD READINESS TREND (PERSISTENT)
+        # -------------------------------------------------
+        history = _load_board_history(run_dir)
+
+        board = executive_payload.get("board_readiness", {})
+        current_score = board.get("score")
+        previous_score = history.get(domain)
+
+        trend = _compute_trend(previous_score, current_score)
+
         executive_payload["board_readiness_trend"] = {
-            "previous_score": None,
-            "trend": "→",
+            "previous_score": previous_score,
+            "current_score": current_score,
+            "trend": trend,
         }
+
+        if isinstance(current_score, int):
+            history[domain] = current_score
+            _save_board_history(run_dir, history)
 
     except Exception as e:
         log.exception("Domain processing failed: %s", domain)
@@ -188,7 +237,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 5. VISUAL GENERATION
+    # 5. VISUAL GENERATION (HARDENED)
     # -------------------------------------------------
     visuals = []
 
@@ -221,7 +270,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 })
 
     # -------------------------------------------------
-    # 6. FINAL CONTRACT PAYLOAD (NO OVERRIDES)
+    # 6. AUTHORITATIVE PAYLOAD (CONTRACT SAFE)
     # -------------------------------------------------
     return {
         domain: {
