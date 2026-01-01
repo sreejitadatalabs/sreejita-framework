@@ -9,18 +9,9 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
-# 🧠 EXECUTIVE COGNITION
+# 🧠 EXECUTIVE COGNITION (MANDATORY)
 from sreejita.narrative.executive_cognition import build_executive_payload
 
-
-# =====================================================
-# LOGGER (DEFENSIVE)
-# =====================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 log = logging.getLogger("sreejita.orchestrator")
 
 
@@ -45,46 +36,42 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
             except Exception:
                 continue
 
-    raise ValueError(f"Unsupported or unreadable file: {path}")
+    raise ValueError(f"Unsupported file type: {suffix}")
 
 
 # =====================================================
-# BOARD READINESS PERSISTENCE
+# BOARD READINESS HISTORY (PERSISTENT)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
     return run_dir / "board_readiness_history.json"
 
 
-def _load_board_history(run_dir: Path) -> Dict[str, int]:
+def _load_history(run_dir: Path) -> Dict[str, int]:
     path = _history_path(run_dir)
     if not path.exists():
         return {}
-
     try:
         with open(path, "r") as f:
             return json.load(f)
     except Exception:
-        log.warning("Board readiness history corrupted. Resetting.")
         return {}
 
 
-def _save_board_history(run_dir: Path, history: Dict[str, int]) -> None:
-    tmp = _history_path(run_dir).with_suffix(".tmp")
+def _save_history(run_dir: Path, history: Dict[str, int]) -> None:
     try:
-        with open(tmp, "w") as f:
+        with open(_history_path(run_dir), "w") as f:
             json.dump(history, f, indent=2)
-        tmp.replace(_history_path(run_dir))
     except Exception:
-        log.exception("Failed to persist board readiness history")
+        pass
 
 
-def _compute_trend(previous: int | None, current: int | None) -> str:
-    if previous is None or current is None:
+def _trend(prev: int | None, curr: int | None) -> str:
+    if prev is None or curr is None:
         return "→"
-    if current >= previous + 5:
+    if curr >= prev + 5:
         return "↑"
-    if current <= previous - 5:
+    if curr <= prev - 5:
         return "↓"
     return "→"
 
@@ -96,48 +83,44 @@ def _compute_trend(previous: int | None, current: int | None) -> str:
 def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     input_path = Path(input_path)
     if not input_path.exists():
-        raise FileNotFoundError(f"Input file not found: {input_path}")
+        raise FileNotFoundError(input_path)
 
-    run_dir = Path(config.get("run_dir", "./runs"))
+    if "run_dir" not in config:
+        raise RuntimeError("config['run_dir'] is required")
+
+    run_dir = Path(config["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Prevent filename collisions (csv vs xlsx)
-    dataset_key = f"{input_path.stem}{input_path.suffix}"
+    dataset_key = input_path.stem
 
     # -------------------------------------------------
     # 1. LOAD DATA
     # -------------------------------------------------
-    base_df = _read_tabular_file_safe(input_path)
-    if base_df.empty:
-        log.warning("Input file is empty: %s", input_path)
+    df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY)
+    # 2. DATASET SHAPE (CRITICAL)
     # -------------------------------------------------
     try:
-        shape_info = detect_dataset_shape(base_df)
-        shape_val = shape_info.get("shape")
-        if hasattr(shape_val, "value"):
-            shape_info["shape"] = shape_val.value
+        shape_info = detect_dataset_shape(df)
     except Exception:
-        log.exception("Shape detection failed")
-        shape_info = {"shape": "unknown", "score": {}, "signals": {}}
+        shape_info = {"shape": "unknown", "signals": {}}
 
     # -------------------------------------------------
     # 3. DOMAIN DECISION
     # -------------------------------------------------
-    decision = decide_domain(base_df)
+    decision = decide_domain(df)
     domain = decision.selected_domain
     engine = decision.engine
 
-    if not engine:
+    if engine is None:
         return {
             "unknown": {
                 "kpis": {},
                 "insights": [{
                     "level": "RISK",
                     "title": "Unknown Domain",
-                    "so_what": "No suitable domain engine could be identified.",
+                    "so_what": "No suitable domain engine found.",
                 }],
                 "recommendations": [],
                 "visuals": [],
@@ -145,128 +128,85 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
                 "executive": {},
             }
         }
-
-    log.info("Domain resolved: %s | Dataset: %s", domain, dataset_key)
 
     # -------------------------------------------------
     # 4. DOMAIN EXECUTION
     # -------------------------------------------------
     try:
-        df = base_df.copy(deep=True)
-
-        engine.shape_info = shape_info
-        engine.shape = shape_info.get("shape")
-
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        kpis = engine.calculate_kpis(df) or {}
+        kpis = engine.calculate_kpis(df)
 
         try:
-            insights = engine.generate_insights(df, kpis, shape_info=shape_info) or []
+            insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
-            insights = engine.generate_insights(df, kpis) or []
+            insights = engine.generate_insights(df, kpis)
 
         try:
-            raw_recs = engine.generate_recommendations(
-                df, kpis, insights, shape_info=shape_info
-            ) or []
+            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
         except TypeError:
-            raw_recs = engine.generate_recommendations(df, kpis, insights) or []
+            raw_recs = engine.generate_recommendations(df, kpis, insights)
 
-        recommendations = enrich_recommendations(raw_recs) or []
+        recommendations = enrich_recommendations(raw_recs)
 
-        executive_payload = build_executive_payload(
+        # 🧠 EXECUTIVE INTELLIGENCE (MANDATORY)
+        executive = build_executive_payload(
             kpis=kpis,
             insights=insights,
             recommendations=recommendations,
         )
 
-        # -------------------------------------------------
-        # BOARD READINESS TREND (POST-COGNITION)
-        # -------------------------------------------------
-        history = _load_board_history(run_dir)
-
-        board = executive_payload.get("board_readiness", {})
-        current_score = board.get("score")
-        previous_score = history.get(dataset_key)
-
-        trend = _compute_trend(previous_score, current_score)
-
-        # Build sparkline history (include current)
-        history_values = list(history.values())
-        if isinstance(current_score, int):
-            history_values.append(current_score)
-
-        executive_payload["board_readiness_trend"] = {
-            "previous_score": previous_score,
-            "current_score": current_score,
-            "trend": trend,
-        }
-
-        executive_payload["board_readiness_history"] = history_values[-10:]
-
-        # 🚨 Governance alert (does NOT affect score by design)
-        if (
-            isinstance(previous_score, int)
-            and isinstance(current_score, int)
-            and previous_score - current_score >= 10
-        ):
-            insights.insert(0, {
-                "level": "CRITICAL",
-                "title": "Board Readiness Decline",
-                "so_what": (
-                    f"Board readiness dropped from {previous_score} to "
-                    f"{current_score}. Executive escalation required."
-                ),
-                "source": "Executive Governance",
-                "executive_summary_flag": True,
-            })
-
-        if isinstance(current_score, int):
-            history[dataset_key] = current_score
-            _save_board_history(run_dir, history)
-
     except Exception as e:
-        log.exception("Domain processing failed: %s", domain)
-        return {
-            domain: {
-                "kpis": {},
-                "insights": [{
-                    "level": "CRITICAL",
-                    "title": "Domain Processing Failure",
-                    "so_what": str(e),
-                }],
-                "recommendations": [],
-                "visuals": [],
-                "shape": shape_info,
-                "executive": {},
-            }
-        }
+        log.exception("Domain processing failed")
+        raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL GENERATION
+    # 5. BOARD READINESS TREND (PERSISTENT)
+    # -------------------------------------------------
+    history = _load_history(run_dir)
+
+    board = executive.get("board_readiness", {})
+    current_score = board.get("score")
+    previous_score = history.get(dataset_key)
+
+    trend = _trend(previous_score, current_score)
+
+    history_values = list(history.values())
+    if isinstance(current_score, int):
+        history_values.append(current_score)
+
+    executive["board_readiness_trend"] = {
+        "previous_score": previous_score,
+        "current_score": current_score,
+        "trend": trend,
+    }
+
+    executive["board_readiness_history"] = history_values[-10:]
+
+    if isinstance(current_score, int):
+        history[dataset_key] = current_score
+        _save_history(run_dir, history)
+
+    # -------------------------------------------------
+    # 6. VISUALS
     # -------------------------------------------------
     visuals = []
     if hasattr(engine, "generate_visuals"):
         visuals_dir = run_dir / "visuals" / domain
         visuals_dir.mkdir(parents=True, exist_ok=True)
-
         try:
             generated = engine.generate_visuals(df, visuals_dir) or []
         except Exception:
-            log.exception("Visual generation failed")
             generated = []
 
         for v in generated:
             p = Path(v.get("path", ""))
-            if not p.is_absolute():
-                p = visuals_dir / p
             if p.exists():
-                visuals.append({**v, "path": str(p)})
+                visuals.append(v)
 
     # -------------------------------------------------
-    # 6. FINAL PAYLOAD
+    # 7. FINAL PAYLOAD (PDF-SAFE)
     # -------------------------------------------------
     return {
         domain: {
@@ -275,6 +215,6 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             "recommendations": recommendations,
             "visuals": visuals,
             "shape": shape_info,
-            "executive": executive_payload,
+            "executive": executive,
         }
     }
