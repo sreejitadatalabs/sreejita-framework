@@ -4,65 +4,73 @@
 HEALTHCARE BENCHMARKS & THRESHOLDS (AUTHORITATIVE)
 --------------------------------------------------
 This file defines "What Good Looks Like" for the Healthcare domain.
-It includes:
-1. BENCHMARKS: Rich metadata for narrative context (Source, Unit, Targets).
-2. THRESHOLDS: Flat key-value pairs for code logic/scoring.
-3. EXTERNAL LIMITS: Governance anchors to prevent internal bias (The "Reality Check").
+
+It contains:
+1. BENCHMARKS        → Narrative context (targets, sources, units)
+2. THRESHOLDS        → Flat logic thresholds (alerts & scoring)
+3. EXTERNAL LIMITS   → Governance caps to prevent internal bias
+4. ACCESS HELPERS    → Canonical, safe access for the entire framework
 """
+
+from typing import Dict, Any
+
 
 # =====================================================
 # 1. NARRATIVE BENCHMARKS (Context & Sources)
 # =====================================================
-HEALTHCARE_BENCHMARKS = {
+
+HEALTHCARE_BENCHMARKS: Dict[str, Dict[str, Any]] = {
     # --- Operational Efficiency ---
     "avg_los": {
-        "good": 5.0,        # Target: 5.0 days (Acute care standard)
-        "warning": 7.0,     # Alert level
-        "critical": 9.0,    # Crisis level
+        "good": 5.0,
+        "warning": 7.0,
+        "critical": 9.0,
         "unit": "days",
-        "source": "CMS Inpatient Norms"
+        "source": "CMS Inpatient Norms",
     },
-    
+
     # --- Clinical Quality ---
     "readmission_rate": {
-        "good": 0.10,       # Target: 10%
-        "warning": 0.15,    # Alert level
-        "critical": 0.20,   # Crisis level (>20% risks penalties)
+        "good": 0.10,
+        "warning": 0.15,
+        "critical": 0.20,
         "unit": "rate",
-        "source": "CMS Hospital Compare"
+        "source": "CMS Hospital Compare",
     },
-    
+
     # --- Capacity Management ---
     "bed_turnover_index": {
-        "good": 0.20,       # Target: ~1 patient every 5 days
-        "warning": 0.14,    # Slow turnover
-        "critical": 0.10,   # Bed blocking
+        "good": 0.20,
+        "warning": 0.14,
+        "critical": 0.10,
         "unit": "index",
-        "source": "Ops Efficiency Std"
+        "source": "Operational Efficiency Standard",
     },
-    
+
     # --- Clinical Variation ---
     "provider_variance_score": {
-        "good": 0.20,       # Low variation (Standardized care)
-        "warning": 0.35,    # Moderate variation
-        "critical": 0.50,   # High variation (Quality risk)
-        "unit": "cv",       # Coefficient of Variation
-        "source": "Clinical Variation Std"
+        "good": 0.20,
+        "warning": 0.35,
+        "critical": 0.50,
+        "unit": "cv",
+        "source": "Clinical Variation Standard",
     },
-    
-    # --- Financial Health (Dynamic) ---
+
+    # --- Financial Health ---
     "cost_per_patient": {
-        "warning_multiplier": 1.2,   # Tightened from 1.5
-        "critical_multiplier": 1.5,  # Tightened from 2.5
-        "source": "Internal Financial Baseline"
-    }
+        "warning_multiplier": 1.2,
+        "critical_multiplier": 1.5,
+        "unit": "currency",
+        "source": "Internal Financial Baseline",
+    },
 }
 
 
 # =====================================================
-# 2. LOGIC THRESHOLDS (For Scoring & Alerts)
+# 2. LOGIC THRESHOLDS (Scoring & Alerts)
 # =====================================================
-HEALTHCARE_THRESHOLDS = {
+
+HEALTHCARE_THRESHOLDS: Dict[str, float] = {
     # Operations
     "avg_los_warning": 6.0,
     "avg_los_critical": 7.0,
@@ -74,7 +82,7 @@ HEALTHCARE_THRESHOLDS = {
     "readmission_critical": 0.18,
 
     # Financial
-    "cost_multiplier_warning": 1.2,   # vs median
+    "cost_multiplier_warning": 1.2,
     "cost_multiplier_critical": 1.5,
 
     # Workforce / Capacity
@@ -82,20 +90,73 @@ HEALTHCARE_THRESHOLDS = {
     "weekend_rate_warning": 0.35,
 }
 
+
 # =====================================================
-# 3. EXTERNAL GOVERNANCE LIMITS (The "Reality Check")
+# 3. EXTERNAL GOVERNANCE LIMITS (Reality Anchors)
 # =====================================================
-# These prevent "Internal Inflation" (where high internal costs set high internal benchmarks).
-# The system forces the benchmark down to these caps if the internal data is too high.
-HEALTHCARE_EXTERNAL_LIMITS = {
+
+HEALTHCARE_EXTERNAL_LIMITS: Dict[str, Dict[str, Any]] = {
     "avg_cost_per_patient": {
         "soft_cap": 12000,
         "hard_cap": 20000,
-        "source": "CMS / OECD blended heuristic"
+        "source": "CMS / OECD blended heuristic",
     },
     "avg_los": {
         "soft_cap": 5.0,
         "hard_cap": 10.0,
-        "source": "Standard Acute Care Norms"
-    }
+        "source": "Standard Acute Care Norms",
+    },
 }
+
+
+# =====================================================
+# 4. ACCESS HELPERS (CANONICAL API)
+# =====================================================
+
+def get_benchmark(metric: str) -> Dict[str, Any]:
+    """
+    Returns narrative benchmark metadata for a metric.
+    """
+    return HEALTHCARE_BENCHMARKS.get(metric, {})
+
+
+def get_threshold(key: str, default: float = None) -> float:
+    """
+    Safe accessor for flat logic thresholds.
+    """
+    return HEALTHCARE_THRESHOLDS.get(key, default)
+
+
+def apply_external_limits(metric: str, value: float) -> float:
+    """
+    Enforces governance caps on KPI values to prevent internal inflation.
+    """
+    if value is None:
+        return value
+
+    limits = HEALTHCARE_EXTERNAL_LIMITS.get(metric)
+    if not limits:
+        return value
+
+    soft = limits.get("soft_cap")
+    hard = limits.get("hard_cap")
+
+    if hard is not None:
+        value = min(value, hard)
+    elif soft is not None:
+        value = min(value, soft)
+
+    return value
+
+
+def explain_external_limit(metric: str) -> str:
+    """
+    Returns governance source for an external limit, if any.
+    """
+    limit = HEALTHCARE_EXTERNAL_LIMITS.get(metric, {})
+    return limit.get("source", "")
+
+
+# =====================================================
+# END OF FILE — AUTHORITATIVE TRUTH LAYER
+# =====================================================
