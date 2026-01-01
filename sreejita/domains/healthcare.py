@@ -86,7 +86,7 @@ def compute_kpi_confidence(kpis: Dict[str, Any], caps: List[str], total_records:
     """
     confidence: Dict[str, float] = {}
     
-    # [FIX 3] Exclude non-metric fields
+    # Exclude non-metric fields
     EXCLUDED = {"total_records", "total_entities", "board_confidence_score", "total_volume"}
     
     data_completeness = float(kpis.get("data_completeness", 0.5))
@@ -123,46 +123,25 @@ def confidence_weight_insights(
     kpi_confidence: Dict[str, float],
 ) -> List[Dict[str, Any]]:
     """
-    Orders insights using:
-    1. Severity (CRITICAL > RISK > WARNING > INFO)
-    2. KPI confidence (high-confidence first)
-    3. Executive relevance flag
+    Orders insights using Severity, Confidence, and Executive Relevance.
     """
-
     SEVERITY_WEIGHT = {
-        "CRITICAL": 4,
-        "RISK": 3,
-        "WARNING": 2,
-        "INFO": 1,
+        "CRITICAL": 4, "RISK": 3, "WARNING": 2, "INFO": 1,
     }
 
     def infer_confidence(insight: Dict[str, Any]) -> float:
-        """
-        Map insight → relevant KPI confidence.
-        Falls back safely.
-        """
         title = insight.get("title", "").lower()
-
-        # Heuristic mapping (deterministic)
-        if "cost" in title:
-            return kpi_confidence.get("avg_unit_cost", 0.6)
-        if "flow" in title or "duration" in title or "stay" in title:
-            return kpi_confidence.get("avg_duration", 0.6)
-        if "quality" in title or "readmission" in title:
-            return kpi_confidence.get("adverse_event_rate", 0.6)
-        if "variance" in title:
-            return kpi_confidence.get("variance_score", 0.6)
-        if "data" in title:
-            return kpi_confidence.get("data_completeness", 0.7)
-
-        # Safe fallback
+        if "cost" in title: return kpi_confidence.get("avg_unit_cost", 0.6)
+        if "flow" in title or "duration" in title: return kpi_confidence.get("avg_duration", 0.6)
+        if "quality" in title: return kpi_confidence.get("adverse_event_rate", 0.6)
+        if "variance" in title: return kpi_confidence.get("variance_score", 0.6)
+        if "data" in title: return kpi_confidence.get("data_completeness", 0.7)
         return 0.65
 
     def score(insight: Dict[str, Any]) -> float:
         severity = SEVERITY_WEIGHT.get(insight.get("level", "INFO"), 1)
         confidence = infer_confidence(insight)
         executive_boost = 1.2 if insight.get("executive_summary_flag") else 1.0
-
         return severity * confidence * executive_boost
 
     return sorted(insights, key=score, reverse=True)
