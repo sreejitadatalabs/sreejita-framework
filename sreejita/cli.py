@@ -42,7 +42,7 @@ def run_single_file(
     """
 
     # -------------------------------------------------
-    # Bootstrap domains (lazy, safe)
+    # Bootstrap domains (lazy & safe)
     # -------------------------------------------------
     importlib.import_module("sreejita.domains.bootstrap_v2")
     hybrid = importlib.import_module("sreejita.reporting.hybrid")
@@ -62,7 +62,7 @@ def run_single_file(
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
-    # HYBRID REPORT (MARKDOWN + PAYLOAD)
+    # HYBRID REPORT (MARKDOWN + EXECUTIVE PAYLOAD)
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
@@ -80,7 +80,6 @@ def run_single_file(
     md_path = Path(result["markdown"])
     payload = result["payload"]
 
-
     pdf_path = None
 
     # -------------------------------------------------
@@ -91,18 +90,25 @@ def run_single_file(
             pdf_mod = importlib.import_module(
                 "sreejita.reporting.pdf_renderer"
             )
+
+            if not hasattr(pdf_mod, "ExecutivePDFRenderer"):
+                raise ImportError("ExecutivePDFRenderer not found")
+
             pdf_renderer = pdf_mod.ExecutivePDFRenderer()
 
             pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
+
+            # Keyword-safe render (matches fixed renderer)
             pdf_renderer.render(
                 payload=payload,
                 output_path=pdf_path,
             )
 
-            logger.info("PDF generated: %s", pdf_path)
+            logger.info("PDF generated successfully: %s", pdf_path)
 
-        except Exception:
+        except Exception as e:
             logger.exception("PDF generation failed")
+            pdf_path = None
 
     return {
         "markdown": str(md_path),
