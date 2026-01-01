@@ -614,8 +614,16 @@ class HealthcareDomain(BaseDomain):
         # 3. TIME / DURATION KPIs
         # -------------------------------------------------
         if HealthcareCapability.TIME in caps:
-            kpis["avg_duration"] = m.avg_duration()
+            avg_dur = m.avg_duration()
             
+            # [FIX] Deduplicate LOS vs Duration
+            # Only use "Length of Stay" (LOS) for Hospitals. 
+            # Use "Duration" for others (Clinics/Labs/Pharmacy).
+            if sub == HealthcareSubDomain.HOSPITAL:
+                kpis["avg_los"] = avg_dur
+            else:
+                kpis["avg_duration"] = avg_dur
+
             # Dynamic thresholding based on sub-domain
             duration_threshold = {
                 HealthcareSubDomain.HOSPITAL: 7,        # days
@@ -626,8 +634,7 @@ class HealthcareDomain(BaseDomain):
             if duration_threshold > 0:
                 kpis["long_duration_rate"] = m.long_duration_rate(duration_threshold)
             
-            # Legacy mapping for engine compatibility
-            kpis["avg_los"] = kpis["avg_duration"] 
+            # Map legacy key for engine compatibility if needed (optional but safe)
             kpis["long_stay_rate"] = kpis.get("long_duration_rate")
 
         # -------------------------------------------------
