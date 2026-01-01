@@ -358,6 +358,108 @@ def build_success_criteria(
     return criteria
 
 
+def compute_board_readiness_score(
+    kpis: Dict[str, Any],
+    insights: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Computes a single board-readiness score (0–100).
+
+    Dimensions:
+    1. KPI confidence (40%)
+    2. Insight confidence & severity (30%)
+    3. Coverage completeness (20%)
+    4. Risk concentration penalty (10%)
+    """
+
+    # -------------------------------------------------
+    # 1. KPI CONFIDENCE SCORE (40)
+    # -------------------------------------------------
+    kpi_conf = kpis.get("_confidence", {})
+    if kpi_conf:
+        avg_kpi_conf = sum(kpi_conf.values()) / len(kpi_conf)
+    else:
+        avg_kpi_conf = 0.6  # safe fallback
+
+    kpi_score = avg_kpi_conf * 40
+
+    # -------------------------------------------------
+    # 2. INSIGHT TRUST SCORE (30)
+    # -------------------------------------------------
+    severity_weight = {
+        "CRITICAL": 1.0,
+        "RISK": 0.8,
+        "WARNING": 0.6,
+        "INFO": 0.4,
+    }
+
+    trusted_insights = 0
+    total_weight = 0.0
+
+    for i in insights[:8]:  # only top insights matter
+        sev = i.get("level", "INFO")
+        weight = severity_weight.get(sev, 0.4)
+        total_weight += weight
+
+        # Executive-flagged insights imply higher trust
+        if i.get("executive_summary_flag"):
+            trusted_insights += weight
+
+    if total_weight > 0:
+        insight_score = (trusted_insights / total_weight) * 30
+    else:
+        insight_score = 15  # neutral fallback
+
+    # -------------------------------------------------
+    # 3. COVERAGE COMPLETENESS (20)
+    # -------------------------------------------------
+    required_sections = [
+        "board_confidence_score",
+        "total_volume",
+        "avg_duration",
+        "avg_unit_cost",
+        "variance_score",
+    ]
+
+    present = sum(1 for k in required_sections if k in kpis and kpis[k] is not None)
+    coverage_ratio = present / len(required_sections)
+    coverage_score = coverage_ratio * 20
+
+    # -------------------------------------------------
+    # 4. RISK CONCENTRATION PENALTY (−10)
+    # -------------------------------------------------
+    critical_count = sum(1 for i in insights if i.get("level") == "CRITICAL")
+
+    if critical_count >= 3:
+        risk_penalty = 10
+    elif critical_count == 2:
+        risk_penalty = 6
+    elif critical_count == 1:
+        risk_penalty = 3
+    else:
+        risk_penalty = 0
+
+    # -------------------------------------------------
+    # FINAL SCORE
+    # -------------------------------------------------
+    raw_score = kpi_score + insight_score + coverage_score - risk_penalty
+    final_score = max(0, min(100, round(raw_score)))
+
+    return {
+        "score": final_score,
+        "band": (
+            "BOARD READY" if final_score >= 85 else
+            "REVIEW WITH CAUTION" if final_score >= 70 else
+            "MANAGEMENT ONLY" if final_score >= 50 else
+            "NOT BOARD SAFE"
+        ),
+        "components": {
+            "kpi_confidence": round(kpi_score, 1),
+            "insight_trust": round(insight_score, 1),
+            "coverage": round(coverage_score, 1),
+            "risk_penalty": -risk_penalty,
+        },
+    }
 # =====================================================
 # EXECUTIVE PAYLOAD (CONFIDENCE-AWARE)
 # =====================================================
@@ -428,13 +530,36 @@ def build_executive_payload(
             + ", ".join(low_conf[:3])
         )
 
+    board_readiness = compute_board_readiness_score(
+    kpis=kpis,
+    insights=insights,
+    )
+    
     return {
-        "snapshot": snapshot,
+        # 🔑 Snapshot
+        "snapshot": build_decision_snapshot(
+            kpis, insights, recommendations
+        ),
+    
+        # 🔑 KPIs
         "primary_kpis": primary_kpis,
+    
+        # 🔑 Problems & Actions
         "top_problems": extract_top_problems(insights),
         "top_actions": [
             r.get("action", "Action required")
             for r in ranked_actions[:3]
         ],
+    
+        # 🔑 Outcome framing
         "success_criteria": build_success_criteria(kpis),
+    
+        # 🏛️ BOARD READINESS (NEW)
+        "board_readiness": board_readiness,
+    
+        # 🔒 INTERNAL METADATA
+        "_executive": {
+            "primary_kpis": primary_kpis,
+            "sub_domain": kpis.get("sub_domain"),
+        },
     }
