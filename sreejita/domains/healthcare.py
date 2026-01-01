@@ -18,8 +18,8 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
 
 # [FIX] Define Visual Benchmark to prevent NameError in generate_visuals
-VISUAL_BENCHMARK_LOS = 5.0
-
+VISUAL_BENCHMARK_LOS = HEALTHCARE_EXTERNAL_LIMITS["avg_los"]["soft_cap"]
+MIN_SAMPLE_SIZE = 30  # [FIX] Statistical significance floor
 # =====================================================
 # 1. HEALTHCARE UNIVERSAL ENUMS
 # =====================================================
@@ -579,6 +579,13 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # Never return mutated original reference
         return df
+    def _safe_metric(self, value: Optional[float], volume: int) -> Optional[float]:
+        """
+        Returns None if data volume is insufficient for statistical confidence.
+        """
+        if volume < MIN_SAMPLE_SIZE:
+            return None
+        return value
         
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -604,60 +611,55 @@ class HealthcareDomain(BaseDomain):
             "sub_domain": sub.value,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
-            "total_volume": (m.volume() if sub == HealthcareSubDomain.PUBLIC_HEALTH else len(df)),
+            "total_volume": vol,
             "total_records": len(df),
-            "total_entities": m.volume(),
-            "total_patients": m.volume() if self.cols.get("pid") else None, # Legacy compat
+            "total_entities": vol,
+            "total_patients": vol if self.cols.get("pid") else None, 
         }
 
         # -------------------------------------------------
         # 3. TIME / DURATION KPIs
         # -------------------------------------------------
         if HealthcareCapability.TIME in caps:
-            avg_dur = m.avg_duration()
+            raw_duration = self._safe_metric(m.avg_duration(), vol)
             
-            # [FIX] Deduplicate LOS vs Duration
-            # Only use "Length of Stay" (LOS) for Hospitals. 
-            # Use "Duration" for others (Clinics/Labs/Pharmacy).
+            # [FIX] Domain-specific mapping
             if sub == HealthcareSubDomain.HOSPITAL:
-                kpis["avg_los"] = avg_dur
+                kpis["avg_los"] = raw_duration
+                # Use benchmarks for logic, not magic numbers
+                limit = HEALTHCARE_THRESHOLDS.get("avg_los_critical", 7.0)
             else:
-                kpis["avg_duration"] = avg_dur
+                kpis["avg_duration"] = raw_duration
+                limit = 7.0 if sub != HealthcareSubDomain.DIAGNOSTICS else 60.0
 
-            # Dynamic thresholding based on sub-domain
-            duration_threshold = {
-                HealthcareSubDomain.HOSPITAL: 7,        # days
-                HealthcareSubDomain.DIAGNOSTICS: 60,    # minutes
-                HealthcareSubDomain.CLINIC: 1,          # days
-            }.get(sub, 7)
-
-            if duration_threshold > 0:
-                kpis["long_duration_rate"] = m.long_duration_rate(duration_threshold)
-            
-            # Map legacy key for engine compatibility if needed (optional but safe)
-            kpis["long_stay_rate"] = kpis.get("long_duration_rate")
+            # Calculate rate against limit
+            if limit > 0:
+                kpis["long_duration_rate"] = self._safe_metric(
+                    m.long_duration_rate(limit), vol
+                )
 
         # -------------------------------------------------
         # 4. COST KPIs
         # -------------------------------------------------
         if HealthcareCapability.COST in caps:
             kpis["total_cost"] = m.total_cost()
-            kpis["avg_unit_cost"] = m.avg_unit_cost()
-            kpis["avg_cost_per_patient"] = kpis["avg_unit_cost"] # Legacy compat
+            kpis["avg_unit_cost"] = self._safe_metric(m.avg_unit_cost(), vol)
+            kpis["avg_cost_per_patient"] = kpis["avg_unit_cost"]
 
         # -------------------------------------------------
         # 5. QUALITY KPIs
         # -------------------------------------------------
         if HealthcareCapability.QUALITY in caps:
-            kpis["adverse_event_rate"] = m.adverse_rate()
-            kpis["readmission_rate"] = kpis["adverse_event_rate"] # Legacy compat
+            kpis["adverse_event_rate"] = self._safe_metric(m.adverse_rate(), vol)
+            kpis["readmission_rate"] = kpis["adverse_event_rate"]
 
         # -------------------------------------------------
         # 6. VARIANCE KPIs
         # -------------------------------------------------
         if HealthcareCapability.VARIANCE in caps:
+            # Variance calculation handles its own volume check internally now
             kpis["variance_score"] = m.variance()
-            kpis["facility_variance_score"] = kpis["variance_score"] # Legacy compat
+            kpis["facility_variance_score"] = kpis["variance_score"]
 
         # -------------------------------------------------
         # 7. UNIVERSAL EXTENSIONS (Advanced Logic)
@@ -726,17 +728,11 @@ class HealthcareDomain(BaseDomain):
                 vol_s = df.set_index(self.time_col).resample("M").size()
                 if len(vol_s) >= 4:
                     start_val = vol_s.iloc[0]
-                    # [FIX] Division by Zero Guard
                     if start_val > 0:
                         delta = (vol_s.iloc[-1] - start_val) / start_val
                         trend_arrow = "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
-                    else:
-                        # Cannot calculate trend if starting volume is 0
-                        trend_arrow = "→"
-                    
                     kpis["volume_trend"] = trend_arrow
             except: pass
-
         # -------------------------------------------------
         # 9. SCORING & METADATA
         # -------------------------------------------------
@@ -745,11 +741,9 @@ class HealthcareDomain(BaseDomain):
         kpis.update({
             "board_confidence_score": score,
             "board_score_breakdown": breakdown,
-            "board_confidence_interpretation": _get_score_interpretation(score),
-            "trend_explanation": _get_trend_explanation(trend_arrow),
-            "maturity_level": "Gold" if score >= 85 else "Silver" if score >= 70 else "Bronze",
             "board_confidence_trend": trend_arrow,
-            "benchmark_context": f"Evaluated against {sub.value.upper()} standards."
+            # [FIX] Removed executive interpretations ("Gold", "Critical") from here.
+            # Those belong in the Narrative/Executive layer.
         })
 
         # -------------------------------------------------
@@ -768,22 +762,8 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         
         primary_kpis = self.select_executive_kpis(kpis, sub)
-        
-        confidence_map = kpis.get("_confidence", {})
-        
-        def rank_exec(k):
-            name = k["name"].lower().replace(" ", "_")
-            value = k.get("value")
-        
-            try:
-                magnitude = abs(float(value))
-            except Exception:
-                magnitude = 0.0
-        
-            conf = confidence_map.get(name, 0.6)
-            return magnitude * conf
-        
-        primary_kpis = sorted(primary_kpis, key=rank_exec, reverse=True)
+        # Apply ranking from executive_cognition if imported, or locally if needed
+        # (Assuming simple selection here, cognition layer re-ranks)
         
         kpis["_executive"] = {
             "primary_kpis": primary_kpis,
