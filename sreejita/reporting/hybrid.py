@@ -39,8 +39,8 @@ class HybridReport(BaseReport):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        report_path = output_dir / "Sreejita_Executive_Report.md"
         run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
+        report_path = output_dir / f"Sreejita_Executive_Report_{run_id}.md"
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
@@ -122,6 +122,9 @@ class HybridReport(BaseReport):
     # EXECUTIVE NARRATIVE
     # -------------------------------------------------
     def _write_narrative(self, f, narrative):
+        if not narrative:
+            return
+
         f.write("## Executive Brief\n\n")
 
         for line in narrative.executive_summary or []:
@@ -157,7 +160,10 @@ class HybridReport(BaseReport):
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
         f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
 
-        kpis = result.get("kpis", {}) or {}
+        kpis = {
+            k: v for k, v in (result.get("kpis") or {}).items()
+            if not k.startswith("_")
+        }
         visuals = result.get("visuals", []) or []
 
         if kpis:
