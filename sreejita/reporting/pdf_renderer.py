@@ -1,3 +1,5 @@
+# sreejita/reporting/pdf_renderer.py
+
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -10,75 +12,60 @@ from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
     Spacer,
+    Image,
     Table,
     TableStyle,
     PageBreak,
-    Image,
     Flowable,
 )
 from reportlab.lib.units import inch
+from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (DEFENSIVE)
+# PAYLOAD NORMALIZER (CONTRACT SAFE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    payload = payload or {}
+    if not isinstance(payload, dict):
+        payload = {}
 
-    # Hybrid payload
-    if "executive" in payload:
-        exec_ = payload["executive"]
-        return {
-            "snapshot": exec_.get("snapshot", {}),
-            "primary_kpis": exec_.get("primary_kpis", []),
-            "board_readiness": exec_.get("board_readiness", {}),
-            "board_readiness_trend": exec_.get("board_readiness_trend", {}),
-            "board_readiness_history": exec_.get("board_readiness_history", []),
-            "insights": payload.get("insights", []),
-            "recommendations": payload.get("recommendations", []),
-            "visuals": payload.get("visuals", []),
-        }
+    executive = payload.get("executive", {}) or {}
 
-    # Domain wrapped
-    if len(payload) == 1:
-        payload = next(iter(payload.values()))
-
-    exec_ = payload.get("executive", {})
     return {
-        "snapshot": exec_.get("snapshot", {}),
-        "primary_kpis": exec_.get("primary_kpis", []),
-        "board_readiness": exec_.get("board_readiness", {}),
-        "board_readiness_trend": exec_.get("board_readiness_trend", {}),
-        "board_readiness_history": exec_.get("board_readiness_history", []),
+        "snapshot": executive.get("snapshot", {}),
+        "primary_kpis": executive.get("primary_kpis", []),
+        "board_readiness": executive.get("board_readiness", {}),
+        "board_readiness_history": executive.get("board_readiness_history", []),
+        "visuals": payload.get("visuals", []),
         "insights": payload.get("insights", []),
         "recommendations": payload.get("recommendations", []),
-        "visuals": payload.get("visuals", []),
     }
 
 
 # =====================================================
-# CONFIDENCE HELPERS
+# FORMATTERS
 # =====================================================
 
-def confidence_badge(conf: Optional[float]) -> str:
-    if conf is None:
-        return "—"
-    if conf >= 0.85:
-        return "High"
-    if conf >= 0.70:
-        return "Medium"
-    return "Low"
+def format_value(key: str, value: Any) -> str:
+    if value is None:
+        return "-"
 
+    if isinstance(value, (int, float)):
+        k = key.lower()
+        if "rate" in k:
+            return f"{value * 100:.1f}%"
+        if "cost" in k:
+            if value >= 1_000_000:
+                return f"${value/1_000_000:.1f}M"
+            if value >= 1_000:
+                return f"${value/1_000:.0f}K"
+            return f"${value:,.0f}"
+        if "duration" in k or "los" in k:
+            return f"{value:.1f} days"
+        return f"{value:,.0f}"
 
-def confidence_color(conf: Optional[float]):
-    if conf is None:
-        return white
-    if conf >= 0.85:
-        return HexColor("#dcfce7")
-    if conf >= 0.70:
-        return HexColor("#fef9c3")
-    return HexColor("#fee2e2")
+    return str(value)
 
 
 # =====================================================
@@ -86,24 +73,25 @@ def confidence_color(conf: Optional[float]):
 # =====================================================
 
 class BoardReadinessSparkline(Flowable):
-    def __init__(self, values: List[int], width=140, height=32):
+    def __init__(self, values: List[int], width=140, height=35):
         super().__init__()
-        self.values = values or []
+        self.values = values
         self.width = width
         self.height = height
 
     def draw(self):
-        if len(self.values) < 2:
+        if not self.values or len(self.values) < 2:
             return
 
         min_v, max_v = min(self.values), max(self.values)
         spread = max(max_v - min_v, 1)
-        step = self.width / (len(self.values) - 1)
+        step_x = self.width / (len(self.values) - 1)
 
-        points = [
-            (i * step, ((v - min_v) / spread) * (self.height - 6) + 3)
-            for i, v in enumerate(self.values)
-        ]
+        points = []
+        for i, v in enumerate(self.values):
+            x = i * step_x
+            y = ((v - min_v) / spread) * (self.height - 6) + 3
+            points.append((x, y))
 
         self.canv.setStrokeColor(HexColor("#2563eb"))
         self.canv.setLineWidth(2)
@@ -115,7 +103,7 @@ class BoardReadinessSparkline(Flowable):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER
+# EXECUTIVE PDF RENDERER (FINAL, SAFE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -123,7 +111,10 @@ class ExecutivePDFRenderer:
     HEADER_BG = HexColor("#f3f4f6")
 
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
-        data = normalize_pdf_payload(payload)
+        payload = normalize_pdf_payload(payload)
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
         doc = SimpleDocTemplate(
             str(output_path),
@@ -135,100 +126,150 @@ class ExecutivePDFRenderer:
         )
 
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle("Title", fontSize=22, alignment=TA_CENTER, fontName="Helvetica-Bold"))
-        styles.add(ParagraphStyle("Section", fontSize=15, spaceBefore=18, fontName="Helvetica-Bold"))
-        styles.add(ParagraphStyle("Body", fontSize=11, leading=14))
-
         story: List[Any] = []
 
+        # -------------------------------------------------
+        # SAFE CUSTOM STYLES (NO COLLISIONS)
+        # -------------------------------------------------
+        styles.add(ParagraphStyle(
+            name="ExecTitle",
+            fontSize=22,
+            alignment=TA_CENTER,
+            spaceAfter=20,
+            fontName="Helvetica-Bold",
+        ))
+        styles.add(ParagraphStyle(
+            name="ExecSection",
+            fontSize=15,
+            spaceBefore=18,
+            spaceAfter=10,
+            fontName="Helvetica-Bold",
+        ))
+        styles.add(ParagraphStyle(
+            name="ExecBody",
+            fontSize=11,
+            leading=15,
+            spaceAfter=6,
+        ))
+        styles.add(ParagraphStyle(
+            name="ExecCaption",
+            fontSize=9,
+            textColor=HexColor("#6b7280"),
+            alignment=TA_CENTER,
+        ))
+
         # =================================================
-        # COVER
+        # COVER PAGE
         # =================================================
-        br = data["board_readiness"]
-        story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["Title"]))
-        story.append(Spacer(1, 12))
+        br = payload["board_readiness"]
+
+        story.append(Paragraph("Sreejita Executive Performance Report", styles["ExecTitle"]))
         story.append(Paragraph(
             f"<b>Board Readiness:</b> {br.get('score','-')} / 100 "
             f"({br.get('band','-')})<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
-            styles["Body"]
+            styles["ExecBody"],
         ))
+
         story.append(PageBreak())
 
         # =================================================
         # BOARD READINESS TREND
         # =================================================
-        story.append(Paragraph("Board Readiness Trend", styles["Section"]))
-        story.append(BoardReadinessSparkline(data["board_readiness_history"]))
-        story.append(PageBreak())
+        story.append(Paragraph("Board Readiness Trend", styles["ExecSection"]))
+        story.append(BoardReadinessSparkline(payload["board_readiness_history"]))
+        story.append(Spacer(1, 14))
 
         # =================================================
         # KPI TABLE
         # =================================================
-        if data["primary_kpis"]:
+        if payload["primary_kpis"]:
             rows = [["Metric", "Value", "Confidence"]]
             row_styles = []
 
-            for idx, k in enumerate(data["primary_kpis"][:5], start=1):
-                conf = k.get("confidence")
-                rows.append([k["name"], str(k["value"]), confidence_badge(conf)])
-                row_styles.append(("BACKGROUND", (0, idx), (-1, idx), confidence_color(conf)))
+            for idx, kpi in enumerate(payload["primary_kpis"][:5], start=1):
+                conf = kpi.get("confidence", 0.6)
+                rows.append([
+                    kpi.get("name"),
+                    format_value(kpi.get("name", ""), kpi.get("value")),
+                    f"{int(conf*100)}%",
+                ])
+                row_styles.append((
+                    "BACKGROUND",
+                    (0, idx),
+                    (-1, idx),
+                    HexColor("#dcfce7") if conf >= 0.85 else HexColor("#fef9c3") if conf >= 0.7 else HexColor("#fee2e2"),
+                ))
 
-            table = Table(rows, colWidths=[3.5 * inch, 2 * inch, 1.5 * inch])
+            table = Table(rows, colWidths=[3.5*inch, 2*inch, 1.5*inch])
             table.setStyle(TableStyle([
-                ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
-                ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
+                ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
+                ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+                ("ALIGN", (1,1), (-1,-1), "RIGHT"),
+                ("PADDING", (0,0), (-1,-1), 8),
                 *row_styles,
             ]))
 
-            story.append(Paragraph("Key Performance Indicators", styles["Section"]))
+            story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
             story.append(table)
-            story.append(PageBreak())
 
         # =================================================
-        # INSIGHTS
+        # VISUALS
         # =================================================
-        insights = data["insights"]
-        if insights:
-            story.append(Paragraph("Key Insights", styles["Section"]))
-            for i in insights[:8]:
-                story.append(Paragraph(
-                    f"<b>{i.get('level','INFO')}</b>: {i.get('title','')}<br/>{i.get('so_what','')}",
-                    styles["Body"]
-                ))
-                story.append(Spacer(1, 6))
+        if payload["visuals"]:
             story.append(PageBreak())
+            story.append(Paragraph("Visual Evidence", styles["ExecSection"]))
 
-        # =================================================
-        # RECOMMENDATIONS
-        # =================================================
-        recs = data["recommendations"]
-        if recs:
-            story.append(Paragraph("Executive Recommendations", styles["Section"]))
-            for r in recs[:7]:
-                story.append(Paragraph(
-                    f"<b>{r.get('priority','')}</b> — {r.get('action','')}<br/>"
-                    f"Owner: {r.get('owner','')} | Timeline: {r.get('timeline','')}",
-                    styles["Body"]
-                ))
-                story.append(Spacer(1, 6))
-            story.append(PageBreak())
-
-        # =================================================
-        # VISUAL EVIDENCE
-        # =================================================
-        visuals = data["visuals"]
-        if visuals:
-            story.append(Paragraph("Visual Evidence", styles["Section"]))
-            for v in visuals[:6]:
+            for vis in payload["visuals"][:6]:
+                p = Path(vis.get("path",""))
+                if not p.exists():
+                    continue
                 try:
-                    img = Image(v["path"], width=5.5 * inch, height=3 * inch)
-                    story.append(img)
-                    story.append(Paragraph(v.get("caption",""), styles["Body"]))
+                    reader = utils.ImageReader(str(p))
+                    iw, ih = reader.getSize()
+                    aspect = ih / float(iw)
+                    w = 6 * inch
+                    h = min(w * aspect, 4 * inch)
+                    story.append(Image(str(p), width=w, height=h))
+                    story.append(Paragraph(vis.get("caption",""), styles["ExecCaption"]))
                     story.append(Spacer(1, 12))
                 except Exception:
                     continue
 
+        # =================================================
+        # INSIGHTS
+        # =================================================
+        story.append(PageBreak())
+        story.append(Paragraph("Key Insights & Risks", styles["ExecSection"]))
+
+        for ins in payload["insights"]:
+            level = ins.get("level","INFO")
+            color = "#dc2626" if level=="CRITICAL" else "#ea580c" if level=="RISK" else "#1f2937"
+            story.append(Paragraph(
+                f"<font color='{color}'><b>{level}</b></font> — {ins.get('title','')}",
+                styles["ExecBody"]
+            ))
+            story.append(Paragraph(ins.get("so_what",""), styles["ExecBody"]))
+            story.append(Spacer(1, 10))
+
+        # =================================================
+        # RECOMMENDATIONS
+        # =================================================
+        story.append(PageBreak())
+        story.append(Paragraph("Recommendations", styles["ExecSection"]))
+
+        for rec in payload["recommendations"]:
+            story.append(Paragraph(
+                f"<b>{rec.get('priority','HIGH')}</b>: {rec.get('action','')}",
+                styles["ExecBody"]
+            ))
+            if rec.get("timeline"):
+                story.append(Paragraph(f"<i>Timeline:</i> {rec['timeline']}", styles["ExecBody"]))
+            story.append(Spacer(1, 10))
+
+        # =================================================
+        # BUILD
+        # =================================================
         doc.build(story)
         return output_path
