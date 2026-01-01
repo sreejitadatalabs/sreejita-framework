@@ -19,43 +19,53 @@ from reportlab.lib.units import inch
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (CANONICAL, EXECUTIVE-SAFE)
+# PAYLOAD NORMALIZER (DEFENSIVE, CONTRACT-SAFE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Accepts executive payload ONLY (already unwrapped).
-    Defensive against partial / missing fields.
+    Accepts:
+    - domain-wrapped payload
+    - hybrid.run() payload
+    - raw executive payload
+
+    Returns a flat, renderer-safe structure.
     """
     payload = payload if isinstance(payload, dict) else {}
 
+    # If domain-wrapped ({"healthcare": {...}})
+    if len(payload) == 1:
+        payload = next(iter(payload.values()), payload)
+
+    executive = payload.get("executive", payload)
+
     return {
-        "snapshot": payload.get("snapshot", {}),
-        "primary_kpis": payload.get("primary_kpis", []),
-        "board_readiness": payload.get("board_readiness", {}),
-        "board_readiness_trend": payload.get("board_readiness_trend", {}),
-        "board_readiness_history": payload.get("board_readiness_history", []),
+        "snapshot": executive.get("snapshot", {}),
+        "primary_kpis": executive.get("primary_kpis", []),
+        "board_readiness": executive.get("board_readiness", {}),
+        "board_readiness_trend": executive.get("board_readiness_trend", {}),
+        "board_readiness_history": executive.get("board_readiness_history", []),
     }
 
 
 # =====================================================
-# KPI FORMATTERS
+# FORMATTERS
 # =====================================================
 
-def format_kpi_value(key: str, value: Any) -> str:
+def format_kpi_value(name: str, value: Any) -> str:
     if value is None:
-        return "—"
+        return "-"
 
     if isinstance(value, (int, float)):
-        k = key.lower()
+        key = name.lower()
 
-        if "rate" in k or "ratio" in k:
+        if "rate" in key or "ratio" in key:
             return f"{value * 100:.1f}%" if value <= 1 else f"{value:.1f}%"
 
-        if "los" in k or "duration" in k or "days" in k:
+        if "los" in key or "duration" in key or "days" in key:
             return f"{value:.1f} days"
 
-        if "cost" in k or "amount" in k:
+        if "cost" in key or "amount" in key:
             if value >= 1_000_000:
                 return f"${value / 1_000_000:.1f}M"
             if value >= 1_000:
@@ -88,13 +98,13 @@ def confidence_color(conf: Optional[float]):
 
 
 # =====================================================
-# BOARD READINESS SPARKLINE (FLOWABLE)
+# BOARD READINESS SPARKLINE (FLOWABLE SAFE)
 # =====================================================
 
 class BoardReadinessSparkline(Flowable):
     def __init__(self, values: List[int], width=120, height=30):
         super().__init__()
-        self.values = [v for v in values if isinstance(v, int)]
+        self.values = values or []
         self.width = width
         self.height = height
 
@@ -102,7 +112,8 @@ class BoardReadinessSparkline(Flowable):
         if len(self.values) < 2:
             return
 
-        min_v, max_v = min(self.values), max(self.values)
+        min_v = min(self.values)
+        max_v = max(self.values)
         spread = max(max_v - min_v, 1)
 
         step_x = self.width / (len(self.values) - 1)
@@ -118,25 +129,24 @@ class BoardReadinessSparkline(Flowable):
 
         for i in range(len(points) - 1):
             self.canv.line(
-                points[i][0],
-                points[i][1],
-                points[i + 1][0],
-                points[i + 1][1],
+                points[i][0], points[i][1],
+                points[i + 1][0], points[i + 1][1]
             )
 
+        # last point
         self.canv.circle(points[-1][0], points[-1][1], 2, stroke=0, fill=1)
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (FINAL)
+# EXECUTIVE PDF RENDERER (AUTHORITATIVE)
 # =====================================================
 
 class ExecutivePDFRenderer:
     BORDER = HexColor("#e5e7eb")
     HEADER_BG = HexColor("#f3f4f6")
 
-    def render(self, executive_payload: Dict[str, Any], output_path: Path) -> Path:
-        payload = normalize_pdf_payload(executive_payload)
+    def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
+        payload = normalize_pdf_payload(payload)
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,36 +170,40 @@ class ExecutivePDFRenderer:
             "ExecTitle",
             fontSize=22,
             alignment=TA_CENTER,
-            spaceAfter=18,
             fontName="Helvetica-Bold",
+            spaceAfter=18,
         ))
         styles.add(ParagraphStyle(
             "ExecSection",
             fontSize=15,
+            fontName="Helvetica-Bold",
             spaceBefore=18,
             spaceAfter=10,
-            fontName="Helvetica-Bold",
         ))
         styles.add(ParagraphStyle(
             "ExecBody",
             fontSize=11,
             leading=15,
-            spaceAfter=6,
         ))
 
         # =================================================
         # COVER PAGE
         # =================================================
-        br = payload["board_readiness"]
-
-        story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["ExecTitle"]))
-        story.append(Paragraph("Executive Performance Report", styles["ExecSection"]))
+        br = payload.get("board_readiness", {})
 
         story.append(Paragraph(
-            f"<b>Board Readiness:</b> {br.get('score','—')} / 100 "
-            f"({br.get('band','—')})<br/>"
+            "SREEJITA INTELLIGENCE FRAMEWORK™",
+            styles["ExecTitle"]
+        ))
+        story.append(Paragraph(
+            "Executive Performance Report",
+            styles["ExecSection"]
+        ))
+        story.append(Paragraph(
+            f"<b>Board Readiness:</b> {br.get('score','-')} / 100 "
+            f"({br.get('band','-')})<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
-            styles["ExecBody"],
+            styles["ExecBody"]
         ))
 
         story.append(PageBreak())
@@ -197,14 +211,19 @@ class ExecutivePDFRenderer:
         # =================================================
         # BOARD READINESS TREND
         # =================================================
-        story.append(Paragraph("Board Readiness Trend", styles["ExecSection"]))
-        story.append(BoardReadinessSparkline(payload["board_readiness_history"]))
-        story.append(Spacer(1, 14))
+        story.append(Paragraph(
+            "Board Readiness Trend",
+            styles["ExecSection"]
+        ))
+
+        history = payload.get("board_readiness_history", [])
+        story.append(BoardReadinessSparkline(history))
+        story.append(Spacer(1, 12))
 
         # =================================================
         # KPI TABLE WITH CONFIDENCE HEAT
         # =================================================
-        primary = payload["primary_kpis"]
+        primary = payload.get("primary_kpis", [])
 
         if primary:
             rows = [["Metric", "Value", "Confidence"]]
@@ -214,19 +233,22 @@ class ExecutivePDFRenderer:
                 conf = kpi.get("confidence")
                 rows.append([
                     kpi.get("name", "Metric"),
-                    format_kpi_value(kpi.get("name", ""), kpi.get("value")),
+                    format_kpi_value(
+                        kpi.get("name", ""),
+                        kpi.get("value")
+                    ),
                     confidence_badge(conf),
                 ])
                 row_styles.append((
                     "BACKGROUND",
                     (0, idx),
                     (-1, idx),
-                    confidence_color(conf),
+                    confidence_color(conf)
                 ))
 
             table = Table(
                 rows,
-                colWidths=[3.5 * inch, 2 * inch, 1.5 * inch],
+                colWidths=[3.5 * inch, 2 * inch, 1.5 * inch]
             )
 
             table.setStyle(TableStyle([
@@ -234,11 +256,13 @@ class ExecutivePDFRenderer:
                 ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("PADDING", (0, 0), (-1, -1), 8),
                 *row_styles,
             ]))
 
-            story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
+            story.append(Paragraph(
+                "Key Performance Indicators",
+                styles["ExecSection"]
+            ))
             story.append(table)
 
         doc.build(story)
