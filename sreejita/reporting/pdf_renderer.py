@@ -5,16 +5,17 @@ from typing import Dict, Any, List
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.colors import HexColor
+from reportlab.lib.colors import HexColor, white
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 )
 from reportlab.lib.units import inch
 from reportlab.lib import utils
+from reportlab.graphics.shapes import Drawing, PolyLine, Circle
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (STRICT & NESTED-SAFE)
+# PAYLOAD NORMALIZER
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,20 +27,11 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     executive = payload.get("executive", {}) or {}
 
     return {
-        "executive_snapshot": (
-            payload.get("executive_snapshot")
-            or executive.get("snapshot")
-            or {}
-        ),
-        "primary_kpis": (
-            payload.get("primary_kpis")
-            or executive.get("primary_kpis", [])
-        ),
-        "board_readiness": (
-            payload.get("board_readiness")
-            or executive.get("board_readiness", {})
-        ),
+        "executive_snapshot": executive.get("snapshot", {}),
+        "primary_kpis": executive.get("primary_kpis", []),
+        "board_readiness": executive.get("board_readiness", {}),
         "board_readiness_trend": executive.get("board_readiness_trend", {}),
+        "board_readiness_history": executive.get("board_readiness_history", []),
         "visuals": payload.get("visuals", []),
         "insights": payload.get("insights", []),
         "recommendations": payload.get("recommendations", []),
@@ -47,7 +39,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =====================================================
-# KPI FORMATTER
+# FORMATTERS
 # =====================================================
 
 def format_kpi_value(key: str, value: Any) -> str:
@@ -56,7 +48,6 @@ def format_kpi_value(key: str, value: Any) -> str:
 
     if isinstance(value, (int, float)):
         k = key.lower()
-
         if "rate" in k:
             return f"{value * 100:.1f}%" if value <= 1 else f"{value:.1f}%"
         if "los" in k or "duration" in k:
@@ -67,32 +58,54 @@ def format_kpi_value(key: str, value: Any) -> str:
             if value >= 1_000:
                 return f"${value / 1_000:.0f}K"
             return f"${value:,.0f}"
-
         return f"{value:,.0f}"
 
     return str(value)
 
 
-# =====================================================
-# CONFIDENCE BADGE (PDF SAFE)
-# =====================================================
-
 def confidence_badge(conf: float | None) -> str:
     if conf is None:
         return "Unknown"
     if conf >= 0.85:
-        return "🟢 High Confidence"
+        return "🟢 High"
     if conf >= 0.70:
-        return "🟡 Moderate Confidence"
-    return "🔴 Low Confidence"
+        return "🟡 Medium"
+    return "🔴 Low"
 
 
-def trend_label(symbol: str) -> str:
-    return {
-        "↑": "Improving",
-        "↓": "Deteriorating",
-        "→": "Stable",
-    }.get(symbol, "Stable")
+def confidence_color(conf: float | None):
+    if conf is None:
+        return white
+    if conf >= 0.85:
+        return HexColor("#dcfce7")  # green
+    if conf >= 0.70:
+        return HexColor("#fef9c3")  # yellow
+    return HexColor("#fee2e2")      # red
+
+
+# =====================================================
+# SPARKLINE (BOARD READINESS)
+# =====================================================
+
+def board_readiness_sparkline(values: List[int], width=120, height=30) -> Drawing:
+    if not values or len(values) < 2:
+        return Drawing(width, height)
+
+    min_v, max_v = min(values), max(values)
+    spread = max(max_v - min_v, 1)
+
+    points = []
+    step_x = width / (len(values) - 1)
+
+    for i, v in enumerate(values):
+        x = i * step_x
+        y = ((v - min_v) / spread) * (height - 6) + 3
+        points.append((x, y))
+
+    d = Drawing(width, height)
+    d.add(PolyLine(points, strokeColor=HexColor("#2563eb"), strokeWidth=2))
+    d.add(Circle(points[-1][0], points[-1][1], 2, fillColor=HexColor("#2563eb")))
+    return d
 
 
 # =====================================================
@@ -100,18 +113,11 @@ def trend_label(symbol: str) -> str:
 # =====================================================
 
 class ExecutivePDFRenderer:
-    PRIMARY = HexColor("#1f2937")
     BORDER = HexColor("#e5e7eb")
     HEADER_BG = HexColor("#f3f4f6")
 
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
-
-        payload["visuals"] = sorted(
-            payload.get("visuals", []),
-            key=lambda x: x.get("importance", 0),
-            reverse=True,
-        )
 
         doc = SimpleDocTemplate(
             str(output_path),
@@ -125,93 +131,65 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List[Any] = []
 
-        def add_style(name, **kwargs):
-            if name not in styles:
-                styles.add(ParagraphStyle(name=name, **kwargs))
-
-        add_style("ExecTitle", fontSize=22, alignment=TA_CENTER, spaceAfter=18, fontName="Helvetica-Bold")
-        add_style("ExecSection", fontSize=15, spaceBefore=18, spaceAfter=10, fontName="Helvetica-Bold")
-        add_style("ExecBody", fontSize=11, leading=15, spaceAfter=6)
-        add_style("ExecCaption", fontSize=9, alignment=TA_CENTER, textColor=HexColor("#6b7280"))
+        styles.add(ParagraphStyle("ExecTitle", fontSize=22, alignment=TA_CENTER))
+        styles.add(ParagraphStyle("ExecSection", fontSize=15, spaceBefore=18, spaceAfter=10))
+        styles.add(ParagraphStyle("ExecBody", fontSize=11, leading=15))
+        styles.add(ParagraphStyle("ExecCaption", fontSize=9, textColor=HexColor("#6b7280")))
 
         # =================================================
-        # COVER PAGE
+        # COVER
         # =================================================
-        snapshot = payload["executive_snapshot"]
-        board = payload.get("board_readiness", {})
+        br = payload["board_readiness"]
 
         story.append(Paragraph("SREEJITA INTELLIGENCE FRAMEWORK™", styles["ExecTitle"]))
         story.append(Paragraph("Executive Performance Report", styles["ExecSection"]))
-
         story.append(Paragraph(
-            f"Overall Risk: {snapshot.get('overall_risk','-')}<br/>"
-            f"Board Readiness: {board.get('score','-')} / 100 ({board.get('band','-')})<br/>"
+            f"Board Readiness: <b>{br.get('score','-')}</b> / 100 "
+            f"({br.get('band','-')})<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
-            styles["ExecBody"],
+            styles["ExecBody"]
         ))
-
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("Prepared by: <b>Sreejita Data Labs</b>", styles["ExecBody"]))
         story.append(PageBreak())
 
         # =================================================
-        # BOARD READINESS
+        # BOARD READINESS + SPARKLINE
         # =================================================
-        trend = payload.get("board_readiness_trend", {})
+        story.append(Paragraph("Board Readiness Trend", styles["ExecSection"]))
 
-        if board:
-            story.append(Paragraph("Board Readiness Assessment", styles["ExecSection"]))
-            story.append(Paragraph(
-                f"Score: {board.get('score')} / 100<br/>"
-                f"Status: {board.get('band')}<br/>"
-                f"Trend: {trend.get('trend','→')} ({trend_label(trend.get('trend'))})<br/>"
-                f"Previous Score: {trend.get('previous_score','N/A')}",
-                styles["ExecBody"]
+        spark = board_readiness_sparkline(payload.get("board_readiness_history", []))
+        story.append(spark)
+        story.append(Spacer(1, 12))
+
+        # =================================================
+        # KPIs WITH CONFIDENCE HEAT
+        # =================================================
+        rows = [["Metric", "Value", "Confidence"]]
+        styles_row = []
+
+        for idx, k in enumerate(payload["primary_kpis"][:5], start=1):
+            conf = k.get("confidence")
+            rows.append([
+                k["name"],
+                format_kpi_value(k["name"], k["value"]),
+                confidence_badge(conf),
+            ])
+            styles_row.append((
+                "BACKGROUND",
+                (0, idx),
+                (-1, idx),
+                confidence_color(conf)
             ))
-            story.append(PageBreak())
 
-        # =================================================
-        # KPIs
-        # =================================================
-        if payload["primary_kpis"]:
-            rows = [["Metric", "Value", "Confidence"]]
-            for k in payload["primary_kpis"][:5]:
-                rows.append([
-                    k.get("name"),
-                    format_kpi_value(k.get("name",""), k.get("value")),
-                    confidence_badge(k.get("confidence")),
-                ])
+        table = Table(rows, colWidths=[3.5 * inch, 2 * inch, 1.5 * inch])
+        table.setStyle(TableStyle([
+            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
+            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            *styles_row
+        ]))
 
-            table = Table(rows, colWidths=[3.5 * inch, 2 * inch, 1.5 * inch])
-            table.setStyle(TableStyle([
-                ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
-                ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
-                ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-                ("PADDING", (0,0), (-1,-1), 8),
-            ]))
-
-            story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
-            story.append(table)
-            story.append(PageBreak())
-
-        # =================================================
-        # VISUALS / INSIGHTS / RECOMMENDATIONS
-        # =================================================
-        for section, items, renderer in [
-            ("Key Insights & Risks", payload["insights"], lambda i:
-                [Paragraph(f"<b>{i['level']}:</b> {i['title']}", styles["ExecBody"]),
-                 Paragraph(i["so_what"], styles["ExecBody"])]
-            ),
-            ("Recommendations", payload["recommendations"], lambda r:
-                [Paragraph(r["action"], styles["ExecBody"])]
-            ),
-        ]:
-            if items:
-                story.append(Paragraph(section, styles["ExecSection"]))
-                for item in items[:5]:
-                    for p in renderer(item):
-                        story.append(p)
-                story.append(PageBreak())
+        story.append(Paragraph("Key Performance Indicators", styles["ExecSection"]))
+        story.append(table)
 
         doc.build(story)
         return output_path
