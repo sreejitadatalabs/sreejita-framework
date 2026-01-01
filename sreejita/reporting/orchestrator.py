@@ -187,11 +187,20 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         trend = _compute_trend(previous_score, current_score)
 
+        # [FIX] Pass full history list for PDF Sparklines
+        # Take last 5 entries to keep payload clean
+        history_values = list(history.values())
+        if isinstance(current_score, int):
+             history_values.append(current_score) # Include current in the timeline if desired, or just use history
+        
         executive_payload["board_readiness_trend"] = {
             "previous_score": previous_score,
             "current_score": current_score,
             "trend": trend,
         }
+        
+        # [CRITICAL FIX] This key is required by the PDF renderer
+        executive_payload["board_readiness_history"] = list(history.values())[-10:]
 
         # 🚨 Inject CRITICAL alert if major drop
         if (
