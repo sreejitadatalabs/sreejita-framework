@@ -1,51 +1,47 @@
 # =====================================================
-# ORCHESTRATOR — UNIVERSAL (FINAL)
+# ORCHESTRATOR — UNIVERSAL (FINAL, ENFORCED)
 # Sreejita Framework
 # =====================================================
 
 import logging
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import pandas as pd
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
-
-# 🧠 Executive cognition (single source of truth)
 from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
 
 
 # =====================================================
-# SAFE TABULAR FILE LOADER
+# SAFE FILE LOADER
 # =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
-    suffix = path.suffix.lower()
-
-    if suffix == ".csv":
+    if path.suffix.lower() == ".csv":
         for enc in (None, "utf-8", "latin-1", "cp1252"):
             try:
                 return pd.read_csv(path, encoding=enc)
             except Exception:
                 continue
 
-    if suffix in (".xls", ".xlsx"):
+    if path.suffix.lower() in (".xls", ".xlsx"):
         for engine in (None, "openpyxl", "xlrd"):
             try:
                 return pd.read_excel(path, engine=engine)
             except Exception:
                 continue
 
-    raise ValueError(f"Unsupported file type: {suffix}")
+    raise RuntimeError(f"Unsupported file type: {path.suffix}")
 
 
 # =====================================================
-# BOARD READINESS HISTORY (PERSISTENT)
+# BOARD HISTORY
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -53,11 +49,8 @@ def _history_path(run_dir: Path) -> Path:
 
 
 def _load_history(run_dir: Path) -> Dict[str, int]:
-    path = _history_path(run_dir)
-    if not path.exists():
-        return {}
     try:
-        with open(path, "r") as f:
+        with open(_history_path(run_dir), "r") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -82,7 +75,7 @@ def _trend(prev: int | None, curr: int | None) -> str:
 
 
 # =====================================================
-# ORCHESTRATOR ENTRY — CANONICAL
+# CANONICAL ENTRY POINT
 # =====================================================
 
 def generate_report_payload(
@@ -94,10 +87,7 @@ def generate_report_payload(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
-    if "run_dir" not in config:
-        raise RuntimeError("config['run_dir'] is required")
-
-    run_dir = Path(config["run_dir"])
+    run_dir = Path(config.get("run_dir", "runs/current"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
     dataset_key = input_path.stem
@@ -106,6 +96,8 @@ def generate_report_payload(
     # 1. LOAD DATA
     # -------------------------------------------------
     df = _read_tabular_file_safe(input_path)
+    if df.empty:
+        raise RuntimeError("Dataset is empty")
 
     # -------------------------------------------------
     # 2. DATASET SHAPE (CONTEXT ONLY)
@@ -119,58 +111,20 @@ def generate_report_payload(
     # 3. DOMAIN DECISION
     # -------------------------------------------------
     decision = decide_domain(df)
-    domain = decision.selected_domain
     engine = decision.engine
+    domain = decision.selected_domain
 
-    # -------------------------------------------------
-    # 3A. UNKNOWN DOMAIN — GOVERNED FALLBACK
-    # -------------------------------------------------
     if engine is None:
-        executive = build_executive_payload(
-            kpis={
-                "primary_sub_domain": "unknown",
-                "total_volume": len(df),
-                "data_completeness": round(1 - df.isna().mean().mean(), 3),
-                "_confidence": {},
-                "_kpi_capabilities": {},
-            },
-            insights=[{
-                "level": "RISK",
-                "title": "Unknown or Unsupported Domain",
-                "so_what": (
-                    "The dataset does not match any supported domain patterns. "
-                    "Only governance-level assessment is possible."
-                ),
-                "confidence": 0.6,
-            }],
-            recommendations=[{
-                "priority": "HIGH",
-                "action": "Review dataset structure and domain relevance",
-                "owner": "Data Governance",
-                "timeline": "Immediate",
-                "goal": "Enable domain-specific analysis",
-                "confidence": 0.7,
-            }],
+        raise RuntimeError(
+            "Unsupported or unknown domain. "
+            "Executive report cannot be generated safely."
         )
 
-        return {
-            "unknown": {
-                "kpis": {},
-                "insights": executive["insights"],
-                "recommendations": executive["recommendations"],
-                "visuals": [],
-                "shape": shape_info,
-                "executive": executive,
-            }
-        }
-
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT CONTRACT)
+    # 4. DOMAIN EXECUTION
     # -------------------------------------------------
     try:
-        if hasattr(engine, "preprocess"):
-            df = engine.preprocess(df)
-
+        df = engine.preprocess(df)
         kpis = engine.calculate_kpis(df)
 
         visuals = engine.generate_visuals(
@@ -184,39 +138,43 @@ def generate_report_payload(
             insights = engine.generate_insights(df, kpis)
 
         try:
-            raw_recs = engine.generate_recommendations(
-                df, kpis, insights, shape_info=shape_info
-            )
+            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
         except TypeError:
             raw_recs = engine.generate_recommendations(df, kpis, insights)
 
         recommendations = enrich_recommendations(raw_recs)
 
     except Exception as e:
-        log.exception("Domain processing failed")
+        log.exception("Domain execution failed")
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY ENFORCEMENT (NON-NEGOTIABLE)
+    # 5. VISUAL ENFORCEMENT (HARD RULE)
     # -------------------------------------------------
-    visuals = [
-        v for v in visuals
-        if isinstance(v, dict) and Path(v.get("path", "")).exists()
-    ]
+    valid_visuals: List[Dict[str, Any]] = []
 
-    visuals = sorted(
-        visuals,
-        key=lambda x: (x.get("importance", 0) * x.get("confidence", 1)),
+    for v in visuals:
+        try:
+            path = Path(v.get("path", ""))
+            conf = float(v.get("confidence", 0))
+            if path.exists() and conf >= 0.3:
+                valid_visuals.append(v)
+        except Exception:
+            continue
+
+    if len(valid_visuals) < 2:
+        raise RuntimeError(
+            "Report rejected: minimum 2 visual evidences required."
+        )
+
+    valid_visuals = sorted(
+        valid_visuals,
+        key=lambda x: x.get("importance", 0) * x.get("confidence", 1),
         reverse=True,
-    )
-
-    evidence_summary = {
-        "visual_count": len(visuals),
-        "has_min_visuals": len(visuals) >= 2,
-    }
+    )[:6]
 
     # -------------------------------------------------
-    # 6. EXECUTIVE COGNITION (FINAL)
+    # 6. EXECUTIVE COGNITION (AUTHORITATIVE)
     # -------------------------------------------------
     executive = build_executive_payload(
         kpis=kpis,
@@ -224,10 +182,8 @@ def generate_report_payload(
         recommendations=recommendations,
     )
 
-    executive["evidence_summary"] = evidence_summary
-
     # -------------------------------------------------
-    # 7. BOARD READINESS TREND (PERSISTENT)
+    # 7. BOARD READINESS HISTORY
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -245,18 +201,20 @@ def generate_report_payload(
         history[dataset_key] = current_score
         _save_history(run_dir, history)
 
-    executive["board_readiness_history"] = list(history.values())[-10:]
-
     # -------------------------------------------------
-    # 8. FINAL PAYLOAD (CANONICAL)
+    # 8. FINAL PAYLOAD (FLAT, ENFORCED)
     # -------------------------------------------------
     return {
-        domain: {
-            "kpis": kpis,
-            "insights": insights,
-            "recommendations": recommendations,
-            "visuals": visuals,
-            "shape": shape_info,
-            "executive": executive,
-        }
+        "domain": domain,
+        "executive": executive,
+        "kpis": executive.get("primary_kpis", []),
+        "visuals": valid_visuals,
+        "insights": executive.get("insights", {}),
+        "recommendations": executive.get("recommendations", []),
+        "metadata": {
+            "rows": len(df),
+            "visual_count": len(valid_visuals),
+            "kpi_count": len(executive.get("primary_kpis", [])),
+            "dataset_shape": shape_info,
+        },
     }
