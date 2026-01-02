@@ -65,6 +65,22 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         }.get(cap, 1.0)
 
         score = abs(value) * confidence * weight
+        # -------------------------------------------------
+        # EXECUTIVE EVIDENCE PENALTIES (FINAL)
+        # -------------------------------------------------
+        visual_count = context.get("visual_count", 0)
+        kpi_count = len([k for k in kpis if not k.startswith("_")])
+        
+        if visual_count < 2:
+            score -= 15
+        
+        if kpi_count < 3:
+            score -= 10
+        
+        if primary_sub_domain == "unknown":
+            score -= 20
+        
+        score = max(score, 0)
 
         scored.append({
             "key": key,
