@@ -2,14 +2,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
-from dataclasses import asdict
 
 from sreejita.reporting.base import BaseReport
-from sreejita.narrative.engine import build_narrative
 
 
 # =====================================================
-# HYBRID REPORT ENGINE (FINAL — BOARD ALIGNED)
+# HYBRID REPORT ENGINE (FINAL — UNIVERSAL)
 # =====================================================
 
 class HybridReport(BaseReport):
@@ -30,8 +28,6 @@ class HybridReport(BaseReport):
     def build(
         self,
         domain_results: Dict[str, Dict[str, Any]],
-        narrative_data: Any,
-        executive_payload: Dict[str, Any],
         output_dir: Path,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
@@ -44,9 +40,14 @@ class HybridReport(BaseReport):
 
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
-            self._write_executive_snapshot(f, executive_payload)
-            self._write_board_readiness(f, executive_payload)
-            self._write_narrative(f, narrative_data)
+
+            # Executive section is always derived from PRIMARY domain
+            primary_domain = self._sort_domains(domain_results.keys())[0]
+            primary = domain_results.get(primary_domain, {})
+            executive = primary.get("executive", {})
+
+            self._write_executive_brief(f, executive)
+            self._write_board_readiness(f, executive)
 
             for domain in self._sort_domains(domain_results.keys()):
                 self._write_domain_section(
@@ -60,48 +61,23 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # EXECUTIVE SNAPSHOT
+    # EXECUTIVE BRIEF (1-MINUTE)
     # -------------------------------------------------
-    def _write_executive_snapshot(self, f, payload: Dict[str, Any]):
-        snapshot = payload.get("snapshot")
-        if not snapshot:
+    def _write_executive_brief(self, f, executive: Dict[str, Any]):
+        brief = executive.get("executive_brief")
+        if not brief:
             return
 
-        f.write("## Executive Decision Snapshot\n\n")
-        f.write(f"**Overall Risk:** {snapshot.get('overall_risk', '-')}\n\n")
-
-        if snapshot.get("confidence_note"):
-            f.write(f"> ⚠️ {snapshot['confidence_note']}\n\n")
-
-        if snapshot.get("top_problems"):
-            f.write("### Top Problems\n")
-            for p in snapshot["top_problems"]:
-                f.write(f"- {p}\n")
-
-        if snapshot.get("top_actions"):
-            f.write("\n### Top Actions (90 Days)\n")
-            for a in snapshot["top_actions"]:
-                f.write(f"- {a}\n")
-
-        if snapshot.get("decisions_required"):
-            f.write("\n### Decisions Required\n")
-            for d in snapshot["decisions_required"]:
-                f.write(f"- [ ] {d}\n")
-
-        f.write(
-            "\n**Confidence Scale:** "
-            "85–100 = 🟢 Green | 70–84 = 🟡 Yellow | "
-            "50–69 = 🟠 Orange | <50 = 🔴 Red\n"
-        )
-
-        f.write("\n---\n\n")
+        f.write("## Executive Brief\n\n")
+        f.write(f"{brief}\n\n")
+        f.write("---\n\n")
 
     # -------------------------------------------------
-    # BOARD READINESS SECTION
+    # BOARD READINESS
     # -------------------------------------------------
-    def _write_board_readiness(self, f, payload: Dict[str, Any]):
-        br = payload.get("board_readiness")
-        trend = payload.get("board_readiness_trend", {})
+    def _write_board_readiness(self, f, executive: Dict[str, Any]):
+        br = executive.get("board_readiness")
+        trend = executive.get("board_readiness_trend", {})
 
         if not br:
             return
@@ -119,42 +95,6 @@ class HybridReport(BaseReport):
         f.write("\n---\n\n")
 
     # -------------------------------------------------
-    # EXECUTIVE NARRATIVE
-    # -------------------------------------------------
-    def _write_narrative(self, f, narrative):
-        if not narrative:
-            return
-
-        f.write("## Executive Brief\n\n")
-
-        for line in narrative.executive_summary or []:
-            f.write(f"- {line}\n")
-
-        if narrative.financial_impact:
-            f.write("\n### Financial Impact\n")
-            for line in narrative.financial_impact:
-                f.write(f"- {line}\n")
-
-        if narrative.risks:
-            f.write("\n### Strategic Risks\n")
-            for r in narrative.risks:
-                f.write(f"- {r}\n")
-
-        if narrative.action_plan:
-            f.write("\n### Action Plan\n")
-            f.write("| Action | Owner | Timeline | Success Metric |\n")
-            f.write("| :--- | :--- | :--- | :--- |\n")
-
-            for a in narrative.action_plan:
-                row = a if isinstance(a, dict) else asdict(a)
-                f.write(
-                    f"| {row.get('action')} | {row.get('owner')} | "
-                    f"{row.get('timeline')} | {row.get('success_kpi')} |\n"
-                )
-
-        f.write("\n---\n\n")
-
-    # -------------------------------------------------
     # DOMAIN SECTION
     # -------------------------------------------------
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
@@ -164,24 +104,57 @@ class HybridReport(BaseReport):
             k: v for k, v in (result.get("kpis") or {}).items()
             if not k.startswith("_")
         }
-        visuals = result.get("visuals", []) or []
 
+        visuals = result.get("visuals", []) or []
+        insights = result.get("insights", []) or []
+        recs = result.get("recommendations", []) or []
+
+        # ---------------- KPIs ----------------
         if kpis:
             f.write("### Key Metrics\n")
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
-            for k, v in list(kpis.items())[:12]:
+
+            for k, v in list(kpis.items())[:9]:
                 f.write(
                     f"| {k.replace('_',' ').title()} | "
                     f"{self._format_value(k, v)} |\n"
                 )
             f.write("\n")
 
+        # ---------------- VISUALS ----------------
         if visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
                 f.write(f"![{vis.get('caption')}]({vis.get('path')})\n")
-                f.write(f"> {vis.get('caption')}\n\n")
+                conf = int(vis.get("confidence", 0) * 100)
+                f.write(
+                    f"> {vis.get('caption')} "
+                    f"(Confidence: {conf}%)\n\n"
+                )
+
+        # ---------------- INSIGHTS ----------------
+        if insights:
+            f.write("### Key Insights\n")
+            for ins in insights[:5]:
+                f.write(
+                    f"- **{ins.get('level','INFO')}** — "
+                    f"{ins.get('title')}: {ins.get('so_what')}\n"
+                )
+            f.write("\n")
+
+        # ---------------- RECOMMENDATIONS ----------------
+        if recs:
+            f.write("### Recommendations\n")
+            for r in recs[:5]:
+                f.write(
+                    f"- **{r.get('priority')}** — {r.get('action')} "
+                    f"(Owner: {r.get('owner')}, "
+                    f"Timeline: {r.get('timeline')})\n"
+                )
+            f.write("\n")
+
+        f.write("---\n\n")
 
     # -------------------------------------------------
     # HEADER & FOOTER
@@ -192,20 +165,22 @@ class HybridReport(BaseReport):
             f"**Run ID:** `{run_id}` | "
             f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n"
         )
+
         if metadata:
             for k, v in metadata.items():
                 f.write(f"- **{k.replace('_',' ').title()}**: {v}\n")
+
         f.write("\n---\n\n")
 
     def _write_footer(self, f):
         f.write("\n---\n")
-        f.write("_Generated by **Sreejita Intelligence Engine** · Hybrid Report_\n")
+        f.write("_Generated by **Sreejita Universal Domain Intelligence**_\n")
 
     # -------------------------------------------------
     # HELPERS
     # -------------------------------------------------
     def _sort_domains(self, domains):
-        priority = ["healthcare", "finance", "sales", "marketing"]
+        priority = ["healthcare", "finance", "retail", "marketing"]
         return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
     def _format_value(self, key: str, v: Any):
@@ -227,7 +202,7 @@ class HybridReport(BaseReport):
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Thin glue layer.
-    Intelligence is already computed by orchestrator.
+    Intelligence is computed by orchestrator.
     """
     from sreejita.reporting.orchestrator import generate_report_payload
 
@@ -237,32 +212,19 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
-    primary_domain = engine._sort_domains(domain_results.keys())[0]
-    primary = domain_results.get(primary_domain, {})
-
-    narrative = build_narrative(
-        domain=primary_domain,
-        kpis=primary.get("kpis", {}),
-        insights=primary.get("insights", []),
-        recommendations=primary.get("recommendations", []),
-    )
-
-    executive_payload = primary.get("executive", {})
-
     md_path = engine.build(
         domain_results=domain_results,
-        narrative_data=narrative,
-        executive_payload=executive_payload,
         output_dir=run_dir,
         metadata=config.get("metadata"),
     )
 
+    primary_domain = engine._sort_domains(domain_results.keys())[0]
+    primary = domain_results.get(primary_domain, {})
+
     return {
         "markdown": str(md_path),
         "payload": {
-            "executive": executive_payload,
-            "executive_snapshot": executive_payload.get("snapshot"),
-            "summary": narrative.executive_summary,
+            "executive": primary.get("executive", {}),
             "visuals": primary.get("visuals", []),
             "insights": primary.get("insights", []),
             "recommendations": primary.get("recommendations", []),
