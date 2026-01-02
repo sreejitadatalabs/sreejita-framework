@@ -532,9 +532,18 @@ class HealthcareDomain(BaseDomain):
         """
         Calculates factual, domain-level KPIs ONLY.
         """
-        subdomains, caps = detect_subdomain_and_capabilities(df, self.cols)
-        primary_sub = max(subdomains, key=subdomains.get)
-        sub = HealthcareSubDomain(primary_sub)
+        sub_distribution, caps = detect_subdomain_and_capabilities(df, self.cols)
+        primary_sub = max(sub_distribution, key=sub_distribution.get)
+        
+        # Multi-label executive signal
+        is_mixed = sum(1 for v in sub_distribution.values() if v > 0.4) > 1
+        report_label = (
+            HealthcareSubDomain.MIXED.value
+            if is_mixed
+            else primary_sub
+        )
+        
+        sub = HealthcareSubDomain(report_label)
 
         m = HealthcareMapping(df, self.cols)
         
@@ -543,15 +552,14 @@ class HealthcareDomain(BaseDomain):
 
         # 1. Base KPIs
         kpis: Dict[str, Any] = {
-            "sub_domains": subdomains,
-            "primary_sub_domain": primary_sub,
+            "sub_domains": sub_distribution,
+            "primary_sub_domain": report_label,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
             "total_volume": vol,
             "total_records": len(df),
             "total_entities": vol,
         }
-
 
         # 2. Time / Duration (Canonical + Alias)
         if Capability.TIME_FLOW in caps:
@@ -747,7 +755,18 @@ class HealthcareDomain(BaseDomain):
                     )
                 except Exception:
                     pass
-    
+
+            else:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                df[self.time_col].dt.month.value_counts().sort_index().plot(kind="bar", ax=ax)
+                ax.set_title("Activity Distribution (Trend Disabled)", fontweight="bold")
+                save(
+                    fig,
+                    "volume_dist_safe.png",
+                    "Activity distribution shown instead of trend due to data stability limits.",
+                    0.85
+                )
+        
         # =================================================
         # 2. VOLUME DISTRIBUTION
         # =================================================
