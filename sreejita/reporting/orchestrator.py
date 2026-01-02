@@ -206,7 +206,11 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
             p = Path(v.get("path", ""))
             if p.exists():
                 visuals.append(v)
-
+        visuals = sorted(
+            visuals,
+            key=lambda x: x.get("importance", 0),
+            reverse=True
+        )
     # -------------------------------------------------
     # 7. FINAL PAYLOAD (PDF-SAFE)
     # -------------------------------------------------
