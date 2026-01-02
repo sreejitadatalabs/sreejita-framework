@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple
 from enum import Enum
 from matplotlib.ticker import FuncFormatter
+from sreejita.core.capabilities import (
+    Capability,
+    get_capability_spec,
+    min_confidence_required,
+    supports_trend,
+)
 
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
@@ -18,7 +24,6 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
 
 # [FIX] Define Visual Benchmark
-VISUAL_BENCHMARK_LOS = HEALTHCARE_EXTERNAL_LIMITS["avg_los"]["soft_cap"]
 MIN_SAMPLE_SIZE = 30  # Statistical significance floor
 
 # =====================================================
@@ -34,48 +39,37 @@ class HealthcareSubDomain(str, Enum):
     MIXED = "mixed"
     UNKNOWN = "unknown"
 
-
-class HealthcareCapability(str, Enum):
-    VOLUME = "volume"
-    TIME = "time"
-    COST = "cost"
-    QUALITY = "quality"
-    VARIANCE = "variance"
-    ACCESS = "access"
-    DATA_QUALITY = "data_quality"
-
-
 # =====================================================
 # 2. SUBDOMAIN EXPECTATIONS (GOVERNANCE)
 # =====================================================
 
 SUBDOMAIN_EXPECTATIONS = {
     HealthcareSubDomain.HOSPITAL: {
-        "required": {HealthcareCapability.VOLUME, HealthcareCapability.TIME},
-        "bonus": {HealthcareCapability.QUALITY, HealthcareCapability.COST, HealthcareCapability.VARIANCE},
+        "required": {Capability.VOLUME, Capability.TIME_FLOW},
+        "bonus": {Capability.QUALITY, Capability.COST, Capability.VARIANCE},
     },
     HealthcareSubDomain.CLINIC: {
-        "required": {HealthcareCapability.VOLUME},
-        "bonus": {HealthcareCapability.TIME, HealthcareCapability.ACCESS},
+        "required": {Capability.VOLUME},
+        "bonus": {Capability.TIME_FLOW, Capability.ACCESS},
     },
     HealthcareSubDomain.DIAGNOSTICS: {
-        "required": {HealthcareCapability.VOLUME},
-        "bonus": {HealthcareCapability.TIME, HealthcareCapability.QUALITY},
+        "required": {Capability.VOLUME},
+        "bonus": {Capability.TIME_FLOW, Capability.QUALITY},
     },
     HealthcareSubDomain.PHARMACY: {
-        "required": {HealthcareCapability.VOLUME, HealthcareCapability.COST},
+        "required": {Capability.VOLUME, Capability.COST},
         "bonus": set(),
     },
     HealthcareSubDomain.PUBLIC_HEALTH: {
-        "required": {HealthcareCapability.VOLUME},
-        "bonus": {HealthcareCapability.ACCESS, HealthcareCapability.QUALITY},
+        "required": {Capability.VOLUME},
+        "bonus": {Capability.ACCESS, Capability.QUALITY},
     },
     HealthcareSubDomain.MIXED: {
-        "required": {HealthcareCapability.VOLUME},
-        "bonus": {HealthcareCapability.TIME, HealthcareCapability.COST},
+        "required": {Capability.VOLUME},
+        "bonus": {Capability.TIME_FLOW, Capability.COST},
     },
     HealthcareSubDomain.UNKNOWN: {
-        "required": {HealthcareCapability.DATA_QUALITY},
+        "required": {Capability.DATA_TRUST},
         "bonus": set(),
     },
 }
@@ -276,15 +270,12 @@ class HealthcareMapping:
 def detect_subdomain_and_capabilities(
     df: pd.DataFrame,
     cols: Dict[str, str]
-) -> Tuple[HealthcareSubDomain, Set[HealthcareCapability]]:
+) -> Tuple[Dict[str, float], Set[Capability]]:
 
-    caps = {HealthcareCapability.DATA_QUALITY}
+    caps: Set[Capability] = {Capability.DATA_TRUST}
+    sub_scores: Dict[HealthcareSubDomain, float] = {}
 
     def usable(col, min_ratio=0.1):
-        """
-        Capability presence check.
-        Low threshold by design to support mixed & aggregated datasets.
-        """
         return (
             col
             and col in df.columns
@@ -293,16 +284,16 @@ def detect_subdomain_and_capabilities(
         )
 
     # -----------------------
-    # CAPABILITIES
+    # CAPABILITIES (UNIVERSAL)
     # -----------------------
     if usable(cols.get("pid")) or usable(cols.get("encounter")):
-        caps.add(HealthcareCapability.VOLUME)
+        caps.add(Capability.VOLUME)
 
     if usable(cols.get("los")) or usable(cols.get("duration")):
-        caps.add(HealthcareCapability.TIME)
+        caps.add(Capability.TIME_FLOW)
 
     if usable(cols.get("cost")):
-        caps.add(HealthcareCapability.COST)
+        caps.add(Capability.COST)
 
     if (
         usable(cols.get("status"))
@@ -310,44 +301,48 @@ def detect_subdomain_and_capabilities(
         or usable(cols.get("readmitted"))
         or usable(cols.get("flag"))
     ):
-        caps.add(HealthcareCapability.QUALITY)
+        caps.add(Capability.QUALITY)
 
     if usable(cols.get("facility")) or usable(cols.get("doctor")):
-        caps.add(HealthcareCapability.VARIANCE)
+        caps.add(Capability.VARIANCE)
 
-    duration_col = cols.get("duration")
-
-    if duration_col and duration_col in df.columns:
-        # Check if the actual column header implies waiting or access issues
-        raw_name = str(duration_col).lower()
-        ACCESS_TOKENS = {"wait", "queue", "access", "turnaround", "delay", "lag", "appointment"}
-        
-        if any(tok in raw_name for tok in ACCESS_TOKENS):
-            caps.add(HealthcareCapability.ACCESS)
+    if cols.get("duration") and any(
+        t in str(cols["duration"]).lower()
+        for t in ("wait", "delay", "queue", "turnaround", "appointment")
+    ):
+        caps.add(Capability.ACCESS)
 
     # -----------------------
-    # SUB-DOMAIN (ORDER MATTERS)
+    # SUB-DOMAIN SCORING (MULTI-LABEL)
     # -----------------------
     if usable(cols.get("los")):
-        sub = HealthcareSubDomain.HOSPITAL
-    elif usable(cols.get("duration")):
-        sub = HealthcareSubDomain.DIAGNOSTICS
-    elif usable(cols.get("cost")) and not usable(cols.get("los")):
-        sub = HealthcareSubDomain.PHARMACY
-    elif usable(cols.get("population")):
-        sub = HealthcareSubDomain.PUBLIC_HEALTH
-    elif usable(cols.get("encounter")):
-        sub = HealthcareSubDomain.CLINIC
-    else:
-        sub = HealthcareSubDomain.MIXED
+        sub_scores[HealthcareSubDomain.HOSPITAL] = 0.9
 
-    return sub, caps
+    if usable(cols.get("duration")):
+        sub_scores[HealthcareSubDomain.DIAGNOSTICS] = 0.7
+
+    if usable(cols.get("cost")) and not usable(cols.get("los")):
+        sub_scores[HealthcareSubDomain.PHARMACY] = 0.6
+
+    if usable(cols.get("population")):
+        sub_scores[HealthcareSubDomain.PUBLIC_HEALTH] = 0.8
+
+    if usable(cols.get("encounter")):
+        sub_scores[HealthcareSubDomain.CLINIC] = 0.6
+
+    if not sub_scores:
+        sub_scores[HealthcareSubDomain.UNKNOWN] = 1.0
+
+    total = sum(sub_scores.values())
+    subdomains = {k.value: round(v / total, 2) for k, v in sub_scores.items()}
+
+    return subdomains, caps
 
 # =====================================================
 # 5. UNIVERSAL SCORE
 # =====================================================
 
-def compute_score(kpis, sub, caps):
+def compute_score(kpis, sub: HealthcareSubDomain, caps: Set[Capability]):
     score = 100
     breakdown = {}
     rules = SUBDOMAIN_EXPECTATIONS[sub]
@@ -548,7 +543,10 @@ class HealthcareDomain(BaseDomain):
         """
         Calculates factual, domain-level KPIs ONLY.
         """
-        sub, caps = detect_subdomain_and_capabilities(df, self.cols)
+        subdomains, caps = detect_subdomain_and_capabilities(df, self.cols)
+        primary_sub = max(subdomains, key=subdomains.get)
+        sub = HealthcareSubDomain(primary_sub)
+
         m = HealthcareMapping(df, self.cols)
         
         # [FIX 1] Define vol BEFORE using it in dictionary
@@ -556,14 +554,15 @@ class HealthcareDomain(BaseDomain):
 
         # 1. Base KPIs
         kpis: Dict[str, Any] = {
-            "sub_domain": sub.value,
+            "sub_domains": subdomains,
+            "primary_sub_domain": primary_sub,
             "capabilities": [c.value for c in caps],
             "data_completeness": m.data_completeness(),
-            "total_volume": (vol if sub == HealthcareSubDomain.PUBLIC_HEALTH else len(df)),
+            "total_volume": vol,
             "total_records": len(df),
             "total_entities": vol,
-            "total_patients": vol if self.cols.get("pid") else None, 
         }
+
 
         # 2. Time / Duration (Canonical + Alias)
         if HealthcareCapability.TIME in caps:
@@ -728,19 +727,20 @@ class HealthcareDomain(BaseDomain):
         # 1. VOLUME OVER TIME (UNIVERSAL)
         # =================================================
         if self.time_col and self.time_col in df.columns:
-            try:
-                fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(self.time_col).resample("M").size().plot(ax=ax, linewidth=2)
-                ax.set_title("Activity Volume Over Time", fontweight="bold")
-                ax.grid(alpha=0.3)
-                save(
-                    fig,
-                    "volume_trend.png",
-                    "Observed activity volume across time.",
-                    0.99
-                )
-            except Exception:
-                pass
+            if supports_trend(Capability.TIME_FLOW):
+                try:
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    df.set_index(self.time_col).resample("M").size().plot(ax=ax, linewidth=2)
+                    ax.set_title("Activity Volume Over Time", fontweight="bold")
+                    ax.grid(alpha=0.3)
+                    save(
+                        fig,
+                        "volume_trend.png",
+                        "Observed activity volume across time.",
+                        0.99
+                    )
+                except Exception:
+                    pass
     
         # =================================================
         # 2. VOLUME DISTRIBUTION
@@ -910,14 +910,22 @@ class HealthcareDomain(BaseDomain):
         caps = set(kpis.get("capabilities", []))
     
         def add(level, title, so_what, source="System Analysis", executive=False):
+            conf = kpis.get("_confidence", {}).get(
+                title.lower().replace(" ", "_"), 0.7
+            )
+        
+            if conf < min_confidence_required(Capability.DATA_TRUST):
+                level = "WARNING"
+        
             insights.append({
                 "level": level,
                 "title": title,
                 "so_what": so_what,
                 "source": source,
+                "confidence": round(conf, 2),
                 "executive_summary_flag": executive
             })
-    
+
         # =================================================
         # 1. DATA TRUST FOUNDATION (ALWAYS FIRST)
         # =================================================
