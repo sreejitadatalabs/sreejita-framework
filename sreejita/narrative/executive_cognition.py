@@ -80,11 +80,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Selects 3–5 KPIs based on capability priority, confidence, and relevance.
     """
-    if not isinstance(kpis, dict):
-        return []
-
-    # 🛡️ THE HARDENING GUARD: Enforce Contract Purity
-    if "_kpi_capabilities" not in kpis:
+    if not isinstance(kpis, dict) or "_kpi_capabilities" not in kpis:
         return []
         
     cap_map = kpis.get("_kpi_capabilities", {})
