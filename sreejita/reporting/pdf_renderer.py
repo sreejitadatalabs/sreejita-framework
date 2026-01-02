@@ -21,31 +21,31 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (SAFE)
+# PAYLOAD NORMALIZER (AUTHORITATIVE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Aligns PDF renderer with orchestrator + executive_cognition output.
-    Ensures nested dictionaries are flattened correctly for the renderer.
+    Align PDF renderer with orchestrator + executive cognition.
+    This is the SINGLE source of truth for rendering.
     """
     if not isinstance(payload, dict):
-        payload = {}
+        return {}
 
-    # unwrap domain key if present
-    if len(payload) == 1 and "executive" not in payload:
-        payload = next(iter(payload.values()), {})
-
-    executive = payload.get("executive", {}) or {}
+    # unwrap domain nesting if present
+    if "executive" in payload:
+        executive = payload.get("executive", {})
+    elif len(payload) == 1:
+        executive = next(iter(payload.values()), {})
+    else:
+        executive = payload
 
     return {
-        "snapshot": executive.get("snapshot", {}),
+        "executive_brief": executive.get("executive_brief", ""),
         "primary_kpis": executive.get("primary_kpis", []),
         "board_readiness": executive.get("board_readiness", {}),
-        "board_readiness_trend": executive.get("board_readiness_trend", {}),
-        "board_readiness_history": executive.get("board_readiness_history", []),
-        "insights": payload.get("insights", []),
-        "recommendations": payload.get("recommendations", []),
+        "insights": executive.get("insights", {}),
+        "recommendations": executive.get("recommendations", []),
         "visuals": payload.get("visuals", []),
     }
 
@@ -58,13 +58,14 @@ def format_value(v: Any) -> str:
     if v is None:
         return "-"
     try:
-        if isinstance(v, float) and v <= 1:
+        if isinstance(v, float) and 0 <= v <= 1:
             return f"{v:.1%}"
-        if abs(float(v)) >= 1_000_000:
+        v = float(v)
+        if abs(v) >= 1_000_000:
             return f"{v/1_000_000:.1f}M"
-        if abs(float(v)) >= 1_000:
+        if abs(v) >= 1_000:
             return f"{v/1_000:.1f}K"
-        return f"{float(v):.2f}"
+        return f"{v:.2f}"
     except Exception:
         return str(v)
 
@@ -125,7 +126,7 @@ class BoardReadinessSparkline(Flowable):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (STABLE)
+# EXECUTIVE PDF RENDERER (FINAL)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -134,10 +135,10 @@ class ExecutivePDFRenderer:
 
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         payload = normalize_pdf_payload(payload)
-    
+
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
         doc = SimpleDocTemplate(
             str(output_path),
             pagesize=A4,
@@ -146,66 +147,75 @@ class ExecutivePDFRenderer:
             topMargin=40,
             bottomMargin=40,
         )
-    
+
         styles = getSampleStyleSheet()
         story: List[Any] = []
-    
-        # ---------- SAFE CUSTOM STYLES (Prevents KeyError in Streamlit) ----------
+
+        # -------------------------------------------------
+        # SAFE CUSTOM STYLES (STREAMLIT-PROOF)
+        # -------------------------------------------------
         if "SR_Title" not in styles:
             styles.add(ParagraphStyle(
-                "SR_Title", fontSize=22, alignment=TA_CENTER,
-                spaceAfter=18, fontName="Helvetica-Bold"
+                "SR_Title",
+                fontSize=22,
+                alignment=TA_CENTER,
+                spaceAfter=18,
+                fontName="Helvetica-Bold",
             ))
+
         if "SR_Section" not in styles:
             styles.add(ParagraphStyle(
-                "SR_Section", fontSize=15,
-                spaceBefore=18, spaceAfter=10,
-                fontName="Helvetica-Bold"
+                "SR_Section",
+                fontSize=15,
+                spaceBefore=18,
+                spaceAfter=10,
+                fontName="Helvetica-Bold",
             ))
+
         if "SR_Body" not in styles:
             styles.add(ParagraphStyle(
-                "SR_Body", fontSize=11, leading=15, spaceAfter=6
+                "SR_Body",
+                fontSize=11,
+                leading=15,
+                spaceAfter=6,
             ))
-    
+
         # =====================================================
         # PAGE 1 — EXECUTIVE BRIEF + KPIs
         # =====================================================
-        br = payload["board_readiness"]
-    
+
+        br = payload.get("board_readiness", {})
+
         story.append(Paragraph("Sreejita Executive Report", styles["SR_Title"]))
         story.append(Paragraph(
             f"<b>Board Readiness:</b> {br.get('score','-')} / 100 "
-            f"({br.get('band','-' )})<br/>"
+            f"({br.get('band','-')})<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
             styles["SR_Body"],
         ))
-    
-        # Executive Brief
-        snapshot = payload.get("snapshot", {})
-        if snapshot:
+
+        # Executive Brief (1-minute)
+        if payload.get("executive_brief"):
             story.append(Spacer(1, 12))
             story.append(Paragraph("Executive Brief", styles["SR_Section"]))
-            story.append(Paragraph(
-                snapshot.get("overall_risk", "Risk level not determined."),
-                styles["SR_Body"],
-            ))
-    
-        # KPI TABLE
-        if payload["primary_kpis"]:
+            story.append(Paragraph(payload["executive_brief"], styles["SR_Body"]))
+
+        # KPI TABLE (MAX 9)
+        if payload.get("primary_kpis"):
             rows = [["Metric", "Value", "Confidence"]]
             bg_styles = []
-    
-            for idx, k in enumerate(payload["primary_kpis"][:5], start=1):
-                conf = k.get("confidence", 0)
+
+            for idx, k in enumerate(payload["primary_kpis"][:9], start=1):
+                conf = k.get("confidence", 0.7)
                 rows.append([
-                    k.get("name", "Unknown Metric"),
+                    k.get("name", "Unknown"),
                     format_value(k.get("value")),
                     f"{confidence_badge(conf)} ({int(conf*100)}%)",
                 ])
-                bg_styles.append((
-                    "BACKGROUND", (0, idx), (-1, idx), confidence_color(conf)
-                ))
-    
+                bg_styles.append(
+                    ("BACKGROUND", (0, idx), (-1, idx), confidence_color(conf))
+                )
+
             table = Table(rows, colWidths=[3.5*inch, 2*inch, 1.5*inch])
             table.setStyle(TableStyle([
                 ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
@@ -214,83 +224,99 @@ class ExecutivePDFRenderer:
                 ("PADDING", (0,0), (-1,-1), 8),
                 *bg_styles,
             ]))
-    
+
             story.append(Spacer(1, 14))
             story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
             story.append(table)
-    
+
         # =====================================================
-        # PAGE 2+ — VISUAL EVIDENCE
+        # PAGE 2+ — VISUAL EVIDENCE (2 PER PAGE)
         # =====================================================
+
         story.append(PageBreak())
         story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
 
-        # 🛡️ CHANGE 5 — PDF SIDE (ONE-LINE SAFETY NET)
-        if not payload["visuals"]:
+        visuals = payload.get("visuals", [])
+
+        if not visuals:
             story.append(Paragraph(
                 "No statistically reliable visuals could be generated. "
                 "This typically indicates sparse or low-confidence data.",
-                styles["SR_Body"]
+                styles["SR_Body"],
             ))
         else:
-            visuals = payload.get("visuals", [])
-            # Chunking visuals 2 per page
-            visual_pages = [visuals[i:i+2] for i in range(0, len(visuals), 2)]
-        
-            for page_idx, pair in enumerate(visual_pages):
-                if page_idx > 0: # Already added first page break/title above
+            pages = [visuals[i:i+2] for i in range(0, len(visuals), 2)]
+
+            for page_idx, pair in enumerate(pages):
+                if page_idx > 0:
                     story.append(PageBreak())
-                    story.append(Paragraph("Visual Evidence (Cont.)", styles["SR_Section"]))
-        
+                    story.append(Paragraph("Visual Evidence (Continued)", styles["SR_Section"]))
+
                 for v in pair:
-                    p = Path(v.get("path", ""))
-                    if p.exists():
-                        img = utils.ImageReader(str(p))
-                        iw, ih = img.getSize()
-                        w = 6 * inch
-                        h = min(w * ih / iw, 4 * inch)
-                        story.append(Image(str(p), width=w, height=h))
-                        if v.get("caption"):
-                            story.append(Paragraph(v["caption"], styles["SR_Body"]))
-                        story.append(Spacer(1, 12))
-    
+                    img_path = Path(v.get("path", ""))
+                    if not img_path.exists():
+                        continue
+
+                    img = utils.ImageReader(str(img_path))
+                    iw, ih = img.getSize()
+                    w = 6 * inch
+                    h = min(w * ih / iw, 4 * inch)
+
+                    story.append(Image(str(img_path), width=w, height=h))
+
+                    caption = v.get("caption", "")
+                    conf = v.get("confidence")
+                    if caption:
+                        story.append(Paragraph(
+                            f"{caption} "
+                            f"<i>(Confidence: {confidence_badge(conf)})</i>",
+                            styles["SR_Body"],
+                        ))
+
+                    story.append(Spacer(1, 14))
+
         # =====================================================
         # INSIGHTS
         # =====================================================
-        if payload["insights"]:
+
+        insight_block = payload.get("insights", {})
+        if insight_block:
             story.append(PageBreak())
             story.append(Paragraph("Key Insights", styles["SR_Section"]))
-    
-            for ins in payload["insights"][:8]:
-                story.append(Paragraph(
-                    f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
-                    styles["SR_Body"],
-                ))
-                story.append(Paragraph(ins.get("so_what",""), styles["SR_Body"]))
-                story.append(Spacer(1, 8))
-    
+
+            for group in ["strengths", "warnings", "risks"]:
+                for ins in insight_block.get(group, []):
+                    story.append(Paragraph(
+                        f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
+                        styles["SR_Body"],
+                    ))
+                    story.append(Paragraph(ins.get("so_what",""), styles["SR_Body"]))
+                    story.append(Spacer(1, 8))
+
         # =====================================================
         # RECOMMENDATIONS
         # =====================================================
-        if payload["recommendations"]:
+
+        if payload.get("recommendations"):
             story.append(PageBreak())
             story.append(Paragraph("Recommendations", styles["SR_Section"]))
-    
+
             for rec in payload["recommendations"][:7]:
                 story.append(Paragraph(
                     f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
                     styles["SR_Body"],
                 ))
-                if rec.get("timeline"):
-                    story.append(Paragraph(
-                        f"<i>Timeline:</i> {rec['timeline']}",
-                        styles["SR_Body"],
-                    ))
-                story.append(Spacer(1, 8))
-    
+                story.append(Paragraph(
+                    f"<i>Owner:</i> {rec.get('owner','-')} | "
+                    f"<i>Timeline:</i> {rec.get('timeline','-')}<br/>"
+                    f"<i>Goal:</i> {rec.get('goal','-')}",
+                    styles["SR_Body"],
+                ))
+                story.append(Spacer(1, 10))
+
         doc.build(story)
-    
+
         if not output_path.exists():
             raise RuntimeError("PDF generation failed")
-    
+
         return output_path
