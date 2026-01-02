@@ -1,8 +1,9 @@
+# =====================================================
+# EXECUTIVE COGNITION — UNIVERSAL (SREEJITA FRAMEWORK)
+# =====================================================
+
 from typing import Dict, Any, List
-from sreejita.core.capabilities import (
-    Capability,
-    get_capability_spec,
-)
+from sreejita.core.capabilities import Capability
 
 # =====================================================
 # EXECUTIVE RISK MODEL
@@ -16,11 +17,8 @@ EXECUTIVE_RISK_BANDS = [
 ]
 
 
-def derive_risk_level(score: Any) -> Dict[str, Any]:
-    try:
-        score = int(score)
-    except Exception:
-        score = 0
+def derive_risk_level(score: int) -> Dict[str, Any]:
+    score = int(score or 0)
 
     for threshold, label, icon in EXECUTIVE_RISK_BANDS:
         if score >= threshold:
@@ -40,77 +38,76 @@ def derive_risk_level(score: Any) -> Dict[str, Any]:
 
 
 # =====================================================
-# KPI SELECTION (MAX 9, EXECUTIVE SAFE)
+# KPI SELECTION (EXECUTIVE SAFE, MAX 9)
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-    if not isinstance(kpis, dict) or "_kpi_capabilities" not in kpis:
-        return []
-
     cap_map = kpis.get("_kpi_capabilities", {})
     conf_map = kpis.get("_confidence", {})
-    scored = []
+
+    scored: List[Dict[str, Any]] = []
 
     for key, cap in cap_map.items():
         value = kpis.get(key)
+
         if not isinstance(value, (int, float)):
             continue
 
-        confidence = conf_map.get(key, 0.6)
-        cap_spec = get_capability_spec(Capability(cap))
+        confidence = conf_map.get(key, 0.7)
 
-        score = abs(value) * confidence * (1 / cap_spec.min_confidence)
+        weight = {
+            Capability.VOLUME.value: 1.0,
+            Capability.TIME_FLOW.value: 1.2,
+            Capability.COST.value: 1.1,
+            Capability.QUALITY.value: 1.3,
+            Capability.VARIANCE.value: 1.0,
+            Capability.ACCESS.value: 1.0,
+        }.get(cap, 1.0)
+
+        score = abs(value) * confidence * weight
 
         scored.append({
             "key": key,
             "name": key.replace("_", " ").title(),
-            "value": value,
-            "confidence": round(confidence, 2),
+            "value": round(value, 2),
             "capability": cap,
-            "score": score,
+            "confidence": round(confidence, 2),
+            "score": round(score, 2),
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:9]   # 🔒 HARD MAX 9
+    return scored[:9]   # 🔒 HARD MAX
 
 
 # =====================================================
-# INSIGHT STRUCTURING (EXECUTIVE FRIENDLY)
+# INSIGHT STRUCTURING (EXECUTIVE LOGIC)
 # =====================================================
 
 def structure_insights(
     insights: List[Dict[str, Any]],
-    kpi_confidence: Dict[str, float],
-) -> Dict[str, List[Dict[str, Any]]]:
+) -> Dict[str, Any]:
 
-    strengths = []
-    risks = []
+    strengths = [i for i in insights if i.get("level") == "STRENGTH"][:2]
+    warnings = [i for i in insights if i.get("level") == "WARNING"][:2]
+    risks = [i for i in insights if i.get("level") == "RISK"][:1]
 
-    for ins in insights:
-        level = ins.get("level", "").upper()
-
-        if level in ("INFO", "STABLE"):
-            strengths.append(ins)
-        else:
-            risks.append(ins)
-
-    strengths = strengths[:2]   # Max 2 positives
-    risks = risks[:3]           # Max 3 risks
+    composite_conf = round(
+        sum(i.get("confidence", 0.7) for i in insights) / max(len(insights), 1),
+        2,
+    )
 
     composite = {
-        "title": "Composite Executive Insight",
+        "title": "Overall Executive Assessment",
         "summary": (
-            "Overall performance shows identifiable strengths, "
-            "with emerging risks that are manageable through "
-            "targeted intervention."
+            "Performance shows identifiable strengths, with manageable "
+            "risk areas requiring focused operational attention."
         ),
-        "confidence": round(
-            sum(kpi_confidence.values()) / max(len(kpi_confidence), 1), 2
-        ),
+        "confidence": composite_conf,
     }
 
     return {
         "strengths": strengths,
+        "warnings": warnings,
         "risks": risks,
         "composite": composite,
     }
@@ -121,41 +118,42 @@ def structure_insights(
 # =====================================================
 
 def build_executive_brief(
-    kpis: Dict[str, Any],
+    board_score: int,
     insight_block: Dict[str, Any],
+    sub_domain: str,
 ) -> str:
-    score = kpis.get("board_confidence_score", 0)
-    risk = derive_risk_level(score)
 
-    positives = insight_block["strengths"]
-    risks = insight_block["risks"]
+    risk = derive_risk_level(board_score)
 
     brief = [
-        f"Current operational performance is assessed as {risk['label'].lower()}, "
-        f"with a Board Readiness Score of {risk['score']} / 100."
+        f"This {sub_domain.replace('_',' ')} performance review is assessed as "
+        f"{risk['label'].lower()}, with a Board Readiness Score of "
+        f"{risk['score']} out of 100."
     ]
 
-    if positives:
+    if insight_block["strengths"]:
         brief.append(
-            f"Key strengths include {positives[0]['title'].lower()}."
+            f"Key strengths include "
+            f"{insight_block['strengths'][0]['title'].lower()}."
         )
 
-    if risks:
+    if insight_block["risks"]:
         brief.append(
-            f"Primary risk relates to {risks[0]['title'].lower()}, "
-            "which requires timely management attention."
+            f"The primary risk relates to "
+            f"{insight_block['risks'][0]['title'].lower()}, "
+            "which requires timely leadership action."
         )
 
     brief.append(
-        "Overall, the situation is controllable with focused execution "
-        "over the next planning cycle."
+        "Overall, leadership intervention at this stage can materially "
+        "improve outcomes over the next operational cycle."
     )
 
     return " ".join(brief)
 
 
 # =====================================================
-# RECOMMENDATION NORMALIZATION (EXECUTIVE ACTION)
+# RECOMMENDATION NORMALIZATION
 # =====================================================
 
 def normalize_recommendations(
@@ -167,21 +165,18 @@ def normalize_recommendations(
     for r in recommendations[:5]:
         normalized.append({
             "priority": r.get("priority", "MEDIUM"),
-            "action": r.get("action", "Action required"),
-            "owner": r.get("owner", "Operations"),
-            "timeline": r.get("timeline", "Next 30–60 days"),
-            "goal": r.get(
-                "goal",
-                "Improve stability and reduce operational risk",
-            ),
-            "confidence": round(r.get("confidence", 0.6), 2),
+            "action": r.get("action"),
+            "owner": r.get("owner"),
+            "timeline": r.get("timeline"),
+            "goal": r.get("goal"),
+            "confidence": round(r.get("confidence", 0.7), 2),
         })
 
     return normalized
 
 
 # =====================================================
-# BOARD READINESS SCORE
+# BOARD READINESS SCORE (UNIVERSAL)
 # =====================================================
 
 def compute_board_readiness_score(
@@ -189,35 +184,35 @@ def compute_board_readiness_score(
     insights: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
 
-    conf = kpis.get("_confidence", {})
-    avg_conf = sum(conf.values()) / max(len(conf), 1)
-    kpi_score = avg_conf * 40
+    confidence_map = kpis.get("_confidence", {})
+    avg_conf = sum(confidence_map.values()) / max(len(confidence_map), 1)
+
+    kpi_signal = avg_conf * 45
 
     coverage_keys = [
         "total_volume",
-        "avg_duration",
-        "avg_unit_cost",
-        "variance_score",
+        "data_completeness",
     ]
-    present = sum(1 for k in coverage_keys if k in kpis)
-    coverage_score = (present / len(coverage_keys)) * 30
+    coverage = sum(1 for k in coverage_keys if k in kpis)
+    coverage_score = (coverage / len(coverage_keys)) * 25
 
-    criticals = sum(1 for i in insights if i.get("level") == "CRITICAL")
-    penalty = 10 if criticals else 0
-
-    final = round(
-        max(0, min(100, kpi_score + coverage_score + 30 - penalty))
+    risk_penalty = sum(
+        10 for i in insights if i.get("level") == "RISK"
     )
 
-    if kpis.get("data_completeness", 0) < 0.7:
-        final = min(final, 60)
+    final_score = round(
+        max(0, min(100, kpi_signal + coverage_score + 30 - risk_penalty))
+    )
+
+    if kpis.get("data_completeness", 1) < 0.7:
+        final_score = min(final_score, 60)
 
     return {
-        "score": final,
+        "score": final_score,
         "band": (
-            "BOARD READY" if final >= 85 else
-            "REVIEW WITH CAUTION" if final >= 70 else
-            "MANAGEMENT ONLY" if final >= 50 else
+            "BOARD READY" if final_score >= 85 else
+            "REVIEW WITH CAUTION" if final_score >= 70 else
+            "MANAGEMENT ONLY" if final_score >= 50 else
             "NOT BOARD SAFE"
         ),
     }
@@ -233,25 +228,24 @@ def build_executive_payload(
     recommendations: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
 
-    confidence_map = kpis.get("_confidence", {})
-
     # 1. KPI SELECTION
     primary_kpis = select_executive_kpis(kpis)
 
     # 2. INSIGHT STRUCTURE
-    insight_block = structure_insights(insights, confidence_map)
+    insight_block = structure_insights(insights)
 
-    # 3. EXECUTIVE BRIEF
-    executive_brief = build_executive_brief(kpis, insight_block)
+    # 3. BOARD READINESS
+    board = compute_board_readiness_score(kpis, insights)
 
-    # 4. RECOMMENDATIONS
-    executive_recs = normalize_recommendations(recommendations)
-
-    # 5. BOARD READINESS
-    board = compute_board_readiness_score(
-        kpis,
-        insights,
+    # 4. EXECUTIVE BRIEF
+    executive_brief = build_executive_brief(
+        board_score=board["score"],
+        insight_block=insight_block,
+        sub_domain=kpis.get("primary_sub_domain", "healthcare"),
     )
+
+    # 5. RECOMMENDATIONS
+    executive_recs = normalize_recommendations(recommendations)
 
     return {
         "executive_brief": executive_brief,
