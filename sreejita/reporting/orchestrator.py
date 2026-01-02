@@ -1,3 +1,8 @@
+# =====================================================
+# ORCHESTRATOR — UNIVERSAL (FINAL)
+# Sreejita Framework
+# =====================================================
+
 import logging
 import json
 from pathlib import Path
@@ -9,14 +14,14 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
-# 🧠 EXECUTIVE COGNITION (AUTHORITATIVE)
+# 🧠 Executive cognition (single source of truth)
 from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
 
 
 # =====================================================
-# SAFE TABULAR LOADER
+# SAFE TABULAR FILE LOADER
 # =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
@@ -77,7 +82,7 @@ def _trend(prev: int | None, curr: int | None) -> str:
 
 
 # =====================================================
-# ORCHESTRATOR — FINAL, CANONICAL
+# ORCHESTRATOR ENTRY — CANONICAL
 # =====================================================
 
 def generate_report_payload(
@@ -118,13 +123,13 @@ def generate_report_payload(
     engine = decision.engine
 
     # -------------------------------------------------
-    # 3A. UNKNOWN DOMAIN (GOVERNED FALLBACK)
+    # 3A. UNKNOWN DOMAIN — GOVERNED FALLBACK
     # -------------------------------------------------
     if engine is None:
         executive = build_executive_payload(
             kpis={
                 "primary_sub_domain": "unknown",
-                "record_count": len(df),
+                "total_volume": len(df),
                 "data_completeness": round(1 - df.isna().mean().mean(), 3),
                 "_confidence": {},
                 "_kpi_capabilities": {},
@@ -151,8 +156,8 @@ def generate_report_payload(
         return {
             "unknown": {
                 "kpis": {},
-                "insights": executive.get("insights", {}),
-                "recommendations": executive.get("recommendations", []),
+                "insights": executive["insights"],
+                "recommendations": executive["recommendations"],
                 "visuals": [],
                 "shape": shape_info,
                 "executive": executive,
@@ -160,7 +165,7 @@ def generate_report_payload(
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (EXPLICIT CONTRACT)
+    # 4. DOMAIN EXECUTION (STRICT CONTRACT)
     # -------------------------------------------------
     try:
         if hasattr(engine, "preprocess"):
@@ -192,7 +197,7 @@ def generate_report_payload(
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY (HARD ENFORCEMENT)
+    # 5. VISUAL SAFETY ENFORCEMENT (NON-NEGOTIABLE)
     # -------------------------------------------------
     visuals = [
         v for v in visuals
@@ -211,7 +216,7 @@ def generate_report_payload(
     }
 
     # -------------------------------------------------
-    # 6. EXECUTIVE COGNITION (FINAL, CONTEXT-AWARE)
+    # 6. EXECUTIVE COGNITION (FINAL)
     # -------------------------------------------------
     executive = build_executive_payload(
         kpis=kpis,
@@ -243,7 +248,7 @@ def generate_report_payload(
     executive["board_readiness_history"] = list(history.values())[-10:]
 
     # -------------------------------------------------
-    # 8. FINAL PAYLOAD (CANONICAL, STABLE)
+    # 8. FINAL PAYLOAD (CANONICAL)
     # -------------------------------------------------
     return {
         domain: {
