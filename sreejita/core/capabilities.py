@@ -1,5 +1,7 @@
 from enum import Enum
-from typing import Dict, List, Set
+from dataclasses import dataclass
+from typing import Dict, Set
+
 
 # =====================================================
 # UNIVERSAL CAPABILITY ENUM
@@ -7,64 +9,181 @@ from typing import Dict, List, Set
 
 class Capability(str, Enum):
     """
-    The Core Pillars of Universal Domain Intelligence.
-    Every KPI in Sreejita must map to one of these capabilities
-    to ensure the Executive Cognition layer can process it.
+    Core pillars of Universal Domain Intelligence.
+
+    Every KPI, Insight, and Recommendation in Sreejita
+    MUST map to exactly one Capability.
     """
-    
+
     # 1. SCALE & DEMAND
     VOLUME = "volume"              # Counts, Throughput, Load, Patients, Transactions
-    
+
     # 2. EFFICIENCY & FLOW
-    TIME_FLOW = "time_flow"        # Duration, LOS, TAT, Wait Time, Lead Time
-    
+    TIME_FLOW = "time_flow"        # LOS, TAT, Wait Time, Cycle Time, Lead Time
+
     # 3. ECONOMICS
-    COST = "cost"                  # Unit cost, Total spend, Margin, Revenue, Billing
-    
+    COST = "cost"                  # Unit cost, Spend, Revenue, Margin
+
     # 4. QUALITY & OUTCOME
-    QUALITY = "quality"            # Errors, Readmissions, Returns, Success Rate
-    
+    QUALITY = "quality"            # Errors, Readmissions, Defects, Returns
+
     # 5. EXECUTION DISCIPLINE
-    VARIANCE = "variance"          # Consistency, Entity performance, Standardization
-    
-    # 6. AVAILABILITY
-    ACCESS = "access"              # Utilization, Reach, Appointment availability
-    
+    VARIANCE = "variance"          # Consistency across entities or time
+
+    # 6. AVAILABILITY & REACH
+    ACCESS = "access"              # Utilization, Coverage, Availability
+
     # 7. GOVERNANCE FOUNDATION
-    DATA_TRUST = "data_trust"      # Completeness, Validity, Statistical significance
+    DATA_TRUST = "data_trust"      # Completeness, Validity, Sample size
 
 
 # =====================================================
-# CAPABILITY RELATIONSHIPS (META-LOGIC)
+# CAPABILITY SPECIFICATION (AUTHORITATIVE)
 # =====================================================
 
-# Maps capabilities to their typical "Executive Concern" for automated narrative weighting
-CAPABILITY_PRIORITY: Dict[Capability, int] = {
-    Capability.DATA_TRUST: 1,   # Foundation: If this is low, nothing else matters
-    Capability.QUALITY: 2,      # Risk: Critical for safety and reputation
-    Capability.COST: 3,         # Financial: Impact on the bottom line
-    Capability.TIME_FLOW: 4,    # Operations: Efficiency and throughput
-    Capability.VOLUME: 5,       # Scale: Context for the other metrics
-    Capability.VARIANCE: 6,     # Governance: Consistency of execution
-    Capability.ACCESS: 7        # Growth: Long-term availability
+@dataclass(frozen=True)
+class CapabilitySpec:
+    """
+    Canonical metadata describing how a capability
+    behaves across all domains.
+    """
+    label: str
+    executive_intent: str
+    min_confidence: float
+    supports_trend: bool
+    supports_benchmark: bool
+    aggregation_safe: bool
+
+
+CAPABILITY_SPECS: Dict[Capability, CapabilitySpec] = {
+
+    Capability.DATA_TRUST: CapabilitySpec(
+        label="Data Trust & Reliability",
+        executive_intent="Governance confidence and decision safety",
+        min_confidence=0.85,
+        supports_trend=False,
+        supports_benchmark=False,
+        aggregation_safe=False,
+    ),
+
+    Capability.QUALITY: CapabilitySpec(
+        label="Quality & Outcome",
+        executive_intent="Risk, safety, and outcome integrity",
+        min_confidence=0.75,
+        supports_trend=True,
+        supports_benchmark=True,
+        aggregation_safe=True,
+    ),
+
+    Capability.COST: CapabilitySpec(
+        label="Cost & Financial Impact",
+        executive_intent="Economic efficiency and margin control",
+        min_confidence=0.70,
+        supports_trend=True,
+        supports_benchmark=True,
+        aggregation_safe=True,
+    ),
+
+    Capability.TIME_FLOW: CapabilitySpec(
+        label="Time & Flow Efficiency",
+        executive_intent="Operational throughput and efficiency",
+        min_confidence=0.70,
+        supports_trend=True,
+        supports_benchmark=True,
+        aggregation_safe=True,
+    ),
+
+    Capability.VOLUME: CapabilitySpec(
+        label="Scale & Demand",
+        executive_intent="Operational scale and exposure",
+        min_confidence=0.60,
+        supports_trend=True,
+        supports_benchmark=False,
+        aggregation_safe=True,
+    ),
+
+    Capability.VARIANCE: CapabilitySpec(
+        label="Execution Consistency",
+        executive_intent="Standardization and control",
+        min_confidence=0.75,
+        supports_trend=False,
+        supports_benchmark=True,
+        aggregation_safe=False,
+    ),
+
+    Capability.ACCESS: CapabilitySpec(
+        label="Access & Availability",
+        executive_intent="Reach, utilization, and service availability",
+        min_confidence=0.65,
+        supports_trend=True,
+        supports_benchmark=False,
+        aggregation_safe=True,
+    ),
 }
 
-# Define which capabilities are "Risk Indicators" vs "Performance Indicators"
+
+# =====================================================
+# EXECUTIVE PRIORITY MODEL
+# =====================================================
+
+CAPABILITY_PRIORITY: Dict[Capability, int] = {
+    Capability.DATA_TRUST: 1,   # Foundation
+    Capability.QUALITY: 2,      # Risk & Safety
+    Capability.COST: 3,         # Financial Impact
+    Capability.TIME_FLOW: 4,    # Efficiency
+    Capability.VOLUME: 5,       # Context
+    Capability.VARIANCE: 6,     # Governance
+    Capability.ACCESS: 7,       # Growth & Reach
+}
+
+
 RISK_CAPABILITIES: Set[Capability] = {
-    Capability.QUALITY,
     Capability.DATA_TRUST,
-    Capability.VARIANCE
+    Capability.QUALITY,
+    Capability.VARIANCE,
 }
 
 PERFORMANCE_CAPABILITIES: Set[Capability] = {
     Capability.VOLUME,
     Capability.TIME_FLOW,
     Capability.COST,
-    Capability.ACCESS
+    Capability.ACCESS,
 }
 
-def get_capability_type(cap: Capability) -> str:
-    """Categorizes a capability for executive reporting."""
-    if cap in RISK_CAPABILITIES:
-        return "RISK_GUARDRAIL"
-    return "PERFORMANCE_DRIVER"
+
+# =====================================================
+# SAFE ACCESS HELPERS (CANONICAL API)
+# =====================================================
+
+def get_capability_spec(cap: Capability) -> CapabilitySpec:
+    """Returns authoritative metadata for a capability."""
+    return CAPABILITY_SPECS[cap]
+
+
+def is_risk_capability(cap: Capability) -> bool:
+    return cap in RISK_CAPABILITIES
+
+
+def is_performance_capability(cap: Capability) -> bool:
+    return cap in PERFORMANCE_CAPABILITIES
+
+
+def min_confidence_required(cap: Capability) -> float:
+    return CAPABILITY_SPECS[cap].min_confidence
+
+
+def supports_trend(cap: Capability) -> bool:
+    return CAPABILITY_SPECS[cap].supports_trend
+
+
+def supports_benchmark(cap: Capability) -> bool:
+    return CAPABILITY_SPECS[cap].supports_benchmark
+
+
+def is_aggregation_safe(cap: Capability) -> bool:
+    return CAPABILITY_SPECS[cap].aggregation_safe
+
+
+def capability_priority(cap: Capability) -> int:
+    """Lower number = higher executive importance."""
+    return CAPABILITY_PRIORITY.get(cap, 99)
