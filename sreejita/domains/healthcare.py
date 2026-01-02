@@ -14,7 +14,7 @@ from sreejita.core.capabilities import (
     min_confidence_required,
     supports_trend,
 )
-
+from sreejita.narrative.executive_cognition import confidence_weight_insights # Ensure import
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
@@ -111,17 +111,6 @@ def compute_kpi_confidence(kpis: Dict[str, Any], caps: List[str], total_records:
         confidence[k] = round(min(score, 1.0), 2)
 
     return confidence
-
-def confidence_weight_insights(
-    insights: List[Dict[str, Any]],
-    kpi_confidence: Dict[str, float],
-) -> List[Dict[str, Any]]:
-    """
-    Orders insights using Severity, Confidence, and Executive Relevance.
-    """
-    SEVERITY_WEIGHT = {
-        "CRITICAL": 4, "RISK": 3, "WARNING": 2, "INFO": 1,
-    }
 
     def infer_confidence(insight: Dict[str, Any]) -> float:
         title = insight.get("title", "").lower()
@@ -565,7 +554,7 @@ class HealthcareDomain(BaseDomain):
 
 
         # 2. Time / Duration (Canonical + Alias)
-        if HealthcareCapability.TIME in caps:
+        if Capability.TIME_FLOW in caps:
             raw_duration = self._safe_metric(m.avg_duration(), vol)
             
             # [FIX 2] Canonical Rule: Always set avg_duration
@@ -585,18 +574,18 @@ class HealthcareDomain(BaseDomain):
                 kpis["long_stay_rate"] = kpis.get("long_duration_rate")
 
         # 3. Cost
-        if HealthcareCapability.COST in caps:
+        if Capability.COST in caps:
             kpis["total_cost"] = m.total_cost()
             kpis["avg_unit_cost"] = self._safe_metric(m.avg_unit_cost(), vol)
             kpis["avg_cost_per_patient"] = kpis["avg_unit_cost"]
 
         # 4. Quality
-        if HealthcareCapability.QUALITY in caps:
+        if Capability.QUALITY in caps:
             kpis["adverse_event_rate"] = self._safe_metric(m.adverse_rate(), vol)
             kpis["readmission_rate"] = kpis["adverse_event_rate"] 
 
         # 5. Variance
-        if HealthcareCapability.VARIANCE in caps:
+        if Capability.VARIANCE in caps:
             kpis["variance_score"] = m.variance()
             kpis["facility_variance_score"] = kpis["variance_score"]
 
@@ -685,7 +674,24 @@ class HealthcareDomain(BaseDomain):
             total_records=len(df)
         )
         self._last_kpi_confidence = kpis["_confidence"]
-        
+
+        # -------------------------------------------------
+        # 10. KPI → CAPABILITY MAPPING (EXECUTIVE CONTRACT)
+        # -------------------------------------------------
+        kpis["_kpi_capabilities"] = {
+            "total_volume": Capability.VOLUME.value,
+            "avg_duration": Capability.TIME_FLOW.value,
+            "avg_los": Capability.TIME_FLOW.value,
+            "long_duration_rate": Capability.TIME_FLOW.value,
+            "total_cost": Capability.COST.value,
+            "avg_unit_cost": Capability.COST.value,
+            "readmission_rate": Capability.QUALITY.value,
+            "adverse_event_rate": Capability.QUALITY.value,
+            "variance_score": Capability.VARIANCE.value,
+            "no_show_rate": Capability.ACCESS.value,
+            "late_refill_rate": Capability.ACCESS.value,
+            "incidence_per_100k": Capability.VOLUME.value,
+        }
         return kpis
 
     def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
@@ -1165,12 +1171,7 @@ class HealthcareDomain(BaseDomain):
         # STEP 2: CONFIDENCE-WEIGHTED INSIGHT ORDERING
         # -------------------------------------------------
         kpi_conf = kpis.get("_confidence", {})
-        
-        insights = confidence_weight_insights(
-            insights=insights,
-            kpi_confidence=kpi_conf,
-        )
-        return insights
+        return confidence_weight_insights(insights=insights, kpi_confidence=kpi_conf)
 
     def generate_recommendations(
         self,
