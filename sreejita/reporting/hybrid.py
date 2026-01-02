@@ -42,9 +42,19 @@ class HybridReport(BaseReport):
             self._write_header(f, run_id, metadata)
 
             # Primary domain drives executive cognition
+            if not isinstance(domain_results, dict):
+                raise RuntimeError("HybridReport.build expected domain_results dict")
+            
             primary_domain = self._sort_domains(domain_results.keys())[0]
-            primary = domain_results.get(primary_domain, {})
+            primary = domain_results.get(primary_domain)
+            
+            if not isinstance(primary, dict):
+                raise RuntimeError(
+                    f"Primary domain payload corrupted: {type(primary)}"
+                )
+            
             executive = primary.get("executive", {})
+
 
             self._write_executive_brief(f, executive)
             self._write_board_readiness(f, executive)
@@ -199,6 +209,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # ✅ AUTHORITATIVE DOMAIN RESULTS
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
@@ -208,16 +219,18 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         metadata=config.get("metadata"),
     )
 
+    # ✅ SAFELY EXTRACT PRIMARY DOMAIN
     primary_domain = engine._sort_domains(domain_results.keys())[0]
     primary = domain_results.get(primary_domain, {})
 
     return {
         "markdown": str(md_path),
-        "payload": {
-            "executive": primary.get("executive", {}),
-            "visuals": primary.get("visuals", []),
-            "insights": primary.get("insights", []),
-            "recommendations": primary.get("recommendations", []),
-        },
+        "domain_results": domain_results,   # 🔒 KEEP FULL STRUCTURE
+        "primary_domain": primary_domain,
+        "executive": primary.get("executive", {}),
+        "visuals": primary.get("visuals", []),
+        "insights": primary.get("insights", []),
+        "recommendations": primary.get("recommendations", []),
         "run_dir": str(run_dir),
     }
+
