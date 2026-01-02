@@ -29,88 +29,95 @@ def generate_executive_summary(
     """
     Generate a CEO / Board-ready executive summary.
 
-    This function:
-    - Accepts legacy parameters for compatibility
-    - Expects Executive Cognition output either:
-        a) directly in `kpis`
-        b) nested under `kpis["executive"]`
+    Accepts legacy parameters but ONLY trusts
+    Executive Cognition output.
+
+    Expected executive payload locations:
+    - kpis["executive_brief"]
+    - kpis["executive"]
     """
 
     # -------------------------------------------------
-    # 1. DETECT EXECUTIVE PAYLOAD
+    # 1. DETECT EXECUTIVE PAYLOAD (STRICT)
     # -------------------------------------------------
-    executive = None
+    executive: Dict[str, Any] | None = None
 
-    if isinstance(kpis, dict) and "executive_brief" in kpis:
-        executive = kpis
-    elif isinstance(kpis, dict) and "executive" in kpis:
-        executive = kpis.get("executive")
+    if isinstance(kpis, dict):
+        if "executive_brief" in kpis:
+            executive = kpis
+        elif "executive" in kpis and isinstance(kpis["executive"], dict):
+            executive = kpis["executive"]
 
     if not isinstance(executive, dict):
-        return _safe_fallback()
+        return _safe_fallback(domain)
 
     # -------------------------------------------------
-    # 2. CORE SIGNALS
+    # 2. CORE EXECUTIVE SIGNALS
     # -------------------------------------------------
-    board = executive.get("board_readiness", {})
+    board = executive.get("board_readiness", {}) or {}
     score = board.get("score")
     band = board.get("band", "Unknown")
 
-    primary_kpis: List[Dict[str, Any]] = executive.get("primary_kpis", [])
-    insight_block = executive.get("insights", {})
-    recommendations = executive.get("recommendations", [])
+    primary_kpis: List[Dict[str, Any]] = executive.get("primary_kpis", []) or []
+    insight_block: Dict[str, Any] = executive.get("insights", {}) or {}
+    recommendations = executive.get("recommendations", []) or []
+
+    paragraphs: List[str] = []
 
     # -------------------------------------------------
     # 3. OPENING STATEMENT (MANDATORY)
     # -------------------------------------------------
-    opening = (
-        f"This {domain.replace('_',' ')} performance review indicates a "
-        f"{band.lower()} operating position, with a Board Readiness Score "
-        f"of {score} out of 100."
-        if score is not None
-        else
-        f"This {domain.replace('_',' ')} performance review was completed "
-        "based on available operational and quality signals."
-    )
-
-    paragraphs = [opening]
+    if isinstance(score, (int, float)):
+        paragraphs.append(
+            f"This {domain.replace('_',' ')} performance review indicates a "
+            f"{band.lower()} operating position, with a Board Readiness Score "
+            f"of {int(score)} out of 100."
+        )
+    else:
+        paragraphs.append(
+            f"This {domain.replace('_',' ')} performance review was completed "
+            "based on available operational and risk signals."
+        )
 
     # -------------------------------------------------
-    # 4. POSITIVE SIGNALS (1–2 MAX)
+    # 4. POSITIVE SIGNAL (MAX 1)
     # -------------------------------------------------
-    strengths = insight_block.get("strengths", [])
+    strengths = insight_block.get("strengths", []) or []
     if strengths:
-        good = strengths[0]
-        paragraphs.append(
-            f"Encouragingly, {good.get('title','key performance areas')} "
-            "are operating within acceptable or improving ranges."
-        )
+        s = strengths[0]
+        if s.get("title"):
+            paragraphs.append(
+                f"Encouragingly, {s['title'].lower()} are operating within "
+                "acceptable or improving ranges."
+            )
 
     # -------------------------------------------------
-    # 5. KEY RISKS (MAX 1)
+    # 5. PRIMARY RISK (MAX 1)
     # -------------------------------------------------
-    risks = insight_block.get("risks", [])
+    risks = insight_block.get("risks", []) or []
     if risks:
-        risk = risks[0]
-        paragraphs.append(
-            f"The most significant risk relates to {risk.get('title','a key operational area')}, "
-            "which warrants focused leadership attention."
-        )
+        r = risks[0]
+        if r.get("title"):
+            paragraphs.append(
+                f"The most significant risk relates to {r['title'].lower()}, "
+                "which warrants focused leadership attention."
+            )
 
     # -------------------------------------------------
     # 6. KPI EVIDENCE (TOP 2 ONLY)
     # -------------------------------------------------
     if primary_kpis:
-        kpi_text = []
+        evidence = []
         for k in primary_kpis[:2]:
-            kpi_text.append(
-                f"{k.get('name')} ({k.get('value')})"
-            )
+            name = k.get("name")
+            value = k.get("value")
+            if name is not None and value is not None:
+                evidence.append(f"{name} ({value})")
 
-        if kpi_text:
+        if evidence:
             paragraphs.append(
                 "This assessment is supported by observed performance in "
-                + " and ".join(kpi_text)
+                + " and ".join(evidence)
                 + "."
             )
 
@@ -119,11 +126,19 @@ def generate_executive_summary(
     # -------------------------------------------------
     if recommendations:
         top = recommendations[0]
-        paragraphs.append(
-            f"Immediate focus on the recommended action — "
-            f"{top.get('action','priority initiatives')} — "
-            "over the next 60–90 days is expected to materially improve outcomes."
-        )
+        action = top.get("action")
+        timeline = top.get("timeline", "the next 60–90 days")
+
+        if action:
+            paragraphs.append(
+                f"Immediate focus on the recommended action — {action.lower()} — "
+                f"over {timeline.lower()} is expected to materially improve outcomes."
+            )
+        else:
+            paragraphs.append(
+                "Focused execution of the recommended initiatives over the next "
+                "60–90 days is expected to materially improve outcomes."
+            )
     else:
         paragraphs.append(
             "Continued monitoring and disciplined execution will be critical "
@@ -131,7 +146,7 @@ def generate_executive_summary(
         )
 
     # -------------------------------------------------
-    # 8. FINAL EXECUTIVE BRIEF (ONE PARAGRAPH)
+    # 8. FINAL ONE-PARAGRAPH OUTPUT
     # -------------------------------------------------
     return " ".join(p.strip() for p in paragraphs if p).strip()
 
@@ -140,10 +155,11 @@ def generate_executive_summary(
 # SAFE FALLBACK (NEVER EMPTY)
 # =====================================================
 
-def _safe_fallback() -> str:
+def _safe_fallback(domain: str) -> str:
     return (
-        "Operational performance was reviewed across efficiency, cost, quality, "
-        "and risk dimensions using available data. No immediate systemic threats "
-        "were identified, though continued executive oversight and monitoring "
-        "are recommended to sustain stability and performance."
+        f"This {domain.replace('_',' ')} performance review was completed using "
+        "available operational, financial, and quality indicators. While no "
+        "immediate systemic threats were identified, continued executive "
+        "oversight and structured monitoring are recommended to sustain "
+        "stability and performance."
     )
