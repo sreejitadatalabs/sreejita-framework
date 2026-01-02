@@ -130,31 +130,29 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (DICT-BASED CONTRACT)
+    # 4. DOMAIN EXECUTION (EXPLICIT CONTRACT)
     # -------------------------------------------------
     try:
+        # Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        domain_result = engine.run(df)
+        # KPIs
+        kpis = engine.calculate_kpis(df)
 
-        if not isinstance(domain_result, dict):
-            raise RuntimeError(
-                f"Domain engine '{domain}' returned invalid result type: "
-                f"{type(domain_result)}"
-            )
+        # Visuals
+        visuals = engine.generate_visuals(
+            df=df,
+            output_dir=run_dir / "visuals" / domain
+        )
 
-        kpis = domain_result.get("kpis", {})
-        insights = domain_result.get("insights", [])
-        raw_recs = domain_result.get("recommendations", [])
-        visuals = domain_result.get("visuals", [])
-
-        # Defensive recompute (preferred hooks)
+        # Insights
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
             insights = engine.generate_insights(df, kpis)
 
+        # Recommendations
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -164,7 +162,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs)
 
-        # 🧠 EXECUTIVE INTELLIGENCE (MANDATORY)
+        # 🧠 EXECUTIVE COGNITION (MANDATORY)
         executive = build_executive_payload(
             kpis=kpis,
             insights=insights,
@@ -184,36 +182,36 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     current_score = board.get("score")
     previous_score = history.get(dataset_key)
 
-    trend = _trend(previous_score, current_score)
+    executive["board_readiness_trend"] = {
+        "previous_score": previous_score,
+        "current_score": current_score,
+        "trend": _trend(previous_score, current_score),
+    }
 
     history_values = list(history.values())
     if isinstance(current_score, int):
         history_values.append(current_score)
-
-    executive["board_readiness_trend"] = {
-        "previous_score": previous_score,
-        "current_score": current_score,
-        "trend": trend,
-    }
-
-    executive["board_readiness_history"] = history_values[-10:]
-
-    if isinstance(current_score, int):
         history[dataset_key] = current_score
         _save_history(run_dir, history)
 
+    executive["board_readiness_history"] = history_values[-10:]
+
     # -------------------------------------------------
-    # 6. VISUAL SAFETY & SORTING
+    # 6. VISUAL SAFETY & SORTING (FINAL GUARANTEE)
     # -------------------------------------------------
     visuals = [
         v for v in visuals
         if isinstance(v, dict) and Path(v.get("path", "")).exists()
     ]
+
     visuals = sorted(
         visuals,
-        key=lambda x: x.get("importance", 0),
-        reverse=True
+        key=lambda x: (x.get("importance", 0) * x.get("confidence", 1)),
+        reverse=True,
     )
+
+    if len(visuals) < 2:
+        log.warning("Less than 2 visuals generated — executive evidence may be weak")
 
     # -------------------------------------------------
     # 7. FINAL PAYLOAD (CANONICAL)
