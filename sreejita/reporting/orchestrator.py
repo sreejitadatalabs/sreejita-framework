@@ -136,7 +136,9 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        kpis = engine.calculate_kpis(df)
+        domain_result = engine.run(df)
+        kpis = domain_result.kpis
+        insights = domain_result.insights
 
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
