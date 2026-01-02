@@ -1,7 +1,6 @@
 # =====================================================
 # UNIVERSAL HEALTHCARE DOMAIN — SREEJITA FRAMEWORK
 # =====================================================
-
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -13,7 +12,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from matplotlib.ticker import FuncFormatter
 
-from sreejita.core.capabilities import Capability, supports_trend
+from sreejita.core.capabilities import Capability
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
 from sreejita.domains.contracts import BaseDomain, BaseDomainDetector, DomainDetectionResult
@@ -68,7 +67,190 @@ HEALTHCARE_VISUAL_MAP = {
         "sdoh_overlay", "immunization_rate"
     ]
 }
+# =====================================================
+# HEALTHCARE KPI INTELLIGENCE MAP (LOCKED)
+# =====================================================
+        
+HEALTHCARE_KPI_MAP = {
+    "hospital": [
+        "avg_los",
+        "readmission_rate",
+        "bed_occupancy_rate",
+        "case_mix_index",
+        "hcahps_score",
+        "mortality_rate",
+        "er_boarding_time",
+        "labor_cost_per_day",
+        "surgical_complication_rate",
+    ],
+    "clinic": [
+        "no_show_rate",
+        "avg_wait_time"
+        "provider_productivity",
+        "third_next_available",
+        "referral_conversion_rate",
+        "visit_cycle_time",
+        "patient_acquisition_cost",
+        "telehealth_mix",
+        "net_collection_ratio",
+    ],
+    "diagnostics": [
+        "avg_tat",
+        "critical_alert_time"
+        "specimen_rejection_rate",
+        "equipment_downtime_rate",
+        "repeat_test_rate",
+        "tests_per_fte",
+        "supply_cost_per_test",
+        "order_completeness_ratio",
+        "outpatient_market_share",
+    ],
+    "pharmacy": [
+        "days_supply_on_hand",
+        "generic_dispensing_rate",
+        "refill_adherence_rate",
+        "cost_per_rx",
+        "med_error_rate",
+        "pharmacist_intervention_rate",
+        "inventory_turnover",
+        "spend_velocity",
+        "avg_patient_wait_time",
+    ],
+    "public_health": [
+        "incidence_per_100k",
+        "sdoh_risk_score",
+        "screening_coverage_rate",
+        "chronic_readmission_rate",
+        "immunization_rate",
+        "provider_access_gap",
+        "ed_visits_per_1k",
+        "cost_per_member",
+        "healthy_days_index",
+    ],
+}
 
+# =====================================================
+# HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
+# =====================================================
+HEALTHCARE_INSIGHT_MAP = {
+    "hospital": [
+        "throughput_bottleneck",
+        "clinical_safety_alert",
+        "bed_capacity_strain",
+        "acuity_labor_mismatch",
+        "revenue_leakage",
+        "quality_stability",
+        "patient_experience_gap",
+        "physician_variance",
+        "supply_chain_variance",
+    ],
+    "clinic": [
+        "access_barrier",
+        "productivity_variance",
+        "referral_leakage",
+        "workflow_inefficiency",
+        "revenue_risk",
+        "telehealth_shift",
+        "demographic_gap",
+        "front_desk_variance",
+        "financial_health",
+    ],
+    "diagnostics": [
+        "service_level_gap",
+        "life_safety_risk",
+        "technical_waste",
+        "pre_analytical_failure",
+        "capacity_overload",
+        "asset_depreciation",
+        "efficiency_plateau",
+        "quality_variance",
+        "market_opportunity",
+    ],
+    "pharmacy": [
+        "economic_pressure",
+        "adherence_risk",
+        "safety_barrier",
+        "inventory_inefficiency",
+        "intervention_impact",
+        "payer_mix_shift",
+        "throughput_constraint",
+        "prescribing_variance",
+        "inventory_waste",
+    ],
+    "public_health": [
+        "equity_gap",
+        "prevention_failure",
+        "access_desert",
+        "chronic_cost_driver",
+        "outbreak_risk",
+        "environmental_influence",
+        "program_success",
+        "member_engagement_gap",
+        "governance_risk",
+    ],
+}
+
+# =====================================================
+# HEALTHCARE RECOMMENDATION MAP (LOCKED)
+# =====================================================
+
+HEALTHCARE_RECOMMENDATION_MAP = {
+    "hospital": [
+        "discharge_huddle",
+        "clinical_pathway_standardization",
+        "bed_assignment_automation",
+        "post_discharge_review",
+        "acuity_based_staffing",
+        "patient_feedback_rounding",
+        "demand_forecasting",
+        "or_turnover_optimization",
+        "implant_contract_review",
+    ],
+    "clinic": [
+        "appointment_reminders",
+        "open_access_scheduling",
+        "telehealth_standardization",
+        "checkin_workflow_lean",
+        "provider_rvu_dashboard",
+        "referral_centralization",
+        "patient_portal",
+        "rooming_velocity_optimization",
+        "targeted_marketing",
+    ],
+    "diagnostics": [
+        "analyzer_upgrade",
+        "critical_alert_software",
+        "specimen_training",
+        "preventive_maintenance",
+        "ehr_interface_automation",
+        "stat_track",
+        "managed_services",
+        "barcode_chain",
+        "physician_portal",
+    ],
+    "pharmacy": [
+        "refill_reminders",
+        "meds_to_beds",
+        "central_fill",
+        "formulary_standardization",
+        "drug_interaction_software",
+        "dispensing_robot",
+        "inventory_audit",
+        "manufacturer_contracts",
+        "staffing_optimization",
+    ],
+    "public_health": [
+        "mobile_health_units",
+        "screening_campaign",
+        "food_programs",
+        "chronic_protocols",
+        "immunization_registry",
+        "disparity_audit",
+        "community_health_workers",
+        "sdoh_referrals",
+        "whole_person_platform",
+    ],
+}
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -112,254 +294,195 @@ class HealthcareDomain(BaseDomain):
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-    
-        volume = len(df)
-    
-        # -------------------------------------------------
-        # SUB-DOMAIN SCORING (SIGNAL-BASED)
-        # -------------------------------------------------
-        sub_scores = {
-            "hospital": 0.9 if self.cols.get("los") else 0.0,
-            "clinic": 0.8 if self.cols.get("duration") else 0.0,
-            "diagnostics": 0.7 if self.cols.get("duration") else 0.0,
-            "pharmacy": 0.6 if self.cols.get("cost") else 0.0,
-            "public_health": 0.8 if self.cols.get("population") else 0.0,
-        }
-    
-        active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
-        primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
-        is_mixed = len(active_subs) > 1
-    
-        kpis: Dict[str, Any] = {
-            "primary_sub_domain": "mixed" if is_mixed else primary_sub,
-            "sub_domains": active_subs,
-            "total_volume": volume,
-            "data_completeness": round(1 - df.isna().mean().mean(), 3),
-        }
-    
-        # -------------------------------------------------
-        # UNIVERSAL KPI HELPERS
-        # -------------------------------------------------
-        def safe_mean(col):
-            return df[col].dropna().mean() if col and col in df.columns else None
-    
-        def safe_rate(col):
-            return df[col].mean() if col and col in df.columns else None
-    
-        # -------------------------------------------------
-        # SUB-DOMAIN KPI COMPUTATION
-        # -------------------------------------------------
-        for sub in active_subs:
-    
-            # ---------------- HOSPITAL ----------------
-            if sub == "hospital":
-                kpis.update({
-                    "avg_los": safe_mean(self.cols.get("los")),
-                    "readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    "bed_occupancy_rate": None,            # requires bed inventory
-                    "case_mix_index": None,                # requires DRG weights
-                    "hcahps_score": None,                  # survey data
-                    "mortality_rate": safe_rate(self.cols.get("flag")),
-                    "er_boarding_time": safe_mean(self.cols.get("duration")),
-                    "labor_cost_per_day": safe_mean(self.cols.get("cost")),
-                    "surgical_complication_rate": None,
-                })
-    
-            # ---------------- CLINIC ----------------
-            if sub == "clinic":
-                kpis.update({
-                    "no_show_rate": safe_rate(self.cols.get("readmitted")),
-                    "avg_wait_time": safe_mean(self.cols.get("duration")),
-                    "provider_productivity": volume / max(df[self.cols.get("doctor")].nunique(), 1)
-                        if self.cols.get("doctor") else None,
-                    "third_next_available": None,
-                    "referral_conversion_rate": None,
-                    "visit_cycle_time": safe_mean(self.cols.get("duration")),
-                    "patient_acquisition_cost": None,
-                    "telehealth_mix": None,
-                    "net_collection_ratio": None,
-                })
-    
-            # ---------------- DIAGNOSTICS ----------------
-            if sub == "diagnostics":
-                kpis.update({
-                    "avg_tat": safe_mean(self.cols.get("duration")),
-                    "critical_alert_time": safe_mean(self.cols.get("duration")),
-                    "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
-                    "equipment_downtime_rate": None,
-                    "repeat_test_rate": None,
-                    "tests_per_fte": volume / max(df[self.cols.get("doctor")].nunique(), 1)
-                        if self.cols.get("doctor") else None,
-                    "supply_cost_per_test": safe_mean(self.cols.get("cost")),
-                    "order_completeness_ratio": None,
-                    "outpatient_market_share": None,
-                })
-    
-            # ---------------- PHARMACY ----------------
-            if sub == "pharmacy":
-                kpis.update({
-                    "days_supply_on_hand": safe_mean(self.cols.get("supply")),
-                    "generic_dispensing_rate": None,
-                    "refill_adherence_rate": None,
-                    "cost_per_rx": safe_mean(self.cols.get("cost")),
-                    "med_error_rate": safe_rate(self.cols.get("flag")),
-                    "pharmacist_intervention_rate": safe_rate(self.cols.get("flag")),
-                    "inventory_turnover": None,
-                    "spend_velocity": safe_mean(self.cols.get("cost")),
-                    "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
-                })
-    
-            # ---------------- PUBLIC HEALTH ----------------
-            if sub == "public_health":
-                pop = safe_mean(self.cols.get("population"))
-                cases = df[self.cols.get("flag")].sum() if self.cols.get("flag") else None
-    
-                kpis.update({
-                    "incidence_per_100k": (cases / pop * 100000) if pop and cases else None,
-                    "sdoh_risk_score": None,
-                    "screening_coverage_rate": safe_rate(self.cols.get("flag")),
-                    "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    "immunization_rate": safe_rate(self.cols.get("flag")),
-                    "provider_access_gap": None,
-                    "ed_visits_per_1k": None,
-                    "cost_per_member": safe_mean(self.cols.get("cost")),
-                    "healthy_days_index": None,
-                })
-    
-        # -------------------------------------------------
-        # KPI → CAPABILITY (EXECUTIVE CONTRACT)
-        # -------------------------------------------------
-        kpis["_kpi_capabilities"] = {
-            "avg_los": Capability.TIME_FLOW.value,
-            "avg_wait_time": Capability.TIME_FLOW.value,
-            "avg_tat": Capability.TIME_FLOW.value,
-            "avg_unit_cost": Capability.COST.value,
-            "cost_per_rx": Capability.COST.value,
-            "readmission_rate": Capability.QUALITY.value,
-            "mortality_rate": Capability.QUALITY.value,
-            "specimen_rejection_rate": Capability.QUALITY.value,
-            "inventory_turnover": Capability.VARIANCE.value,
-            "incidence_per_100k": Capability.VOLUME.value,
-        }
-    
-        return kpis
-    
-        # =====================================================
-    # HEALTHCARE KPI INTELLIGENCE MAP (LOCKED)
-    # =====================================================
-    
-    HEALTHCARE_KPI_MAP = {
-        "hospital": [
-            "avg_los",
-            "readmission_rate",
-            "bed_occupancy_rate",
-            "case_mix_index",
-            "hcahps_score",
-            "mortality_rate",
-            "er_boarding_time",
-            "labor_cost_per_day",
-            "surgical_complication_rate",
-        ],
-        "clinic": [
-            "no_show_rate",
-            "avg_wait_time",
-            "provider_productivity",
-            "third_next_available",
-            "referral_conversion_rate",
-            "visit_cycle_time",
-            "patient_acquisition_cost",
-            "telehealth_mix",
-            "net_collection_ratio",
-        ],
-        "diagnostics": [
-            "avg_tat",
-            "critical_alert_time",
-            "specimen_rejection_rate",
-            "equipment_downtime_rate",
-            "repeat_test_rate",
-            "tests_per_fte",
-            "supply_cost_per_test",
-            "order_completeness_ratio",
-            "outpatient_market_share",
-        ],
-        "pharmacy": [
-            "days_supply_on_hand",
-            "generic_dispensing_rate",
-            "refill_adherence_rate",
-            "cost_per_rx",
-            "med_error_rate",
-            "pharmacist_intervention_rate",
-            "inventory_turnover",
-            "spend_velocity",
-            "avg_patient_wait_time",
-        ],
-        "public_health": [
-            "incidence_per_100k",
-            "sdoh_risk_score",
-            "screening_coverage_rate",
-            "chronic_readmission_rate",
-            "immunization_rate",
-            "provider_access_gap",
-            "ed_visits_per_1k",
-            "cost_per_member",
-            "healthy_days_index",
-        ],
+
+    volume = len(df)
+
+    # -------------------------------------------------
+    # SUB-DOMAIN SCORING (SIGNAL-BASED)
+    # -------------------------------------------------
+    sub_scores = {
+        "hospital": 0.9 if self.cols.get("los") else 0.0,
+        "clinic": 0.8 if self.cols.get("duration") else 0.0,
+        "diagnostics": 0.7 if self.cols.get("duration") else 0.0,
+        "pharmacy": 0.6 if self.cols.get("cost") else 0.0,
+        "public_health": 0.8 if self.cols.get("population") else 0.0,
     }
-    
-    
-        # -------------------------------------------------
-        # VISUAL INTELLIGENCE (PER SUB-DOMAIN)
-        # -------------------------------------------------
-        # -------------------------------------------------
+
+    active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
+    primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
+    is_mixed = len(active_subs) > 1
+
+    kpis: Dict[str, Any] = {
+        "primary_sub_domain": "mixed" if is_mixed else primary_sub,
+        "sub_domains": active_subs,
+        "total_volume": volume,
+        "data_completeness": round(1 - df.isna().mean().mean(), 3),
+    }
+
+    # -------------------------------------------------
+    # UNIVERSAL KPI HELPERS
+    # -------------------------------------------------
+    def safe_mean(col):
+        return df[col].dropna().mean() if col and col in df.columns else None
+
+    def safe_rate(col):
+        return df[col].mean() if col and col in df.columns else None
+
+    # -------------------------------------------------
+    # SUB-DOMAIN KPI COMPUTATION
+    # -------------------------------------------------
+    for sub in active_subs:
+
+        # ---------------- HOSPITAL ----------------
+        if sub == "hospital":
+            kpis.update({
+                "avg_los": safe_mean(self.cols.get("los")),
+                "readmission_rate": safe_rate(self.cols.get("readmitted")),
+                "bed_occupancy_rate": None,
+                "case_mix_index": None,
+                "hcahps_score": None,
+                "mortality_rate": safe_rate(self.cols.get("flag")),
+                "er_boarding_time": safe_mean(self.cols.get("duration")),
+                "labor_cost_per_day": safe_mean(self.cols.get("cost")),
+                "surgical_complication_rate": None,
+            })
+
+        # ---------------- CLINIC ----------------
+        if sub == "clinic":
+            kpis.update({
+                "no_show_rate": safe_rate(self.cols.get("readmitted")),
+                "avg_wait_time": safe_mean(self.cols.get("duration")),
+                "provider_productivity": (
+                    volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                    if self.cols.get("doctor") else None
+                ),
+                "third_next_available": None,
+                "referral_conversion_rate": None,
+                "visit_cycle_time": safe_mean(self.cols.get("duration")),
+                "patient_acquisition_cost": None,
+                "telehealth_mix": None,
+                "net_collection_ratio": None,
+            })
+
+        # ---------------- DIAGNOSTICS ----------------
+        if sub == "diagnostics":
+            kpis.update({
+                "avg_tat": safe_mean(self.cols.get("duration")),
+                "critical_alert_time": safe_mean(self.cols.get("duration")),
+                "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
+                "equipment_downtime_rate": None,
+                "repeat_test_rate": None,
+                "tests_per_fte": (
+                    volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                    if self.cols.get("doctor") else None
+                ),
+                "supply_cost_per_test": safe_mean(self.cols.get("cost")),
+                "order_completeness_ratio": None,
+                "outpatient_market_share": None,
+            })
+
+        # ---------------- PHARMACY ----------------
+        if sub == "pharmacy":
+            kpis.update({
+                "days_supply_on_hand": safe_mean(self.cols.get("supply")),
+                "generic_dispensing_rate": None,
+                "refill_adherence_rate": None,
+                "cost_per_rx": safe_mean(self.cols.get("cost")),
+                "med_error_rate": safe_rate(self.cols.get("flag")),
+                "pharmacist_intervention_rate": safe_rate(self.cols.get("flag")),
+                "inventory_turnover": None,
+                "spend_velocity": safe_mean(self.cols.get("cost")),
+                "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
+            })
+
+        # ---------------- PUBLIC HEALTH ----------------
+        if sub == "public_health":
+            pop = safe_mean(self.cols.get("population"))
+            cases = df[self.cols.get("flag")].sum() if self.cols.get("flag") else None
+
+            kpis.update({
+                "incidence_per_100k": (cases / pop * 100000) if pop and cases else None,
+                "sdoh_risk_score": None,
+                "screening_coverage_rate": safe_rate(self.cols.get("flag")),
+                "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
+                "immunization_rate": safe_rate(self.cols.get("flag")),
+                "provider_access_gap": None,
+                "ed_visits_per_1k": None,
+                "cost_per_member": safe_mean(self.cols.get("cost")),
+                "healthy_days_index": None,
+            })
+
+    # -------------------------------------------------
+    # KPI → CAPABILITY (EXECUTIVE CONTRACT)
+    # -------------------------------------------------
+    kpis["_kpi_capabilities"] = {
+        "avg_los": Capability.TIME_FLOW.value,
+        "avg_wait_time": Capability.TIME_FLOW.value,
+        "avg_tat": Capability.TIME_FLOW.value,
+        "er_boarding_time": Capability.TIME_FLOW.value,
+        "cost_per_rx": Capability.COST.value,
+        "labor_cost_per_day": Capability.COST.value,
+        "readmission_rate": Capability.QUALITY.value,
+        "mortality_rate": Capability.QUALITY.value,
+        "specimen_rejection_rate": Capability.QUALITY.value,
+        "inventory_turnover": Capability.VARIANCE.value,
+        "incidence_per_100k": Capability.VOLUME.value,
+    }
+
+    # -------------------------------------------------
+    # KPI CONFIDENCE (EXECUTIVE CONTRACT)
+    # -------------------------------------------------
+    kpis["_confidence"] = {
+        k: 0.9 if v is not None else 0.4
+        for k, v in kpis.items()
+        if not k.startswith("_") and isinstance(v, (int, float))
+    }
+
+    return kpis
+
+    # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
     # -------------------------------------------------
-    # -------------------------------------------------
-        # VISUAL INTELLIGENCE (MAIN DISPATCHER)
-        # -------------------------------------------------
-        def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            visuals: List[Dict[str, Any]] = []
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        visuals: List[Dict[str, Any]] = []
+        
+        # 🧠 Get active sub-domains based on data signal
+        active_subs = [
+            s for s, score in self.calculate_kpis(df).get("sub_domains", {}).items()
+            if score > 0.15
+        ] or ["hospital"]  # safe default
     
-            # 🧠 Get active sub-domains based on data signal
-            active_subs = [
-                s for s, score in self.calculate_kpis(df).get("sub_domains", {}).items()
-                if score > 0.15
-            ] or ["hospital"]  # safe default
+        def register_visual(fig, name, caption, importance, confidence):
+            path = output_dir / name
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+            visuals.append({
+                "path": str(path),
+                "caption": caption,
+                "importance": importance,
+                "confidence": confidence,
+            })
     
-            def register_visual(fig, name, caption, importance, confidence):
-                path = output_dir / name
-                fig.savefig(path, dpi=120, bbox_inches="tight")
-                plt.close(fig)
-                visuals.append({
-                    "path": str(path),
-                    "caption": caption,
-                    "importance": importance,
-                    "confidence": confidence,
-                })
+        # --- MAIN DISPATCH ---
+        for sub in active_subs:
+            for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
+                try:
+                    # This calls the method you are adding below
+                    self._render_visual_by_key(
+                        visual_key=visual_key,
+                        df=df,
+                        output_dir=output_dir,
+                        sub_domain=sub,
+                        register_visual=register_visual,
+                    )
+                except Exception:
+                    continue # Skip visuals where data is insufficient
     
-            # --- MAIN DISPATCH ---
-            for sub in active_subs:
-                for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
-                    try:
-                        # This calls the method you are adding below
-                        self._render_visual_by_key(
-                            visual_key=visual_key,
-                            df=df,
-                            output_dir=output_dir,
-                            sub_domain=sub,
-                            register_visual=register_visual,
-                        )
-                    except Exception:
-                        continue # Skip visuals where data is insufficient
-    
-            # --- FINAL GUARANTEE ---
+        # --- FINAL GUARANTEE ---
             visuals = [v for v in visuals if Path(v["path"]).exists() and v["confidence"] >= 0.3]
             return sorted(visuals, key=lambda x: x["importance"], reverse=True)
     
-        # -------------------------------------------------
-        # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
-        # -------------------------------------------------
-        # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
     # -------------------------------------------------
     def _render_visual_by_key(
@@ -1225,129 +1348,7 @@ class HealthcareDomain(BaseDomain):
     
         return insights
     
-    # =====================================================
-    # HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
-    # =====================================================
     
-    HEALTHCARE_INSIGHT_MAP = {
-        "hospital": [
-            "throughput_bottleneck",
-            "clinical_safety_alert",
-            "bed_capacity_strain",
-            "acuity_labor_mismatch",
-            "revenue_leakage",
-            "quality_stability",
-            "patient_experience_gap",
-            "physician_variance",
-            "supply_chain_variance",
-        ],
-        "clinic": [
-            "access_barrier",
-            "productivity_variance",
-            "referral_leakage",
-            "workflow_inefficiency",
-            "revenue_risk",
-            "telehealth_shift",
-            "demographic_gap",
-            "front_desk_variance",
-            "financial_health",
-        ],
-        "diagnostics": [
-            "service_level_gap",
-            "life_safety_risk",
-            "technical_waste",
-            "pre_analytical_failure",
-            "capacity_overload",
-            "asset_depreciation",
-            "efficiency_plateau",
-            "quality_variance",
-            "market_opportunity",
-        ],
-        "pharmacy": [
-            "economic_pressure",
-            "adherence_risk",
-            "safety_barrier",
-            "inventory_inefficiency",
-            "intervention_impact",
-            "payer_mix_shift",
-            "throughput_constraint",
-            "prescribing_variance",
-            "inventory_waste",
-        ],
-        "public_health": [
-            "equity_gap",
-            "prevention_failure",
-            "access_desert",
-            "chronic_cost_driver",
-            "outbreak_risk",
-            "environmental_influence",
-            "program_success",
-            "member_engagement_gap",
-            "governance_risk",
-        ],
-    }
-    
-    # =====================================================
-    # HEALTHCARE RECOMMENDATION MAP (LOCKED)
-    # =====================================================
-    
-    HEALTHCARE_RECOMMENDATION_MAP = {
-        "hospital": [
-            "discharge_huddle",
-            "clinical_pathway_standardization",
-            "bed_assignment_automation",
-            "post_discharge_review",
-            "acuity_based_staffing",
-            "patient_feedback_rounding",
-            "demand_forecasting",
-            "or_turnover_optimization",
-            "implant_contract_review",
-        ],
-        "clinic": [
-            "appointment_reminders",
-            "open_access_scheduling",
-            "telehealth_standardization",
-            "checkin_workflow_lean",
-            "provider_rvu_dashboard",
-            "referral_centralization",
-            "patient_portal",
-            "rooming_velocity_optimization",
-            "targeted_marketing",
-        ],
-        "diagnostics": [
-            "analyzer_upgrade",
-            "critical_alert_software",
-            "specimen_training",
-            "preventive_maintenance",
-            "ehr_interface_automation",
-            "stat_track",
-            "managed_services",
-            "barcode_chain",
-            "physician_portal",
-        ],
-        "pharmacy": [
-            "refill_reminders",
-            "meds_to_beds",
-            "central_fill",
-            "formulary_standardization",
-            "drug_interaction_software",
-            "dispensing_robot",
-            "inventory_audit",
-            "manufacturer_contracts",
-            "staffing_optimization",
-        ],
-        "public_health": [
-            "mobile_health_units",
-            "screening_campaign",
-            "food_programs",
-            "chronic_protocols",
-            "immunization_registry",
-            "disparity_audit",
-            "community_health_workers",
-            "sdoh_referrals",
-            "whole_person_platform",
-        ],
-    }
     
         
     
