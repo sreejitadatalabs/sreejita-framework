@@ -9,7 +9,7 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
-# 🧠 EXECUTIVE COGNITION (MANDATORY)
+# 🧠 EXECUTIVE COGNITION (AUTHORITATIVE)
 from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
@@ -77,10 +77,14 @@ def _trend(prev: int | None, curr: int | None) -> str:
 
 
 # =====================================================
-# ORCHESTRATOR — SINGLE SOURCE OF TRUTH
+# ORCHESTRATOR — FINAL, CANONICAL
 # =====================================================
 
-def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+def generate_report_payload(
+    input_path: str,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(input_path)
@@ -113,19 +117,45 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     domain = decision.selected_domain
     engine = decision.engine
 
+    # -------------------------------------------------
+    # 3A. UNKNOWN DOMAIN (GOVERNED FALLBACK)
+    # -------------------------------------------------
     if engine is None:
+        executive = build_executive_payload(
+            kpis={
+                "primary_sub_domain": "unknown",
+                "record_count": len(df),
+                "data_completeness": round(1 - df.isna().mean().mean(), 3),
+                "_confidence": {},
+                "_kpi_capabilities": {},
+            },
+            insights=[{
+                "level": "RISK",
+                "title": "Unknown or Unsupported Domain",
+                "so_what": (
+                    "The dataset does not match any supported domain patterns. "
+                    "Only governance-level assessment is possible."
+                ),
+                "confidence": 0.6,
+            }],
+            recommendations=[{
+                "priority": "HIGH",
+                "action": "Review dataset structure and domain relevance",
+                "owner": "Data Governance",
+                "timeline": "Immediate",
+                "goal": "Enable domain-specific analysis",
+                "confidence": 0.7,
+            }],
+        )
+
         return {
             "unknown": {
                 "kpis": {},
-                "insights": [{
-                    "level": "RISK",
-                    "title": "Unknown Domain",
-                    "so_what": "No suitable domain engine found.",
-                }],
-                "recommendations": [],
+                "insights": executive.get("insights", {}),
+                "recommendations": executive.get("recommendations", []),
                 "visuals": [],
                 "shape": shape_info,
-                "executive": {},
+                "executive": executive,
             }
         }
 
@@ -133,26 +163,21 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     # 4. DOMAIN EXECUTION (EXPLICIT CONTRACT)
     # -------------------------------------------------
     try:
-        # Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
-        # KPIs
         kpis = engine.calculate_kpis(df)
 
-        # Visuals
         visuals = engine.generate_visuals(
             df=df,
             output_dir=run_dir / "visuals" / domain
         )
 
-        # Insights
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
             insights = engine.generate_insights(df, kpis)
 
-        # Recommendations
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -162,19 +187,42 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
 
         recommendations = enrich_recommendations(raw_recs)
 
-        # 🧠 EXECUTIVE COGNITION (MANDATORY)
-        executive = build_executive_payload(
-            kpis=kpis,
-            insights=insights,
-            recommendations=recommendations,
-        )
-
     except Exception as e:
         log.exception("Domain processing failed")
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. BOARD READINESS TREND (PERSISTENT)
+    # 5. VISUAL SAFETY (HARD ENFORCEMENT)
+    # -------------------------------------------------
+    visuals = [
+        v for v in visuals
+        if isinstance(v, dict) and Path(v.get("path", "")).exists()
+    ]
+
+    visuals = sorted(
+        visuals,
+        key=lambda x: (x.get("importance", 0) * x.get("confidence", 1)),
+        reverse=True,
+    )
+
+    evidence_summary = {
+        "visual_count": len(visuals),
+        "has_min_visuals": len(visuals) >= 2,
+    }
+
+    # -------------------------------------------------
+    # 6. EXECUTIVE COGNITION (FINAL, CONTEXT-AWARE)
+    # -------------------------------------------------
+    executive = build_executive_payload(
+        kpis=kpis,
+        insights=insights,
+        recommendations=recommendations,
+    )
+
+    executive["evidence_summary"] = evidence_summary
+
+    # -------------------------------------------------
+    # 7. BOARD READINESS TREND (PERSISTENT)
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -188,33 +236,14 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         "trend": _trend(previous_score, current_score),
     }
 
-    history_values = list(history.values())
     if isinstance(current_score, int):
-        history_values.append(current_score)
         history[dataset_key] = current_score
         _save_history(run_dir, history)
 
-    executive["board_readiness_history"] = history_values[-10:]
+    executive["board_readiness_history"] = list(history.values())[-10:]
 
     # -------------------------------------------------
-    # 6. VISUAL SAFETY & SORTING (FINAL GUARANTEE)
-    # -------------------------------------------------
-    visuals = [
-        v for v in visuals
-        if isinstance(v, dict) and Path(v.get("path", "")).exists()
-    ]
-
-    visuals = sorted(
-        visuals,
-        key=lambda x: (x.get("importance", 0) * x.get("confidence", 1)),
-        reverse=True,
-    )
-
-    if len(visuals) < 2:
-        log.warning("Less than 2 visuals generated — executive evidence may be weak")
-
-    # -------------------------------------------------
-    # 7. FINAL PAYLOAD (CANONICAL)
+    # 8. FINAL PAYLOAD (CANONICAL, STABLE)
     # -------------------------------------------------
     return {
         domain: {
