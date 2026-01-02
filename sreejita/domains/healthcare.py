@@ -329,6 +329,12 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # UNIVERSAL KPI HELPERS
         # -------------------------------------------------
+        def sub_domain_weight(sub: str, sub_scores: Dict[str, float]) -> float:
+            """
+            Returns confidence multiplier based on sub-domain strength.
+            """
+            return round(min(1.0, max(0.4, sub_scores.get(sub, 0.5))), 2)
+
         def safe_mean(col):
             return df[col].dropna().mean() if col and col in df.columns else None
     
@@ -492,33 +498,67 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
     # -------------------------------------------------
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        output_dir.mkdir(parents=True, exist_ok=True)
+    def generate_visuals(
+        self,
+        df: pd.DataFrame,
+        output_dir: Path
+    ) -> List[Dict[str, Any]]:
     
+        output_dir.mkdir(parents=True, exist_ok=True)
         visuals: List[Dict[str, Any]] = []
     
+        # -------------------------------------------------
+        # GET / CACHE KPIs (SINGLE SOURCE OF TRUTH)
+        # -------------------------------------------------
         kpis = getattr(self, "_last_kpis", None)
-        if kpis is None:
+        if not isinstance(kpis, dict):
             kpis = self.calculate_kpis(df)
             self._last_kpis = kpis
-        
+    
+        sub_scores: Dict[str, float] = kpis.get("sub_domains", {}) or {}
+    
         active_subs = [
-            s for s, score in kpis.get("sub_domains", {}).items()
-            if score > 0.15
+            s for s, score in sub_scores.items()
+            if isinstance(score, (int, float)) and score > 0.15
         ] or ["hospital"]
-
-        def register_visual(fig, name, caption, importance, confidence):
+    
+        # -------------------------------------------------
+        # SUB-DOMAIN CONFIDENCE WEIGHTING
+        # -------------------------------------------------
+        def sub_domain_weight(sub: str) -> float:
+            return round(
+                min(1.0, max(0.4, float(sub_scores.get(sub, 0.5)))),
+                2
+            )
+    
+        # -------------------------------------------------
+        # VISUAL REGISTRATION (STRICT CONTRACT)
+        # -------------------------------------------------
+        def register_visual(
+            fig,
+            name: str,
+            caption: str,
+            importance: float,
+            base_confidence: float,
+            sub: str,
+        ):
             path = output_dir / name
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
+    
+            final_conf = round(base_confidence * sub_domain_weight(sub), 2)
+    
             visuals.append({
                 "path": str(path),
                 "caption": caption,
-                "importance": importance,
-                "confidence": confidence,
+                "importance": float(importance),
+                "confidence": final_conf,
+                "sub_domain": sub,
             })
     
-        # --- MAIN DISPATCH ---
+        # -------------------------------------------------
+        # MAIN VISUAL DISPATCH
+        # -------------------------------------------------
         for sub in active_subs:
             for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
                 try:
@@ -530,56 +570,89 @@ class HealthcareDomain(BaseDomain):
                         register_visual=register_visual,
                     )
                 except Exception:
-                    # Silent fail → fallback logic will cover
+                    # Silent fail — fallback logic handles coverage
                     continue
     
-        # --- FINAL GUARANTEE ---
+        # -------------------------------------------------
+        # FILTER INVALID / WEAK VISUALS
+        # -------------------------------------------------
         visuals = [
             v for v in visuals
-            if Path(v["path"]).exists() and v["confidence"] >= 0.3
+            if isinstance(v, dict)
+            and Path(v.get("path", "")).exists()
+            and v.get("confidence", 0) >= 0.3
         ]
     
-        visuals = sorted(visuals, key=lambda x: x["importance"], reverse=True)
         # -------------------------------------------------
-        # EXECUTIVE VISUAL EVIDENCE GUARANTEE (FINAL)
+        # HARD GUARANTEE: ≥2 VISUALS PER SUB-DOMAIN
         # -------------------------------------------------
-        if len(visuals) < 2:
-            # Fallback 1: Dataset scale
+        final_visuals: List[Dict[str, Any]] = []
+    
+        for sub in active_subs:
+            sub_visuals = [
+                v for v in visuals
+                if v.get("sub_domain") == sub
+            ]
+    
+            if len(sub_visuals) < 2:
+                try:
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    ax.text(
+                        0.5, 0.5,
+                        f"{sub.upper()} — Data Coverage Overview",
+                        ha="center",
+                        va="center",
+                        fontsize=11,
+                        fontweight="bold",
+                    )
+                    ax.axis("off")
+    
+                    fallback_path = output_dir / f"{sub}_fallback_confidence.png"
+                    fig.savefig(fallback_path, dpi=120, bbox_inches="tight")
+                    plt.close(fig)
+    
+                    sub_visuals.append({
+                        "path": str(fallback_path),
+                        "caption": "Fallback evidence due to limited structured data.",
+                        "importance": 0.5,
+                        "confidence": 0.6,
+                        "sub_domain": sub,
+                    })
+                except Exception:
+                    pass
+    
+            final_visuals.extend(sub_visuals[:5])
+    
+        # -------------------------------------------------
+        # GLOBAL FALLBACK (ABSOLUTE LAST RESORT)
+        # -------------------------------------------------
+        if len(final_visuals) < 2:
             fig, ax = plt.subplots(figsize=(6, 4))
-            ax.bar(["Total Records"], [len(df)], color="#4C72B0")
+            ax.bar(["Total Records"], [len(df)])
             ax.set_title("Dataset Scale Overview", fontweight="bold")
-            ax.set_ylabel("Record Count")
-        
+    
             path = output_dir / "fallback_dataset_scale.png"
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
-        
-            visuals.append({
+    
+            final_visuals.append({
                 "path": str(path),
-                "caption": "Dataset size used for this analysis (fallback evidence).",
-                "importance": 0.45,
-                "confidence": 0.40,
+                "caption": "Dataset size used for this analysis.",
+                "importance": 0.4,
+                "confidence": 0.4,
+                "sub_domain": active_subs[0],
             })
-        
-        if len(visuals) < 2 and self.time_col:
-            # Fallback 2: Time coverage
-            fig, ax = plt.subplots(figsize=(6, 4))
-            span = (df[self.time_col].max() - df[self.time_col].min()).days
-            ax.bar(["Time Span (days)"], [span], color="#55A868")
-            ax.set_title("Time Coverage of Data", fontweight="bold")
-        
-            path = output_dir / "fallback_time_span.png"
-            fig.savefig(path, dpi=120, bbox_inches="tight")
-            plt.close(fig)
-        
-            visuals.append({
-                "path": str(path),
-                "caption": "Time coverage of available records.",
-                "importance": 0.40,
-                "confidence": 0.35,
-            })
-
-        return visuals
+    
+        # -------------------------------------------------
+        # FINAL SORT (EXECUTIVE PRIORITY)
+        # -------------------------------------------------
+        final_visuals = sorted(
+            final_visuals,
+            key=lambda v: v.get("importance", 0) * v.get("confidence", 1),
+            reverse=True,
+        )
+    
+        return final_visuals
     
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
