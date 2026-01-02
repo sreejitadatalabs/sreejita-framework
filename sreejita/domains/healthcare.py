@@ -520,10 +520,48 @@ class HealthcareDomain(BaseDomain):
         ]
     
         visuals = sorted(visuals, key=lambda x: x["importance"], reverse=True)
-    
+        # -------------------------------------------------
+        # EXECUTIVE VISUAL EVIDENCE GUARANTEE (FINAL)
+        # -------------------------------------------------
+        if len(visuals) < 2:
+            # Fallback 1: Dataset scale
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Total Records"], [len(df)], color="#4C72B0")
+            ax.set_title("Dataset Scale Overview", fontweight="bold")
+            ax.set_ylabel("Record Count")
+        
+            path = output_dir / "fallback_dataset_scale.png"
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+        
+            visuals.append({
+                "path": str(path),
+                "caption": "Dataset size used for this analysis (fallback evidence).",
+                "importance": 0.45,
+                "confidence": 0.40,
+            })
+        
+        if len(visuals) < 2 and self.time_col:
+            # Fallback 2: Time coverage
+            fig, ax = plt.subplots(figsize=(6, 4))
+            span = (df[self.time_col].max() - df[self.time_col].min()).days
+            ax.bar(["Time Span (days)"], [span], color="#55A868")
+            ax.set_title("Time Coverage of Data", fontweight="bold")
+        
+            path = output_dir / "fallback_time_span.png"
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+        
+            visuals.append({
+                "path": str(path),
+                "caption": "Time coverage of available records.",
+                "importance": 0.40,
+                "confidence": 0.35,
+            })
+
         return visuals
     
-        # -------------------------------------------------
+    # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
     # -------------------------------------------------
     def _render_visual_by_key(
