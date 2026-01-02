@@ -1,262 +1,223 @@
-# =====================================================
-# ORCHESTRATOR — UNIVERSAL (FINAL)
-# Sreejita Framework
-# =====================================================
-
-import logging
-import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from datetime import datetime
+import uuid
 
-import pandas as pd
-
-from sreejita.domains.router import decide_domain
-from sreejita.reporting.recommendation_enricher import enrich_recommendations
-from sreejita.core.dataset_shape import detect_dataset_shape
-
-# 🧠 Executive cognition (single source of truth)
-from sreejita.narrative.executive_cognition import build_executive_payload
-
-log = logging.getLogger("sreejita.orchestrator")
+from sreejita.reporting.base import BaseReport
 
 
 # =====================================================
-# SAFE TABULAR FILE LOADER
+# HYBRID REPORT ENGINE — UNIVERSAL (FINAL)
 # =====================================================
 
-def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
-    suffix = path.suffix.lower()
+class HybridReport(BaseReport):
+    """
+    Hybrid Report Engine (Authoritative)
 
-    if suffix == ".csv":
-        for enc in (None, "utf-8", "latin-1", "cp1252"):
-            try:
-                return pd.read_csv(path, encoding=enc)
-            except Exception:
-                continue
+    Responsibilities:
+    - Render executive-ready Markdown
+    - Enforce narrative ordering
+    - NEVER compute intelligence
+    """
 
-    if suffix in (".xls", ".xlsx"):
-        for engine in (None, "openpyxl", "xlrd"):
-            try:
-                return pd.read_excel(path, engine=engine)
-            except Exception:
-                continue
+    name = "hybrid"
 
-    raise ValueError(f"Unsupported file type: {suffix}")
+    # -------------------------------------------------
+    # BUILD MARKDOWN REPORT
+    # -------------------------------------------------
+    def build(
+        self,
+        domain_results: Dict[str, Dict[str, Any]],
+        output_dir: Path,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Path:
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
+        report_path = output_dir / f"Sreejita_Executive_Report_{run_id}.md"
+
+        with open(report_path, "w", encoding="utf-8") as f:
+            self._write_header(f, run_id, metadata)
+
+            # Primary domain drives executive cognition
+            primary_domain = self._sort_domains(domain_results.keys())[0]
+            primary = domain_results.get(primary_domain, {})
+            executive = primary.get("executive", {})
+
+            self._write_executive_brief(f, executive)
+            self._write_board_readiness(f, executive)
+
+            for domain in self._sort_domains(domain_results.keys()):
+                self._write_domain_section(
+                    f,
+                    domain,
+                    domain_results.get(domain, {}),
+                )
+
+            self._write_footer(f)
+
+        return report_path
+
+    # -------------------------------------------------
+    # EXECUTIVE BRIEF (PAGE 1)
+    # -------------------------------------------------
+    def _write_executive_brief(self, f, executive: Dict[str, Any]):
+        brief = executive.get("executive_brief")
+        if not brief:
+            return
+
+        f.write("## Executive Brief\n\n")
+        f.write(f"{brief}\n\n")
+        f.write("---\n\n")
+
+    # -------------------------------------------------
+    # BOARD READINESS
+    # -------------------------------------------------
+    def _write_board_readiness(self, f, executive: Dict[str, Any]):
+        br = executive.get("board_readiness")
+        if not br:
+            return
+
+        f.write("## Board Readiness Assessment\n\n")
+        f.write(f"- **Score:** {br.get('score', '-')} / 100\n")
+        f.write(f"- **Status:** {br.get('band', '-')}\n")
+        f.write("\n---\n\n")
+
+    # -------------------------------------------------
+    # DOMAIN SECTION
+    # -------------------------------------------------
+    def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
+        f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
+
+        kpis = {
+            k: v for k, v in (result.get("kpis") or {}).items()
+            if not k.startswith("_")
+        }
+        visuals = result.get("visuals", []) or []
+        insights = result.get("insights", []) or []
+        recs = result.get("recommendations", []) or []
+
+        # ---------------- KPIs ----------------
+        if kpis:
+            f.write("### Key Metrics\n")
+            f.write("| Metric | Value |\n")
+            f.write("| :--- | :--- |\n")
+
+            for k, v in list(kpis.items())[:9]:
+                f.write(
+                    f"| {k.replace('_',' ').title()} | "
+                    f"{self._format_value(k, v)} |\n"
+                )
+            f.write("\n")
+
+        # ---------------- VISUAL EVIDENCE ----------------
+        if visuals:
+            f.write("### Visual Evidence\n")
+            for vis in visuals[:6]:
+                f.write(f"![{vis.get('caption')}]({vis.get('path')})\n")
+                conf = int(vis.get("confidence", 0) * 100)
+                f.write(
+                    f"> {vis.get('caption')} "
+                    f"(Confidence: {conf}%)\n\n"
+                )
+
+        # ---------------- INSIGHTS ----------------
+        if insights:
+            f.write("### Key Insights\n")
+            for ins in insights[:5]:
+                f.write(
+                    f"- **{ins.get('level','INFO')}** — "
+                    f"{ins.get('title')}: {ins.get('so_what')}\n"
+                )
+            f.write("\n")
+
+        # ---------------- RECOMMENDATIONS ----------------
+        if recs:
+            f.write("### Recommendations\n")
+            for r in recs[:5]:
+                f.write(
+                    f"- **{r.get('priority')}** — {r.get('action')} "
+                    f"(Owner: {r.get('owner')}, "
+                    f"Timeline: {r.get('timeline')})\n"
+                )
+            f.write("\n")
+
+        f.write("---\n\n")
+
+    # -------------------------------------------------
+    # HEADER & FOOTER
+    # -------------------------------------------------
+    def _write_header(self, f, run_id: str, metadata: Optional[Dict[str, Any]]):
+        f.write("# Sreejita Executive Report\n\n")
+        f.write(
+            f"**Run ID:** `{run_id}` | "
+            f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n"
+        )
+
+        if metadata:
+            for k, v in metadata.items():
+                f.write(f"- **{k.replace('_',' ').title()}**: {v}\n")
+
+        f.write("\n---\n\n")
+
+    def _write_footer(self, f):
+        f.write("\n---\n")
+        f.write("_Generated by **Sreejita Universal Domain Intelligence**_\n")
+
+    # -------------------------------------------------
+    # HELPERS
+    # -------------------------------------------------
+    def _sort_domains(self, domains):
+        priority = ["healthcare", "finance", "retail", "marketing"]
+        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
+
+    def _format_value(self, key: str, v: Any):
+        if isinstance(v, (int, float)):
+            if "rate" in key:
+                return f"{v:.1%}"
+            if abs(v) >= 1_000_000:
+                return f"{v/1_000_000:.1f}M"
+            if abs(v) >= 1_000:
+                return f"{v/1_000:.1f}K"
+            return f"{v:.2f}"
+        return str(v)
 
 
 # =====================================================
-# BOARD READINESS HISTORY (PERSISTENT)
+# PUBLIC ENTRY POINT
 # =====================================================
 
-def _history_path(run_dir: Path) -> Path:
-    return run_dir / "board_readiness_history.json"
+def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Thin glue layer.
+    Intelligence is computed by orchestrator.
+    """
+    from sreejita.reporting.orchestrator import generate_report_payload
 
-
-def _load_history(run_dir: Path) -> Dict[str, int]:
-    path = _history_path(run_dir)
-    if not path.exists():
-        return {}
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_history(run_dir: Path, history: Dict[str, int]) -> None:
-    try:
-        with open(_history_path(run_dir), "w") as f:
-            json.dump(history, f, indent=2)
-    except Exception:
-        pass
-
-
-def _trend(prev: int | None, curr: int | None) -> str:
-    if prev is None or curr is None:
-        return "→"
-    if curr >= prev + 5:
-        return "↑"
-    if curr <= prev - 5:
-        return "↓"
-    return "→"
-
-
-# =====================================================
-# ORCHESTRATOR ENTRY — CANONICAL
-# =====================================================
-
-def generate_report_payload(
-    input_path: str,
-    config: Dict[str, Any],
-) -> Dict[str, Any]:
-
-    input_path = Path(input_path)
-    if not input_path.exists():
-        raise FileNotFoundError(input_path)
-
-    if "run_dir" not in config:
-        raise RuntimeError("config['run_dir'] is required")
-
-    run_dir = Path(config["run_dir"])
+    run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset_key = input_path.stem
+    domain_results = generate_report_payload(input_path, config)
 
-    # -------------------------------------------------
-    # 1. LOAD DATA
-    # -------------------------------------------------
-    df = _read_tabular_file_safe(input_path)
-
-    # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY)
-    # -------------------------------------------------
-    try:
-        shape_info = detect_dataset_shape(df)
-    except Exception:
-        shape_info = {"shape": "unknown", "signals": {}}
-
-    # -------------------------------------------------
-    # 3. DOMAIN DECISION
-    # -------------------------------------------------
-    decision = decide_domain(df)
-    domain = decision.selected_domain
-    engine = decision.engine
-
-    # -------------------------------------------------
-    # 3A. UNKNOWN DOMAIN — GOVERNED FALLBACK
-    # -------------------------------------------------
-    if engine is None:
-        executive = build_executive_payload(
-            kpis={
-                "primary_sub_domain": "unknown",
-                "total_volume": len(df),
-                "data_completeness": round(1 - df.isna().mean().mean(), 3),
-                "_confidence": {},
-                "_kpi_capabilities": {},
-            },
-            insights=[{
-                "level": "RISK",
-                "title": "Unknown or Unsupported Domain",
-                "so_what": (
-                    "The dataset does not match any supported domain patterns. "
-                    "Only governance-level assessment is possible."
-                ),
-                "confidence": 0.6,
-            }],
-            recommendations=[{
-                "priority": "HIGH",
-                "action": "Review dataset structure and domain relevance",
-                "owner": "Data Governance",
-                "timeline": "Immediate",
-                "goal": "Enable domain-specific analysis",
-                "confidence": 0.7,
-            }],
-        )
-
-        return {
-            "unknown": {
-                "kpis": {},
-                "insights": executive["insights"],
-                "recommendations": executive["recommendations"],
-                "visuals": [],
-                "shape": shape_info,
-                "executive": executive,
-            }
-        }
-
-    # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT CONTRACT)
-    # -------------------------------------------------
-    try:
-        if hasattr(engine, "preprocess"):
-            df = engine.preprocess(df)
-
-        kpis = engine.calculate_kpis(df)
-
-        visuals = engine.generate_visuals(
-            df=df,
-            output_dir=run_dir / "visuals" / domain
-        )
-
-        try:
-            insights = engine.generate_insights(df, kpis, shape_info=shape_info)
-        except TypeError:
-            insights = engine.generate_insights(df, kpis)
-
-        try:
-            raw_recs = engine.generate_recommendations(
-                df, kpis, insights, shape_info=shape_info
-            )
-        except TypeError:
-            raw_recs = engine.generate_recommendations(df, kpis, insights)
-
-        recommendations = enrich_recommendations(raw_recs)
-
-    except Exception as e:
-        log.exception("Domain processing failed")
-        raise RuntimeError(str(e))
-
-    # -------------------------------------------------
-    # 5. VISUAL SAFETY ENFORCEMENT (NON-NEGOTIABLE)
-    # -------------------------------------------------
-    visuals = [
-        v for v in visuals
-        if isinstance(v, dict) and Path(v.get("path", "")).exists()
-    ]
-
-    visuals = sorted(
-        visuals,
-        key=lambda x: (x.get("importance", 0) * x.get("confidence", 1)),
-        reverse=True,
+    engine = HybridReport()
+    md_path = engine.build(
+        domain_results=domain_results,
+        output_dir=run_dir,
+        metadata=config.get("metadata"),
     )
 
-    evidence_summary = {
-        "visual_count": len(visuals),
-        "has_min_visuals": len(visuals) >= 2,
-    }
+    primary_domain = engine._sort_domains(domain_results.keys())[0]
+    primary = domain_results.get(primary_domain, {})
 
-    # -------------------------------------------------
-    # 6. EXECUTIVE COGNITION (FINAL)
-    # -------------------------------------------------
-    executive = build_executive_payload(
-        kpis=kpis,
-        insights=insights,
-        recommendations=recommendations,
-    )
-
-    executive["evidence_summary"] = evidence_summary
-
-    # -------------------------------------------------
-    # 7. BOARD READINESS TREND (PERSISTENT)
-    # -------------------------------------------------
-    history = _load_history(run_dir)
-
-    board = executive.get("board_readiness", {})
-    current_score = board.get("score")
-    previous_score = history.get(dataset_key)
-
-    executive["board_readiness_trend"] = {
-        "previous_score": previous_score,
-        "current_score": current_score,
-        "trend": _trend(previous_score, current_score),
-    }
-
-    if isinstance(current_score, int):
-        history[dataset_key] = current_score
-        _save_history(run_dir, history)
-
-    executive["board_readiness_history"] = list(history.values())[-10:]
-
-    # -------------------------------------------------
-    # 8. FINAL PAYLOAD (CANONICAL)
-    # -------------------------------------------------
     return {
-        domain: {
-            "kpis": kpis,
-            "insights": insights,
-            "recommendations": recommendations,
-            "visuals": visuals,
-            "shape": shape_info,
-            "executive": executive,
-        }
+        "markdown": str(md_path),
+        "payload": {
+            "executive": primary.get("executive", {}),
+            "visuals": primary.get("visuals", []),
+            "insights": primary.get("insights", []),
+            "recommendations": primary.get("recommendations", []),
+        },
+        "run_dir": str(run_dir),
     }
