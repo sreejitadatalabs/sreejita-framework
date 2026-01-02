@@ -290,6 +290,19 @@ class HealthcareDomain(BaseDomain):
         self.time_col = self.cols.get("date")
         return df.copy()
 
+        # Normalize Yes/No flags early if detected
+        for key in ["readmitted", "flag"]:
+            col = self.cols.get(key)
+            if col and col in df.columns and df[col].dtype == object:
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .map({"yes": 1, "y": 1, "true": 1, "no": 0, "n": 0, "false": 0})
+                )
+
+
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
