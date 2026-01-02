@@ -73,61 +73,38 @@ HEALTHCARE_VISUAL_MAP = {
         
 HEALTHCARE_KPI_MAP = {
     "hospital": [
-        "avg_los",
-        "readmission_rate",
-        "bed_occupancy_rate",
-        "case_mix_index",
-        "hcahps_score",
-        "mortality_rate",
-        "er_boarding_time",
-        "labor_cost_per_day",
-        "surgical_complication_rate",
+        "avg_los", "readmission_rate", "bed_occupancy_rate",
+        "case_mix_index", "hcahps_score", "mortality_rate",
+        "er_boarding_time", "labor_cost_per_day", "surgical_complication_rate",
     ],
     "clinic": [
-        "no_show_rate",
-        "avg_wait_time"
-        "provider_productivity",
-        "third_next_available",
-        "referral_conversion_rate",
-        "visit_cycle_time",
-        "patient_acquisition_cost",
-        "telehealth_mix",
-        "net_collection_ratio",
+        "no_show_rate", "avg_wait_time", "provider_productivity",
+        "third_next_available", "referral_conversion_rate",
+        "visit_cycle_time", "patient_acquisition_cost",
+        "telehealth_mix", "net_collection_ratio",
     ],
     "diagnostics": [
-        "avg_tat",
-        "critical_alert_time"
-        "specimen_rejection_rate",
-        "equipment_downtime_rate",
-        "repeat_test_rate",
-        "tests_per_fte",
-        "supply_cost_per_test",
-        "order_completeness_ratio",
-        "outpatient_market_share",
+        "avg_tat", "critical_alert_time", "specimen_rejection_rate",
+        "equipment_downtime_rate", "repeat_test_rate",
+        "tests_per_fte", "supply_cost_per_test",
+        "order_completeness_ratio", "outpatient_market_share",
     ],
     "pharmacy": [
-        "days_supply_on_hand",
-        "generic_dispensing_rate",
-        "refill_adherence_rate",
-        "cost_per_rx",
-        "med_error_rate",
-        "pharmacist_intervention_rate",
-        "inventory_turnover",
-        "spend_velocity",
+        "days_supply_on_hand", "generic_dispensing_rate",
+        "refill_adherence_rate", "cost_per_rx",
+        "med_error_rate", "pharmacist_intervention_rate",
+        "inventory_turnover", "spend_velocity",
         "avg_patient_wait_time",
     ],
     "public_health": [
-        "incidence_per_100k",
-        "sdoh_risk_score",
-        "screening_coverage_rate",
-        "chronic_readmission_rate",
-        "immunization_rate",
-        "provider_access_gap",
-        "ed_visits_per_1k",
-        "cost_per_member",
+        "incidence_per_100k", "sdoh_risk_score",
+        "screening_coverage_rate", "chronic_readmission_rate",
+        "immunization_rate", "provider_access_gap",
+        "ed_visits_per_1k", "cost_per_member",
         "healthy_days_index",
     ],
 }
+
 
 # =====================================================
 # HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
@@ -263,7 +240,7 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         self.shape_info = detect_dataset_shape(df)
-
+    
         self.cols = {
             "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
             "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id"),
@@ -277,31 +254,37 @@ class HealthcareDomain(BaseDomain):
             "fill_date": resolve_column(df, "fill_date"),
             "supply": resolve_column(df, "days_supply"),
             "population": resolve_column(df, "population"),
+            "flag": resolve_column(df, "flag"),
         }
-
+    
+        # Numeric coercion
         for k in ["los", "duration", "cost", "supply", "population"]:
             col = self.cols.get(k)
             if col and col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        if self.cols.get("date"):
+    
+        # Date coercion
+        if self.cols.get("date") and self.cols["date"] in df.columns:
             df[self.cols["date"]] = pd.to_datetime(df[self.cols["date"]], errors="coerce")
-
-        self.time_col = self.cols.get("date")
-        return df.copy()
-
-        # Normalize Yes/No flags early if detected
+    
+        # ✅ YES / NO NORMALIZATION (CRITICAL)
         for key in ["readmitted", "flag"]:
             col = self.cols.get(key)
-            if col and col in df.columns and df[col].dtype == object:
+            if col and col in df.columns:
                 df[col] = (
                     df[col]
                     .astype(str)
                     .str.strip()
                     .str.lower()
-                    .map({"yes": 1, "y": 1, "true": 1, "no": 0, "n": 0, "false": 0})
+                    .map({
+                        "yes": 1, "y": 1, "true": 1, "1": 1,
+                        "no": 0, "n": 0, "false": 0, "0": 0,
+                    })
                 )
-
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+    
+        self.time_col = self.cols.get("date")
+        return df
 
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
@@ -314,12 +297,12 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         sub_scores = {
             "hospital": 0.9 if self.cols.get("los") else 0.0,
-            "clinic": 0.8 if self.cols.get("duration") else 0.0,
-            "diagnostics": 0.7 if self.cols.get("duration") else 0.0,
-            "pharmacy": 0.6 if self.cols.get("cost") else 0.0,
-            "public_health": 0.8 if self.cols.get("population") else 0.0,
+            "clinic": 0.8 if self.cols.get("duration") and not self.cols.get("cost") else 0.0,
+            "diagnostics": 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
+            "pharmacy": 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
+            "public_health": 0.9 if self.cols.get("population") else 0.0,
         }
-    
+        
         active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
         primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
         is_mixed = len(active_subs) > 1
@@ -496,11 +479,16 @@ class HealthcareDomain(BaseDomain):
     
         visuals: List[Dict[str, Any]] = []
     
+        kpis = getattr(self, "_last_kpis", None)
+        if kpis is None:
+            kpis = self.calculate_kpis(df)
+            self._last_kpis = kpis
+        
         active_subs = [
-            s for s, score in self.calculate_kpis(df).get("sub_domains", {}).items()
+            s for s, score in kpis.get("sub_domains", {}).items()
             if score > 0.15
-        ] or ["hospital"]  # safe default
-    
+        ] or ["hospital"]
+
         def register_visual(fig, name, caption, importance, confidence):
             path = output_dir / name
             fig.savefig(path, dpi=120, bbox_inches="tight")
@@ -1441,7 +1429,6 @@ class HealthcareDomain(BaseDomain):
     
         return insights
 
-    
     # -------------------------------------------------
     # RECOMMENDATIONS ENGINE (UNIVERSAL, STRATEGIC)
     # -------------------------------------------------
