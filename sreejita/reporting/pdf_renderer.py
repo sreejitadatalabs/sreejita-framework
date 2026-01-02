@@ -2,7 +2,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
-import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
@@ -22,14 +21,10 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (MATCHES ORCHESTRATOR)
+# PAYLOAD NORMALIZER (SAFE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Aligns PDF renderer with orchestrator + executive_cognition output.
-    NEVER crashes.
-    """
     if not isinstance(payload, dict):
         payload = {}
 
@@ -52,7 +47,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =====================================================
-# FORMATTERS (SAFE)
+# FORMAT HELPERS
 # =====================================================
 
 def format_value(v: Any) -> str:
@@ -126,7 +121,7 @@ class BoardReadinessSparkline(Flowable):
 
 
 # =====================================================
-# EXECUTIVE PDF RENDERER (AUTHORITATIVE)
+# EXECUTIVE PDF RENDERER (STABLE)
 # =====================================================
 
 class ExecutivePDFRenderer:
@@ -149,40 +144,47 @@ class ExecutivePDFRenderer:
         )
 
         styles = getSampleStyleSheet()
-        story: List[Any] = []
 
-        styles.add(ParagraphStyle(
-            "Title",
-            fontSize=22,
-            alignment=TA_CENTER,
-            spaceAfter=18,
-            fontName="Helvetica-Bold",
-        ))
-        styles.add(ParagraphStyle(
-            "Section",
-            fontSize=15,
-            spaceBefore=18,
-            spaceAfter=10,
-            fontName="Helvetica-Bold",
-        ))
-        styles.add(ParagraphStyle(
-            "Body",
-            fontSize=11,
-            leading=15,
-            spaceAfter=6,
-        ))
+        # ---------- SAFE CUSTOM STYLES ----------
+        if "SR_Title" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Title",
+                fontSize=22,
+                alignment=TA_CENTER,
+                spaceAfter=18,
+                fontName="Helvetica-Bold",
+            ))
+
+        if "SR_Section" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Section",
+                fontSize=15,
+                spaceBefore=18,
+                spaceAfter=10,
+                fontName="Helvetica-Bold",
+            ))
+
+        if "SR_Body" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Body",
+                fontSize=11,
+                leading=15,
+                spaceAfter=6,
+            ))
+
+        story: List[Any] = []
 
         # =================================================
         # COVER
         # =================================================
         br = payload["board_readiness"]
 
-        story.append(Paragraph("Sreejita Executive Report", styles["Title"]))
+        story.append(Paragraph("Sreejita Executive Report", styles["SR_Title"]))
         story.append(Paragraph(
             f"<b>Board Readiness:</b> {br.get('score','-')} / 100 "
-            f"({br.get('band','-')})<br/>"
+            f"({br.get('band','-' )})<br/>"
             f"Generated: {datetime.utcnow():%Y-%m-%d}",
-            styles["Body"],
+            styles["SR_Body"],
         ))
 
         story.append(PageBreak())
@@ -190,7 +192,7 @@ class ExecutivePDFRenderer:
         # =================================================
         # BOARD READINESS TREND
         # =================================================
-        story.append(Paragraph("Board Readiness Trend", styles["Section"]))
+        story.append(Paragraph("Board Readiness Trend", styles["SR_Section"]))
         story.append(BoardReadinessSparkline(payload["board_readiness_history"]))
         story.append(Spacer(1, 12))
 
@@ -208,7 +210,6 @@ class ExecutivePDFRenderer:
                     format_value(k.get("value")),
                     f"{confidence_badge(conf)} ({int(conf*100)}%)",
                 ])
-                
                 bg_styles.append((
                     "BACKGROUND",
                     (0, idx),
@@ -225,38 +226,38 @@ class ExecutivePDFRenderer:
                 *bg_styles,
             ]))
 
-            story.append(Paragraph("Key Performance Indicators", styles["Section"]))
+            story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
             story.append(table)
 
         # =================================================
         # INSIGHTS
         # =================================================
         story.append(PageBreak())
-        story.append(Paragraph("Key Insights", styles["Section"]))
+        story.append(Paragraph("Key Insights", styles["SR_Section"]))
 
         for ins in payload["insights"][:8]:
             story.append(Paragraph(
                 f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
-                styles["Body"],
+                styles["SR_Body"],
             ))
-            story.append(Paragraph(ins.get("so_what",""), styles["Body"]))
+            story.append(Paragraph(ins.get("so_what",""), styles["SR_Body"]))
             story.append(Spacer(1, 8))
 
         # =================================================
         # RECOMMENDATIONS
         # =================================================
         story.append(PageBreak())
-        story.append(Paragraph("Recommendations", styles["Section"]))
+        story.append(Paragraph("Recommendations", styles["SR_Section"]))
 
         for rec in payload["recommendations"][:7]:
             story.append(Paragraph(
                 f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
-                styles["Body"],
+                styles["SR_Body"],
             ))
             if rec.get("timeline"):
                 story.append(Paragraph(
                     f"<i>Timeline:</i> {rec['timeline']}",
-                    styles["Body"],
+                    styles["SR_Body"],
                 ))
             story.append(Spacer(1, 8))
 
@@ -265,7 +266,7 @@ class ExecutivePDFRenderer:
         # =================================================
         if payload["visuals"]:
             story.append(PageBreak())
-            story.append(Paragraph("Visual Evidence", styles["Section"]))
+            story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
 
             for v in payload["visuals"][:4]:
                 p = Path(v.get("path",""))
