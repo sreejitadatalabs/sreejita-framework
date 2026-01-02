@@ -349,6 +349,20 @@ class HealthcareDomain(BaseDomain):
         
             if series.empty:
                 return None
+
+            # -------------------------------------------------
+            # KPI GOVERNANCE FALLBACK (EXECUTIVE SAFE)
+            # -------------------------------------------------
+            kpis.setdefault("record_count", len(df))
+            kpis.setdefault(
+                "time_coverage_days",
+                (df[self.time_col].max() - df[self.time_col].min()).days
+                if self.time_col else None
+            )
+            kpis.setdefault(
+                "data_completeness",
+                round(1 - df.isna().mean().mean(), 3)
+            )
         
             # Normalize common boolean encodings
             if series.dtype == object:
