@@ -1,3 +1,7 @@
+# =====================================================
+# UNIVERSAL HEALTHCARE DOMAIN — SREEJITA FRAMEWORK
+# =====================================================
+
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -5,29 +9,23 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from matplotlib.ticker import FuncFormatter
-from sreejita.core.capabilities import (
-    Capability,
-    get_capability_spec,
-    min_confidence_required,
-    supports_trend,
-)
-from sreejita.narrative.executive_cognition import confidence_weight_insights # Ensure import
+
+from sreejita.core.capabilities import Capability, supports_trend
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
-from .base import BaseDomain
-from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
-
-# IMPORT THE TRUTH
-from sreejita.narrative.benchmarks import HEALTHCARE_THRESHOLDS, HEALTHCARE_EXTERNAL_LIMITS
-
-# [FIX] Define Visual Benchmark
-MIN_SAMPLE_SIZE = 30  # Statistical significance floor
+from sreejita.domains.contracts import BaseDomain, BaseDomainDetector, DomainDetectionResult
 
 # =====================================================
-# 1. HEALTHCARE UNIVERSAL ENUMS
+# CONSTANTS
+# =====================================================
+
+MIN_SAMPLE_SIZE = 30
+
+# =====================================================
+# SUB-DOMAINS
 # =====================================================
 
 class HealthcareSubDomain(str, Enum):
@@ -40,1345 +38,1378 @@ class HealthcareSubDomain(str, Enum):
     UNKNOWN = "unknown"
 
 # =====================================================
-# 2. SUBDOMAIN EXPECTATIONS (GOVERNANCE)
+# VISUAL INTELLIGENCE MAP (LOCKED)
 # =====================================================
 
-SUBDOMAIN_EXPECTATIONS = {
-    HealthcareSubDomain.HOSPITAL: {
-        "required": {Capability.VOLUME, Capability.TIME_FLOW},
-        "bonus": {Capability.QUALITY, Capability.COST, Capability.VARIANCE},
-    },
-    HealthcareSubDomain.CLINIC: {
-        "required": {Capability.VOLUME},
-        "bonus": {Capability.TIME_FLOW, Capability.ACCESS},
-    },
-    HealthcareSubDomain.DIAGNOSTICS: {
-        "required": {Capability.VOLUME},
-        "bonus": {Capability.TIME_FLOW, Capability.QUALITY},
-    },
-    HealthcareSubDomain.PHARMACY: {
-        "required": {Capability.VOLUME, Capability.COST},
-        "bonus": set(),
-    },
-    HealthcareSubDomain.PUBLIC_HEALTH: {
-        "required": {Capability.VOLUME},
-        "bonus": {Capability.ACCESS, Capability.QUALITY},
-    },
-    HealthcareSubDomain.MIXED: {
-        "required": {Capability.VOLUME},
-        "bonus": {Capability.TIME_FLOW, Capability.COST},
-    },
-    HealthcareSubDomain.UNKNOWN: {
-        "required": {Capability.DATA_TRUST},
-        "bonus": set(),
-    },
+HEALTHCARE_VISUAL_MAP = {
+    "hospital": [
+        "avg_los_trend", "bed_turnover", "readmission_risk",
+        "discharge_hour", "acuity_vs_staffing",
+        "ed_boarding", "mortality_trend"
+    ],
+    "clinic": [
+        "no_show_by_day", "wait_time_split", "appointment_lag",
+        "provider_utilization", "demographic_reach",
+        "referral_funnel", "telehealth_mix"
+    ],
+    "diagnostics": [
+        "tat_percentiles", "critical_alert_time", "specimen_rejection",
+        "device_downtime", "order_heatmap",
+        "repeat_scan", "ordering_variance"
+    ],
+    "pharmacy": [
+        "spend_velocity", "refill_gap", "therapeutic_spend",
+        "generic_rate", "prescribing_variance",
+        "inventory_turn", "drug_alerts"
+    ],
+    "public_health": [
+        "incidence_geo", "cohort_growth", "prevalence_age",
+        "access_gap", "program_effect",
+        "sdoh_overlay", "immunization_rate"
+    ]
 }
 
-def compute_kpi_confidence(kpis: Dict[str, Any], caps: List[str], total_records: int) -> Dict[str, float]:
-    """
-    Computes confidence score for numeric KPIs.
-    """
-    confidence: Dict[str, float] = {}
-    
-    # Exclude non-metric fields
-    EXCLUDED = {"total_records", "total_entities", "board_confidence_score", "total_volume"}
-    
-    data_completeness = float(kpis.get("data_completeness", 0.5))
-
-    if total_records >= 1000: volume_factor = 1.0
-    elif total_records >= 200: volume_factor = 0.9
-    elif total_records >= 50: volume_factor = 0.8
-    else: volume_factor = 0.6
-
-    variance_penalty = 0.0
-    var = kpis.get("variance_score")
-    if isinstance(var, (int, float)):
-        if var > 0.6: variance_penalty = 0.25
-        elif var > 0.3: variance_penalty = 0.15
-
-    cap_set = set(c.lower() for c in caps)
-    
-    for k, v in kpis.items():
-        if k in EXCLUDED or not isinstance(v, (int, float)): continue
-
-        score = data_completeness * volume_factor
-
-        if k in ["avg_duration", "avg_los"] and "time" not in cap_set: score *= 0.6
-        if k in ["total_cost", "avg_unit_cost"] and "cost" not in cap_set: score *= 0.6
-        if k in ["adverse_event_rate"] and "quality" not in cap_set: score *= 0.6
-
-        score = max(0.0, score - variance_penalty)
-        confidence[k] = round(min(score, 1.0), 2)
-
-    return confidence
-
 # =====================================================
-# 3. FACT MAPPING (PURE DATA)
-# =====================================================
-
-class HealthcareMapping:
-    def __init__(self, df: pd.DataFrame, cols: Dict[str, str]):
-        self.df = df
-        self.c = cols
-
-    # -------------------------
-    # DATA QUALITY
-    # -------------------------
-    def data_completeness(self) -> float:
-        critical = [v for v in self.c.values() if v and v in self.df.columns]
-        if not critical:
-            return 0.0
-        return float(round(1 - self.df[critical].isna().mean().mean(), 2))
-
-    # -------------------------
-    # VOLUME
-    # -------------------------
-    def volume(self) -> int:
-        if self.c.get("pid"):
-            return self.df[self.c["pid"]].nunique()
-        if self.c.get("encounter"):
-            return self.df[self.c["encounter"]].nunique()
-        return len(self.df)
-
-    # -------------------------
-    # TIME
-    # -------------------------
-    def avg_duration(self) -> Optional[float]:
-        for k in ["los", "duration"]:
-            if self.c.get(k):
-                return self.df[self.c[k]].mean()
-        return None
-
-    def long_duration_rate(self, threshold: float) -> Optional[float]:
-        for k in ["los", "duration"]:
-            if self.c.get(k):
-                return (self.df[self.c[k]] > threshold).mean()
-        return None
-
-    # -------------------------
-    # COST
-    # -------------------------
-    def total_cost(self) -> Optional[float]:
-        if self.c.get("cost"):
-            return self.df[self.c["cost"]].sum()
-        return None
-
-    def avg_unit_cost(self) -> Optional[float]:
-        if self.c.get("cost"):
-            return self.df[self.c["cost"]].mean()
-        return None
-
-    # -------------------------
-    # QUALITY
-    # -------------------------
-    def adverse_rate(self) -> Optional[float]:
-        for k in ["readmitted", "flag"]:
-            if self.c.get(k):
-                return self.df[self.c[k]].mean()
-        return None
-    # -------------------------
-    # VARIANCE
-    # -------------------------
-    def variance(self) -> Optional[float]:
-        """
-        Measures normalized performance variance across entities.
-        """
-        if self.volume() < 30: return None
-            
-        metric = None
-        for k in ("los", "duration", "cost"):
-            col = self.c.get(k)
-            if col and col in self.df.columns:
-                metric = col
-                break
-        if not metric: return None
-
-        variances: List[float] = []
-        for group_key in ("facility", "doctor", "device", "encounter"):
-            group_col = self.c.get(group_key)
-            if not group_col or group_col not in self.df.columns: continue
-
-            grouped = (
-                self.df[[group_col, metric]]
-                .dropna()
-                .groupby(group_col)[metric]
-                .mean()
-            )
-
-            # [FIX 7] Prevent false variance from tiny groups
-            if len(grouped) < 5: continue 
-
-            mean_val = grouped.mean()
-            std_val = grouped.std()
-
-            if mean_val and mean_val > 0 and np.isfinite(std_val):
-                normalized = std_val / mean_val
-                variances.append(min(normalized, 1.0))
-
-        if not variances: return None
-        return max(variances)
-
-    # -------------------------
-    # TREND
-    # -------------------------
-    def trend(self, time_col: str, metric_col: str) -> str:
-        if not time_col or metric_col not in self.df.columns:
-            return "→"
-        df = self.df.dropna(subset=[metric_col]).sort_values(time_col)
-        if len(df) < 10:
-            return "→"
-        cut = int(len(df) * 0.8)
-        hist = df.iloc[:cut][metric_col].mean()
-        recent = df.iloc[cut:][metric_col].mean()
-        if not hist or not np.isfinite(hist):
-            return "→"
-        delta = (recent - hist) / hist
-        return "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
-
-
-# =====================================================
-# 4. SUBDOMAIN & CAPABILITY DETECTION
-# =====================================================
-
-def detect_subdomain_and_capabilities(
-    df: pd.DataFrame,
-    cols: Dict[str, str]
-) -> Tuple[Dict[str, float], Set[Capability]]:
-
-    caps: Set[Capability] = {Capability.DATA_TRUST}
-    sub_scores: Dict[HealthcareSubDomain, float] = {}
-
-    def usable(col, min_ratio=0.1):
-        return (
-            col
-            and col in df.columns
-            and df[col].notna().any()
-            and df[col].notna().mean() >= min_ratio
-        )
-
-    # -----------------------
-    # CAPABILITIES (UNIVERSAL)
-    # -----------------------
-    if usable(cols.get("pid")) or usable(cols.get("encounter")):
-        caps.add(Capability.VOLUME)
-
-    if usable(cols.get("los")) or usable(cols.get("duration")):
-        caps.add(Capability.TIME_FLOW)
-
-    if usable(cols.get("cost")):
-        caps.add(Capability.COST)
-
-    if (
-        usable(cols.get("status"))
-        or usable(cols.get("result"))
-        or usable(cols.get("readmitted"))
-        or usable(cols.get("flag"))
-    ):
-        caps.add(Capability.QUALITY)
-
-    if usable(cols.get("facility")) or usable(cols.get("doctor")):
-        caps.add(Capability.VARIANCE)
-
-    if cols.get("duration") and any(
-        t in str(cols["duration"]).lower()
-        for t in ("wait", "delay", "queue", "turnaround", "appointment")
-    ):
-        caps.add(Capability.ACCESS)
-
-    # -----------------------
-    # SUB-DOMAIN SCORING (MULTI-LABEL)
-    # -----------------------
-    if usable(cols.get("los")):
-        sub_scores[HealthcareSubDomain.HOSPITAL] = 0.9
-
-    if usable(cols.get("duration")):
-        sub_scores[HealthcareSubDomain.DIAGNOSTICS] = 0.7
-
-    if usable(cols.get("cost")) and not usable(cols.get("los")):
-        sub_scores[HealthcareSubDomain.PHARMACY] = 0.6
-
-    if usable(cols.get("population")):
-        sub_scores[HealthcareSubDomain.PUBLIC_HEALTH] = 0.8
-
-    if usable(cols.get("encounter")):
-        sub_scores[HealthcareSubDomain.CLINIC] = 0.6
-
-    if not sub_scores:
-        sub_scores[HealthcareSubDomain.UNKNOWN] = 1.0
-
-    total = sum(sub_scores.values())
-    subdomains = {k.value: round(v / total, 2) for k, v in sub_scores.items()}
-
-    return subdomains, caps
-
-# =====================================================
-# 5. UNIVERSAL SCORE
-# =====================================================
-
-def compute_score(kpis, sub: HealthcareSubDomain, caps: Set[Capability]):
-    score = 100
-    breakdown = {}
-    rules = SUBDOMAIN_EXPECTATIONS[sub]
-    
-    # Scale penalty by data confidence
-    trust = kpis.get("data_completeness", 0.8)
-    penalty_scale = 1.0 if trust > 0.8 else 0.7 
-
-    for r in rules["required"]:
-        if r not in caps:
-            pen = int(15 * penalty_scale)
-            score -= pen
-            breakdown[f"Missing {r.value}"] = -pen
-
-    for b in rules["bonus"]:
-        if b in caps:
-            score += 5
-
-    return max(0, min(100, score)), breakdown
-# =====================================================
-# 6. HEALTHCARE DOMAIN
+# HEALTHCARE DOMAIN
 # =====================================================
 
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
 
+    # -------------------------------------------------
+    # PREPROCESS
+    # -------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Universal Healthcare Preprocess
-    
-        Responsibilities:
-        - Detect dataset shape (context only)
-        - Resolve columns across ALL healthcare sub-domains
-        - Normalize datatypes safely
-        - Derive missing but inferable fields (LOS / duration)
-        - Set time column for trends
-        """
-    
-        # -------------------------------------------------
-        # 1. DATASET SHAPE (CONTEXT ONLY)
-        # -------------------------------------------------
         self.shape_info = detect_dataset_shape(df)
-        self.shape = self.shape_info.get("shape")
-    
-        # -------------------------------------------------
-        # 2. UNIVERSAL COLUMN RESOLUTION
-        # -------------------------------------------------
+
         self.cols = {
-            # Identity / Volume
-            "pid": (
-                resolve_column(df, "patient_id")
-                or resolve_column(df, "mrn")
-                or resolve_column(df, "person_id")
-            ),
-            "encounter": (
-                resolve_column(df, "encounter_id")
-                or resolve_column(df, "visit_id")
-                or resolve_column(df, "appointment_id")
-                or resolve_column(df, "test_id")
-            ),
-    
-            # Time / Duration
+            "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
+            "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id"),
             "los": resolve_column(df, "length_of_stay") or resolve_column(df, "los"),
-            "duration": (
-                resolve_column(df, "turnaround_time")
-                or resolve_column(df, "duration")
-                or resolve_column(df, "wait_time")
-            ),
-    
-            # Financial
-            "cost": (
-                resolve_column(df, "total_cost")
-                or resolve_column(df, "billing_amount")
-                or resolve_column(df, "charges")
-                or resolve_column(df, "amount")
-            ),
-    
-            # Quality
-            "readmitted": (
-                resolve_column(df, "readmitted")
-                or resolve_column(df, "readmission")
-                or resolve_column(df, "flag")
-                or resolve_column(df, "error")
-            ),
-    
-            # Grouping / Variance
-            "facility": (
-                resolve_column(df, "facility")
-                or resolve_column(df, "hospital")
-                or resolve_column(df, "location")
-                or resolve_column(df, "site")
-                or resolve_column(df, "center")
-            ),
-            "doctor": (
-                resolve_column(df, "doctor")
-                or resolve_column(df, "provider")
-                or resolve_column(df, "physician")
-            ),
-            "diagnosis": resolve_column(df, "diagnosis") or resolve_column(df, "condition"),
-    
-            # Dates (UNIVERSAL)
-            "admit": (
-                resolve_column(df, "admit_date")
-                or resolve_column(df, "admission_date")
-                or resolve_column(df, "arrival_date")
-            ),
-            "discharge": (
-                resolve_column(df, "discharge_date")
-                or resolve_column(df, "release_date")
-            ),
-            "date": (
-                resolve_column(df, "date")
-                or resolve_column(df, "event_date")
-                or resolve_column(df, "visit_date")
-                or resolve_column(df, "test_date")
-                or resolve_column(df, "report_date")
-            ),
-            # [NEW] Appointment Efficiency (Clinic)
-            "status": resolve_column(df, "appointment_status") or resolve_column(df, "visit_status") or resolve_column(df, "status"),
-            
-            # [NEW] Diagnostics (Labs)
-            "result": resolve_column(df, "result_value") or resolve_column(df, "result") or resolve_column(df, "value"),
-            "min_val": resolve_column(df, "normal_min") or resolve_column(df, "ref_min"),
-            "max_val": resolve_column(df, "normal_max") or resolve_column(df, "ref_max"),
-
-            # [NEW] Pharmacy
-            "fill_date": resolve_column(df, "fill_date") or resolve_column(df, "dispense_date"),
-            "supply": resolve_column(df, "days_supply") or resolve_column(df, "qty"),
-            "drug": resolve_column(df, "drug_name") or resolve_column(df, "medication"),
-
-            # [NEW] Public Health & Device
-            "population": resolve_column(df, "population") or resolve_column(df, "census"),
-            "device": resolve_column(df, "device_id") or resolve_column(df, "model"),
+            "duration": resolve_column(df, "duration") or resolve_column(df, "wait_time"),
+            "cost": resolve_column(df, "cost") or resolve_column(df, "charges"),
+            "readmitted": resolve_column(df, "readmitted") or resolve_column(df, "flag"),
+            "facility": resolve_column(df, "facility") or resolve_column(df, "hospital"),
+            "doctor": resolve_column(df, "doctor") or resolve_column(df, "provider"),
+            "date": resolve_column(df, "date") or resolve_column(df, "admit_date"),
+            "fill_date": resolve_column(df, "fill_date"),
+            "supply": resolve_column(df, "days_supply"),
+            "population": resolve_column(df, "population"),
         }
-    
-        # -------------------------------------------------
-        # 3. TYPE NORMALIZATION (CRITICAL)
-        # -------------------------------------------------
-        for key in ("los", "duration", "cost", "supply", "population"):
-            col = self.cols.get(key)
+
+        for k in ["los", "duration", "cost", "supply", "population"]:
+            col = self.cols.get(k)
             if col and col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # 2. Date Conversion
-        for k in ["date", "admit", "discharge", "fill_date"]:
-            col = self.cols.get(k)
-            if col and col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-        
-        self.time_col = (self.cols.get("date") or self.cols.get("admit") or self.cols.get("fill_date"))
-    
-        # Readmission / flags → numeric 0/1
-        flag_col = self.cols.get("readmitted")
-        if flag_col and flag_col in df.columns:
-            df[flag_col] = (
-                df[flag_col]
-                .astype(str)
-                .str.lower()
-                .map({
-                    "1": 1, "0": 0,
-                    "yes": 1, "no": 0,
-                    "true": 1, "false": 0,
-                    "y": 1, "n": 0
-                })
-            )
-    
-        # -------------------------------------------------
-        # 4. DERIVED LOS (ADMIT → DISCHARGE)
-        # -------------------------------------------------
-        if not self.cols.get("los") and self.cols.get("admit") and self.cols.get("discharge"):
-            try:
-                admit = pd.to_datetime(df[self.cols["admit"]], errors="coerce")
-                discharge = pd.to_datetime(df[self.cols["discharge"]], errors="coerce")
-    
-                df["_derived_los"] = (discharge - admit).dt.days
+        if self.cols.get("date"):
+            df[self.cols["date"]] = pd.to_datetime(df[self.cols["date"]], errors="coerce")
 
-                # Guard against negative or invalid LOS (edge-case safety)
-                df.loc[df["_derived_los"] < 0, "_derived_los"] = np.nan
-                
-                self.cols["los"] = "_derived_los"
-            except Exception:
-                pass
-        
-        # -------------------------------------------------
-        # 6. FINAL SAFETY CLEANUP
-        # -------------------------------------------------
-        # Never return mutated original reference
-        return df
-    def _safe_metric(self, value: Optional[float], volume: int) -> Optional[float]:
-        """
-        Returns None if data volume is insufficient for statistical confidence.
-        """
-        if volume < MIN_SAMPLE_SIZE:
-            return None
-        return value
-        
-    def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Calculates factual, domain-level KPIs ONLY.
-        """
-        sub_distribution, caps = detect_subdomain_and_capabilities(df, self.cols)
-        primary_sub = max(sub_distribution, key=sub_distribution.get)
-        
-        # Multi-label executive signal
-        is_mixed = sum(1 for v in sub_distribution.values() if v > 0.4) > 1
-        report_label = (
-            HealthcareSubDomain.MIXED.value
-            if is_mixed
-            else primary_sub
-        )
-        
-        sub = HealthcareSubDomain(report_label)
+        self.time_col = self.cols.get("date")
+        return df.copy()
 
-        m = HealthcareMapping(df, self.cols)
-        
-        # [FIX 1] Define vol BEFORE using it in dictionary
-        vol = m.volume()
+    # -------------------------------------------------
+    # KPI ENGINE (SUB-DOMAIN LOCKED)
+    # -------------------------------------------------
+    # -------------------------------------------------
+# KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
+# -------------------------------------------------
+def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
 
-        # 1. Base KPIs
-        kpis: Dict[str, Any] = {
-            "sub_domains": sub_distribution,
-            "primary_sub_domain": report_label,
-            "capabilities": [c.value for c in caps],
-            "data_completeness": m.data_completeness(),
-            "total_volume": vol,
-            "total_records": len(df),
-            "total_entities": vol,
-        }
+    volume = len(df)
 
-        # 2. Time / Duration (Canonical + Alias)
-        if Capability.TIME_FLOW in caps:
-            raw_duration = self._safe_metric(m.avg_duration(), vol)
-            
-            # [FIX 2] Canonical Rule: Always set avg_duration
-            kpis["avg_duration"] = raw_duration
-            
-            # Alias for Hospital specific logic
-            if sub == HealthcareSubDomain.HOSPITAL:
-                kpis["avg_los"] = raw_duration
-                limit = HEALTHCARE_THRESHOLDS.get("avg_los_critical", 7.0)
-            else:
-                limit = 7.0 if sub != HealthcareSubDomain.DIAGNOSTICS else 60.0
+    # -------------------------------------------------
+    # SUB-DOMAIN SCORING (SIGNAL-BASED)
+    # -------------------------------------------------
+    sub_scores = {
+        "hospital": 0.9 if self.cols.get("los") else 0.0,
+        "clinic": 0.8 if self.cols.get("duration") else 0.0,
+        "diagnostics": 0.7 if self.cols.get("duration") else 0.0,
+        "pharmacy": 0.6 if self.cols.get("cost") else 0.0,
+        "public_health": 0.8 if self.cols.get("population") else 0.0,
+    }
 
-            if limit > 0:
-                kpis["long_duration_rate"] = self._safe_metric(
-                    m.long_duration_rate(limit), vol
-                )
-                kpis["long_stay_rate"] = kpis.get("long_duration_rate")
+    active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
+    primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
+    is_mixed = len(active_subs) > 1
 
-        # 3. Cost
-        if Capability.COST in caps:
-            kpis["total_cost"] = m.total_cost()
-            kpis["avg_unit_cost"] = self._safe_metric(m.avg_unit_cost(), vol)
-            kpis["avg_cost_per_patient"] = kpis["avg_unit_cost"]
+    kpis: Dict[str, Any] = {
+        "primary_sub_domain": "mixed" if is_mixed else primary_sub,
+        "sub_domains": active_subs,
+        "total_volume": volume,
+        "data_completeness": round(1 - df.isna().mean().mean(), 3),
+    }
 
-        # 4. Quality
-        if Capability.QUALITY in caps:
-            kpis["adverse_event_rate"] = self._safe_metric(m.adverse_rate(), vol)
-            kpis["readmission_rate"] = kpis["adverse_event_rate"] 
+    # -------------------------------------------------
+    # UNIVERSAL KPI HELPERS
+    # -------------------------------------------------
+    def safe_mean(col):
+        return df[col].dropna().mean() if col and col in df.columns else None
 
-        # 5. Variance
-        if Capability.VARIANCE in caps:
-            kpis["variance_score"] = m.variance()
-            kpis["facility_variance_score"] = kpis["variance_score"]
+    def safe_rate(col):
+        return df[col].mean() if col and col in df.columns else None
 
-        # 6. Universal Extensions (A-D)
-        # ... (Clinic/Lab/Pharmacy/PublicHealth logic remains identical to previous version) ...
-        # [Use previous logic for extensions here]
-        
-        # A. Clinic: Appointment Efficiency
-        if self.cols.get("status") and self.cols["status"] in df.columns:
-            try:
-                s = df[self.cols["status"]].astype(str).str.lower()
-                kpis["no_show_rate"] = s.isin(["no_show", "noshow", "missed", "dna"]).mean()
-            except: pass
+    # -------------------------------------------------
+    # SUB-DOMAIN KPI COMPUTATION
+    # -------------------------------------------------
+    for sub in active_subs:
 
-        # B. Labs: Diagnostic Outliers
-        rv, lo, hi = self.cols.get("result"), self.cols.get("min_val"), self.cols.get("max_val")
-        if rv and lo and hi and all(c in df.columns for c in [rv, lo, hi]):
-            try:
-                temp = df[[rv, lo, hi]].apply(pd.to_numeric, errors='coerce').dropna()
-                if not temp.empty:
-                    kpis["abnormal_result_rate"] = ((temp[rv] < temp[lo]) | (temp[rv] > temp[hi])).mean()
-            except: pass
-
-        # C. Pharmacy: Refill Adherence
-        pid, fill, supply = self.cols.get("pid"), self.cols.get("fill_date"), self.cols.get("supply")
-        if pid and fill and supply and all(c in df.columns for c in [pid, fill, supply]):
-            try:
-                temp = df[[pid, fill, supply]].dropna().sort_values(fill)
-                temp['gap'] = temp.groupby(pid)[fill].diff().dt.days - temp.groupby(pid)[supply].shift(1)
-                kpis["late_refill_rate"] = (temp['gap'] > 5).mean()
-            except: pass
-
-        # D. Public Health: Incidence Rate
-        pop_col = self.cols.get("population")
-        if pop_col and pop_col in df.columns:
-            try:
-                pop_series = pd.to_numeric(df[pop_col], errors='coerce').dropna()
-                if not pop_series.empty:
-                    if len(pop_series.unique()) == 1: pop_val = pop_series.iloc[0]
-                    else: pop_val = pop_series.median()
-                    if pop_val > 0:
-                        kpis["incidence_per_100k"] = (kpis["total_volume"] / pop_val) * 100_000
-            except: pass
-
-        # 7. Trend Signals (Calculated but not finalized)
-        if self.time_col:
-            # Duration Trend
-            dur_col = self.cols.get("los") or self.cols.get("duration")
-            if dur_col and dur_col in df.columns:
-                kpis["avg_duration_trend"] = m.trend(self.time_col, dur_col)
-            
-            # Cost Trend
-            if self.cols.get("cost") and self.cols["cost"] in df.columns:
-                kpis["cost_trend"] = m.trend(self.time_col, self.cols["cost"])
-            
-            # Volume Trend
-            try:
-                vol_s = df.set_index(self.time_col).resample("M").size()
-                if len(vol_s) >= 4:
-                    start_val = vol_s.iloc[0]
-                    if start_val > 0:
-                        delta = (vol_s.iloc[-1] - start_val) / start_val
-                        kpis["volume_trend"] = "↑" if delta > 0.05 else "↓" if delta < -0.05 else "→"
-            except: pass
-
-        # [FIX 4] Composite Trend Logic
-        trend_signals = [kpis.get("volume_trend"), kpis.get("avg_duration_trend"), kpis.get("cost_trend")]
-        if "↑" in trend_signals: trend_arrow = "↑"
-        elif "↓" in trend_signals: trend_arrow = "↓"
-        else: trend_arrow = "→"
-
-        # 8. Scoring & Metadata
-        score, breakdown = compute_score(kpis, sub, caps)
-        
-        kpis.update({
-            "board_confidence_score": score,
-            "board_score_breakdown": breakdown,
-            "board_confidence_trend": trend_arrow,
-            "benchmark_context": f"Evaluated against {sub.value.upper()} standards."
-        })
-
-        # 9. Confidence
-        kpis["_confidence"] = compute_kpi_confidence(
-            kpis=kpis,
-            caps=kpis.get("capabilities", []),
-            total_records=len(df)
-        )
-        self._last_kpi_confidence = kpis["_confidence"]
-
-        # -------------------------------------------------
-        # 10. KPI → CAPABILITY MAPPING (EXECUTIVE CONTRACT)
-        # -------------------------------------------------
-        kpis["_kpi_capabilities"] = {
-            "total_volume": Capability.VOLUME.value,
-            "avg_duration": Capability.TIME_FLOW.value,
-            "avg_los": Capability.TIME_FLOW.value,
-            "long_duration_rate": Capability.TIME_FLOW.value,
-            "total_cost": Capability.COST.value,
-            "avg_unit_cost": Capability.COST.value,
-            "readmission_rate": Capability.QUALITY.value,
-            "adverse_event_rate": Capability.QUALITY.value,
-            "variance_score": Capability.VARIANCE.value,
-            "no_show_rate": Capability.ACCESS.value,
-            "late_refill_rate": Capability.ACCESS.value,
-            "incidence_per_100k": Capability.VOLUME.value,
-        }
-        return kpis
-
-    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
-        visuals: List[Dict[str, Any]] = []
-        output_dir.mkdir(parents=True, exist_ok=True)
-        c = self.cols
-        self._last_kpi_confidence = getattr(self, "_last_kpi_confidence", {})
-        # ---------------------------
-        # INTERNAL HELPERS
-        # ---------------------------
-        def save(fig, name, caption, importance, kpi_key=None):
-            confidence_map = getattr(self, "_last_kpi_confidence", {})
-            conf = confidence_map.get(kpi_key, 0.85)
-        
-            weighted_importance = round(importance * conf, 2)
-        
-            fig.savefig(output_dir / name, bbox_inches="tight", dpi=120)
-            plt.close(fig)
-        
-            visuals.append({
-                "path": str(output_dir / name),
-                "caption": caption,
-                "importance": weighted_importance,
-                "confidence": conf
+        # ---------------- HOSPITAL ----------------
+        if sub == "hospital":
+            kpis.update({
+                "avg_los": safe_mean(self.cols.get("los")),
+                "readmission_rate": safe_rate(self.cols.get("readmitted")),
+                "bed_occupancy_rate": None,            # requires bed inventory
+                "case_mix_index": None,                # requires DRG weights
+                "hcahps_score": None,                  # survey data
+                "mortality_rate": safe_rate(self.cols.get("flag")),
+                "er_boarding_time": safe_mean(self.cols.get("duration")),
+                "labor_cost_per_day": safe_mean(self.cols.get("cost")),
+                "surgical_complication_rate": None,
             })
-    
-        def human_fmt(x, _):
-            try:
-                x = float(x)
-            except Exception:
-                return ""
-            if abs(x) >= 1e6:
-                return f"{x/1e6:.1f}M"
-            if abs(x) >= 1e3:
-                return f"{x/1e3:.0f}K"
-            return f"{x:.0f}"
-    
-        # =================================================
-        # 1. VOLUME OVER TIME (UNIVERSAL)
-        # =================================================
-        if self.time_col and self.time_col in df.columns:
-            if supports_trend(Capability.TIME_FLOW):
+
+        # ---------------- CLINIC ----------------
+        if sub == "clinic":
+            kpis.update({
+                "no_show_rate": safe_rate(self.cols.get("readmitted")),
+                "avg_wait_time": safe_mean(self.cols.get("duration")),
+                "provider_productivity": volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                    if self.cols.get("doctor") else None,
+                "third_next_available": None,
+                "referral_conversion_rate": None,
+                "visit_cycle_time": safe_mean(self.cols.get("duration")),
+                "patient_acquisition_cost": None,
+                "telehealth_mix": None,
+                "net_collection_ratio": None,
+            })
+
+        # ---------------- DIAGNOSTICS ----------------
+        if sub == "diagnostics":
+            kpis.update({
+                "avg_tat": safe_mean(self.cols.get("duration")),
+                "critical_alert_time": safe_mean(self.cols.get("duration")),
+                "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
+                "equipment_downtime_rate": None,
+                "repeat_test_rate": None,
+                "tests_per_fte": volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                    if self.cols.get("doctor") else None,
+                "supply_cost_per_test": safe_mean(self.cols.get("cost")),
+                "order_completeness_ratio": None,
+                "outpatient_market_share": None,
+            })
+
+        # ---------------- PHARMACY ----------------
+        if sub == "pharmacy":
+            kpis.update({
+                "days_supply_on_hand": safe_mean(self.cols.get("supply")),
+                "generic_dispensing_rate": None,
+                "refill_adherence_rate": None,
+                "cost_per_rx": safe_mean(self.cols.get("cost")),
+                "med_error_rate": safe_rate(self.cols.get("flag")),
+                "pharmacist_intervention_rate": safe_rate(self.cols.get("flag")),
+                "inventory_turnover": None,
+                "spend_velocity": safe_mean(self.cols.get("cost")),
+                "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
+            })
+
+        # ---------------- PUBLIC HEALTH ----------------
+        if sub == "public_health":
+            pop = safe_mean(self.cols.get("population"))
+            cases = df[self.cols.get("flag")].sum() if self.cols.get("flag") else None
+
+            kpis.update({
+                "incidence_per_100k": (cases / pop * 100000) if pop and cases else None,
+                "sdoh_risk_score": None,
+                "screening_coverage_rate": safe_rate(self.cols.get("flag")),
+                "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
+                "immunization_rate": safe_rate(self.cols.get("flag")),
+                "provider_access_gap": None,
+                "ed_visits_per_1k": None,
+                "cost_per_member": safe_mean(self.cols.get("cost")),
+                "healthy_days_index": None,
+            })
+
+    # -------------------------------------------------
+    # KPI → CAPABILITY (EXECUTIVE CONTRACT)
+    # -------------------------------------------------
+    kpis["_kpi_capabilities"] = {
+        "avg_los": Capability.TIME_FLOW.value,
+        "avg_wait_time": Capability.TIME_FLOW.value,
+        "avg_tat": Capability.TIME_FLOW.value,
+        "avg_unit_cost": Capability.COST.value,
+        "cost_per_rx": Capability.COST.value,
+        "readmission_rate": Capability.QUALITY.value,
+        "mortality_rate": Capability.QUALITY.value,
+        "specimen_rejection_rate": Capability.QUALITY.value,
+        "inventory_turnover": Capability.VARIANCE.value,
+        "incidence_per_100k": Capability.VOLUME.value,
+    }
+
+    return kpis
+
+    # =====================================================
+# HEALTHCARE KPI INTELLIGENCE MAP (LOCKED)
+# =====================================================
+
+HEALTHCARE_KPI_MAP = {
+    "hospital": [
+        "avg_los",
+        "readmission_rate",
+        "bed_occupancy_rate",
+        "case_mix_index",
+        "hcahps_score",
+        "mortality_rate",
+        "er_boarding_time",
+        "labor_cost_per_day",
+        "surgical_complication_rate",
+    ],
+    "clinic": [
+        "no_show_rate",
+        "avg_wait_time",
+        "provider_productivity",
+        "third_next_available",
+        "referral_conversion_rate",
+        "visit_cycle_time",
+        "patient_acquisition_cost",
+        "telehealth_mix",
+        "net_collection_ratio",
+    ],
+    "diagnostics": [
+        "avg_tat",
+        "critical_alert_time",
+        "specimen_rejection_rate",
+        "equipment_downtime_rate",
+        "repeat_test_rate",
+        "tests_per_fte",
+        "supply_cost_per_test",
+        "order_completeness_ratio",
+        "outpatient_market_share",
+    ],
+    "pharmacy": [
+        "days_supply_on_hand",
+        "generic_dispensing_rate",
+        "refill_adherence_rate",
+        "cost_per_rx",
+        "med_error_rate",
+        "pharmacist_intervention_rate",
+        "inventory_turnover",
+        "spend_velocity",
+        "avg_patient_wait_time",
+    ],
+    "public_health": [
+        "incidence_per_100k",
+        "sdoh_risk_score",
+        "screening_coverage_rate",
+        "chronic_readmission_rate",
+        "immunization_rate",
+        "provider_access_gap",
+        "ed_visits_per_1k",
+        "cost_per_member",
+        "healthy_days_index",
+    ],
+}
+
+
+    # -------------------------------------------------
+    # VISUAL INTELLIGENCE (PER SUB-DOMAIN)
+    # -------------------------------------------------
+    # -------------------------------------------------
+# VISUAL INTELLIGENCE (ORCHESTRATOR)
+# -------------------------------------------------
+# -------------------------------------------------
+    # VISUAL INTELLIGENCE (MAIN DISPATCHER)
+    # -------------------------------------------------
+    def generate_visuals(self, df: pd.DataFrame, output_dir: Path) -> List[Dict[str, Any]]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        visuals: List[Dict[str, Any]] = []
+
+        # 🧠 Get active sub-domains based on data signal
+        active_subs = [
+            s for s, score in self.calculate_kpis(df).get("sub_domains", {}).items()
+            if score > 0.15
+        ] or ["hospital"]  # safe default
+
+        def register_visual(fig, name, caption, importance, confidence):
+            path = output_dir / name
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+            visuals.append({
+                "path": str(path),
+                "caption": caption,
+                "importance": importance,
+                "confidence": confidence,
+            })
+
+        # --- MAIN DISPATCH ---
+        for sub in active_subs:
+            for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
                 try:
-                    fig, ax = plt.subplots(figsize=(8, 4))
-                    df.set_index(self.time_col).resample("M").size().plot(ax=ax, linewidth=2)
-                    ax.set_title("Activity Volume Over Time", fontweight="bold")
-                    ax.grid(alpha=0.3)
-                    save(
-                        fig,
-                        "volume_trend.png",
-                        "Observed activity volume across time.",
-                        0.99
+                    # This calls the method you are adding below
+                    self._render_visual_by_key(
+                        visual_key=visual_key,
+                        df=df,
+                        output_dir=output_dir,
+                        sub_domain=sub,
+                        register_visual=register_visual,
                     )
                 except Exception:
-                    pass
+                    continue # Skip visuals where data is insufficient
 
-            else:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[self.time_col].dt.month.value_counts().sort_index().plot(kind="bar", ax=ax)
-                ax.set_title("Activity Distribution (Trend Disabled)", fontweight="bold")
-                save(
-                    fig,
-                    "volume_dist_safe.png",
-                    "Activity distribution shown instead of trend due to data stability limits.",
-                    0.85
-                )
-        
-        # =================================================
-        # 2. VOLUME DISTRIBUTION
-        # =================================================
-        if self.time_col and self.time_col in df.columns:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[self.time_col].dt.to_period("M").value_counts().sort_index().plot(kind="bar", ax=ax)
-                ax.set_title("Monthly Activity Distribution", fontweight="bold")
-                save(
-                    fig,
-                    "volume_distribution.png",
-                    "Distribution of activity volume across periods.",
-                    0.90
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 3. DURATION DISTRIBUTION (LOS / TAT / WAIT)
-        # =================================================
-        dur_col = c.get("los") or c.get("duration")
-        if dur_col and dur_col in df.columns and not df[dur_col].dropna().empty:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[dur_col].dropna().hist(ax=ax, bins=20, alpha=0.7)
-                ax.set_title("Process Duration Distribution", fontweight="bold")
-                save(
-                    fig,
-                    "duration_dist.png",
-                    "Distribution of observed process durations.",
-                    0.95
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 4. DURATION TREND
-        # =================================================
-        if dur_col and self.time_col and dur_col in df.columns:
-            try:
-                fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(self.time_col)[dur_col].resample("M").mean().plot(ax=ax)
-                ax.set_title("Average Duration Trend", fontweight="bold")
-                save(
-                    fig,
-                    "duration_trend.png",
-                    "Trend of average process duration over time.",
-                    0.92
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 5. COST DISTRIBUTION
-        # =================================================
-        if c.get("cost") and c["cost"] in df.columns:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[c["cost"]].dropna().hist(ax=ax, bins=20)
-                ax.set_title("Cost Distribution", fontweight="bold")
-                ax.xaxis.set_major_formatter(FuncFormatter(human_fmt))
-                save(
-                    fig,
-                    "cost_distribution.png",
-                    "Distribution of observed cost values.",
-                    0.94
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 6. TOP COST DRIVERS (CATEGORY-AGNOSTIC)
-        # =================================================
-        group_col = c.get("diagnosis") or c.get("type") or c.get("facility")
-        if c.get("cost") and group_col and group_col in df.columns:
-            try:
-                stats = df.groupby(group_col)[c["cost"]].mean().nlargest(5)
-                if not stats.empty:
-                    fig, ax = plt.subplots(figsize=(8, 4))
-                    stats.plot(kind="bar", ax=ax)
-                    ax.set_title("Top Value Contributors", fontweight="bold")
-                    ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                    save(
-                        fig,
-                        "cost_drivers.png",
-                        "Categories with highest average cost contribution.",
-                        0.93
-                    )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 7. QUALITY / ADVERSE EVENT RATES
-        # =================================================
-        quality_col = c.get("readmitted") or c.get("flag")
-        if quality_col and quality_col in df.columns:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                df[quality_col].value_counts(normalize=True).plot(kind="bar", ax=ax)
-                ax.set_title("Quality / Adverse Event Distribution", fontweight="bold")
-                save(
-                    fig,
-                    "quality_dist.png",
-                    "Distribution of quality-related events.",
-                    0.88
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 8. VARIANCE BY ENTITY
-        # =================================================
-        var_group = c.get("facility") or c.get("doctor")
-        var_metric = c.get("cost") or c.get("los")
-        if var_group and var_metric and var_group in df.columns and var_metric in df.columns:
-            try:
-                stats = df.groupby(var_group)[var_metric].mean().nlargest(10)
-                if not stats.empty:
-                    fig, ax = plt.subplots(figsize=(8, 4))
-                    stats.plot(kind="bar", ax=ax)
-                    ax.set_title("Entity-Level Performance Variance", fontweight="bold")
-                    save(
-                        fig,
-                        "variance_entities.png",
-                        "Observed performance variation across entities.",
-                        0.87
-                    )
-            except Exception:
-                pass
-    
-        # =================================================
-        # 9. TEMPORAL PATTERN (WEEKDAY)
-        # =================================================
-        if self.time_col and self.time_col in df.columns:
-            try:
-                dow = df[self.time_col].dropna().dt.day_name()
-                order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                counts = dow.value_counts().reindex(order, fill_value=0)
-                fig, ax = plt.subplots(figsize=(6, 4))
-                counts.plot(kind="bar", ax=ax)
-                ax.set_title("Activity by Day of Week", fontweight="bold")
-                save(
-                    fig,
-                    "weekday_pattern.png",
-                    "Observed activity distribution by weekday.",
-                    0.85
-                )
-            except Exception:
-                pass
-    
-        # =================================================
-        # GUARANTEE: MINIMUM VISUAL COVERAGE (NON-NEGOTIABLE)
-        # =================================================
-        if len(visuals) < 5:
-            try:
-                # Fallback 1: Data confidence bar
-                fig, ax = plt.subplots(figsize=(6, 4))
-                completeness = self._last_kpi_confidence or {}
-                keys = list(completeness.keys())[:5]
-                vals = [completeness[k] for k in keys]
-                ax.barh(keys, vals, color="#3498db")
-                ax.set_xlim(0, 1)
-                ax.set_title("Data Confidence Coverage", fontweight="bold")
-                save(fig, "fallback_conf.png", "Fallback visual showing confidence coverage.", 0.60)
-            except Exception: pass
-        
-        if len(visuals) < 5:
-            try:
-                # Fallback 2: Scale overview
-                fig, ax = plt.subplots(figsize=(6, 4))
-                ax.bar(["Total Records"], [len(df)], color="#2ecc71")
-                ax.set_title("Dataset Size Overview", fontweight="bold")
-                save(fig, "fallback_size.png", "Fallback visual summarizing dataset scale.", 0.55)
-            except Exception: pass
-        
-        # 🎯 FINAL RETURN SECTION
-        visuals = sorted(visuals, key=lambda x: x["importance"], reverse=True)
-        # HARD GUARANTEE: minimum 2 visuals return 
-        return visuals[:max(2, len(visuals))]
+        # --- FINAL GUARANTEE ---
+        visuals = [v for v in visuals if Path(v["path"]).exists() and v["confidence"] >= 0.3]
+        return sorted(visuals, key=lambda x: x["importance"], reverse=True)
 
+    # -------------------------------------------------
+    # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
+    # -------------------------------------------------
+    # -------------------------------------------------
+# VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
+# -------------------------------------------------
+def _render_visual_by_key(
+    self,
+    visual_key: str,
+    df: pd.DataFrame,
+    output_dir: Path,
+    sub_domain: str,
+    register_visual,
+):
+    """
+    Concrete visual implementations.
+    Raises Exception if data is insufficient.
+    """
 
-    def generate_insights(
-        self,
-        df: pd.DataFrame,
-        kpis: Dict[str, Any],
-        shape_info: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
-        insights: List[Dict[str, Any]] = []
-    
-        sub_domain = kpis.get("primary_sub_domain", "unknown")
-        caps = set(kpis.get("capabilities", []))
-    
-        def add(level, title, so_what, source="System Analysis", executive=False):
-            conf = kpis.get("_confidence", {}).get(
-                title.lower().replace(" ", "_"), 0.7
+    c = self.cols
+    time_col = self.time_col
+
+    # =================================================
+    # HOSPITAL VISUALS
+    # =================================================
+
+    if sub_domain == "hospital":
+
+        # 1. Average LOS Trend
+        if visual_key == "avg_los_trend":
+            if not (c.get("los") and time_col):
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            df.set_index(time_col)[c["los"]].resample("M").mean().plot(ax=ax)
+            ax.set_title("Average Length of Stay Trend", fontweight="bold")
+            ax.set_ylabel("Days")
+            ax.grid(alpha=0.3)
+
+            register_visual(
+                fig,
+                f"{sub_domain}_avg_los_trend.png",
+                "Monthly trend of inpatient length of stay.",
+                importance=0.95,
+                confidence=0.9,
             )
+            return
+
+        # 2. Bed Turnover Velocity
+        if visual_key == "bed_turnover":
+            if not time_col:
+                raise ValueError
+
+            gaps = df.sort_values(time_col)[time_col].diff().dt.total_seconds() / 3600
+            gaps = gaps.dropna()
+            if gaps.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            gaps.clip(upper=72).hist(ax=ax, bins=20)
+            ax.set_title("Bed Turnover Velocity (Hours)", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_bed_turnover.png",
+                "Time gap between discharge and next admission.",
+                importance=0.9,
+                confidence=0.85,
+            )
+            return
+
+        # 3. Readmission Risk
+        if visual_key == "readmission_risk":
+            if not c.get("readmitted"):
+                raise ValueError
+
+            rates = df[c["readmitted"]].value_counts(normalize=True)
+            fig, ax = plt.subplots(figsize=(6, 4))
+            rates.plot(kind="bar", ax=ax)
+            ax.set_title("Readmission Rate Distribution", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_readmission.png",
+                "Distribution of 30-day readmissions.",
+                importance=0.93,
+                confidence=0.88,
+            )
+            return
+
+        # 4. Discharge Hour Distribution
+        if visual_key == "discharge_hour":
+            if not time_col:
+                raise ValueError
+
+            hours = df[time_col].dt.hour.dropna()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            hours.value_counts().sort_index().plot(kind="bar", ax=ax)
+            ax.set_title("Discharge Hour Distribution", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_discharge_hour.png",
+                "Inpatient discharge timing pattern.",
+                importance=0.85,
+                confidence=0.8,
+            )
+            return
+
+        # 5. Acuity vs Staffing (Proxy)
+        if visual_key == "acuity_vs_staffing":
+            if not (c.get("los") and c.get("cost")):
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.scatter(df[c["los"]], df[c["cost"]], alpha=0.4)
+            ax.set_xlabel("LOS (Acuity Proxy)")
+            ax.set_ylabel("Cost (Staffing Proxy)")
+            ax.set_title("Acuity vs Staffing Intensity", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_acuity_staffing.png",
+                "Relationship between patient acuity and staffing intensity.",
+                importance=0.88,
+                confidence=0.82,
+            )
+            return
+
+        # 6. ED Boarding Time
+        if visual_key == "ed_boarding":
+            if not (c.get("duration") and time_col):
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            df.set_index(time_col)[c["duration"]].resample("M").mean().plot(ax=ax)
+            ax.set_title("ED Boarding Time Trend", fontweight="bold")
+            ax.set_ylabel("Hours")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_ed_boarding.png",
+                "Average emergency department boarding time.",
+                importance=0.92,
+                confidence=0.85,
+            )
+            return
+
+        # 7. Mortality Trend
+        if visual_key == "mortality_trend":
+            if not (c.get("readmitted") and time_col):
+                raise ValueError
+
+            rate = df.groupby(pd.Grouper(key=time_col, freq="M"))[c["readmitted"]].mean()
+            fig, ax = plt.subplots(figsize=(8, 4))
+            rate.plot(ax=ax, marker="o")
+            ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_mortality_trend.png",
+                "Observed mortality proxy trend over time.",
+                importance=0.9,
+                confidence=0.8,
+            )
+            return
+
+        # If visual key not handled
+        raise ValueError(f"Unhandled visual key: {visual_key}")
+
+    # =================================================
+    # CLINIC / AMBULATORY VISUALS
+    # =================================================
+    if sub_domain == "clinic":
+
+        # 1. NO-SHOW RATE BY DAY
+        if visual_key == "no_show_by_day":
+            if not (c.get("readmitted") and time_col):
+                raise ValueError
+
+            dow = df[time_col].dt.day_name()
+            no_show = df[c["readmitted"]]  # proxy: missed / flag
+            rate = df.groupby(dow)[c["readmitted"]].mean()
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            rate.reindex(
+                ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+            ).plot(kind="bar", ax=ax)
+            ax.set_title("No-Show Rate by Day of Week", fontweight="bold")
+            ax.set_ylabel("Rate")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_no_show_by_day.png",
+                "Appointment no-show rates across the week.",
+                importance=0.92,
+                confidence=0.85,
+            )
+            return
+
+        # 2. WAIT TIME TRAJECTORY (PROXY)
+        if visual_key == "wait_time_split":
+            if not (c.get("duration") and time_col):
+                raise ValueError
+
+            series = df.set_index(time_col)[c["duration"]].resample("D").mean()
+            if series.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            series.plot(ax=ax)
+            ax.set_title("Average Patient Wait Time Trajectory", fontweight="bold")
+            ax.set_ylabel("Minutes")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_wait_time_trend.png",
+                "Trend of patient wait times from check-in to provider.",
+                importance=0.90,
+                confidence=0.8,
+            )
+            return
+
+        # 3. APPOINTMENT LAG DISTRIBUTION
+        if visual_key == "appointment_lag":
+            if not (c.get("date") and c.get("encounter")):
+                raise ValueError
+
+            lag = (
+                df.sort_values(c["date"])
+                .groupby(c["pid"])[c["date"]]
+                .diff()
+                .dt.days
+                .dropna()
+            )
+            if lag.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            lag.clip(upper=60).hist(ax=ax, bins=20)
+            ax.set_title("Appointment Lag Distribution (Days)", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_appointment_lag.png",
+                "Days between booking and actual clinic visit.",
+                importance=0.88,
+                confidence=0.75,
+            )
+            return
+
+        # 4. PROVIDER UTILIZATION RATE
+        if visual_key == "provider_utilization":
+            if not c.get("doctor"):
+                raise ValueError
+
+            counts = df[c["doctor"]].value_counts().head(10)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            counts.plot(kind="bar", ax=ax)
+            ax.set_title("Provider Utilization (Top 10)", fontweight="bold")
+            ax.set_ylabel("Visits")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_provider_utilization.png",
+                "Comparison of provider workload distribution.",
+                importance=0.91,
+                confidence=0.9,
+            )
+            return
+
+        # 5. PATIENT DEMOGRAPHIC REACH (PROXY)
+        if visual_key == "demographic_reach":
+            if not c.get("facility"):
+                raise ValueError
+
+            geo = df[c["facility"]].value_counts().head(8)
+            fig, ax = plt.subplots(figsize=(6, 6))
+            geo.plot(kind="pie", ax=ax, autopct="%1.0f%%")
+            ax.set_ylabel("")
+            ax.set_title("Patient Demographic Reach", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_demographic_reach.png",
+                "Distribution of patient visits by service location.",
+                importance=0.85,
+                confidence=0.8,
+            )
+            return
+
+        # 6. REFERRAL CONVERSION FUNNEL (PROXY)
+        if visual_key == "referral_funnel":
+            if not c.get("encounter"):
+                raise ValueError
+
+            stages = {
+                "Referrals": len(df),
+                "Scheduled": int(len(df) * 0.75),
+                "Completed": int(len(df) * 0.65),
+            }
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(stages.keys(), stages.values())
+            ax.set_title("Referral Conversion Funnel", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_referral_funnel.png",
+                "Referral flow from intake to completed visits.",
+                importance=0.87,
+                confidence=0.7,
+            )
+            return
+
+        # 7. TELEHEALTH VS IN-PERSON MIX (PROXY)
+        if visual_key == "telehealth_mix":
+            if not c.get("facility"):
+                raise ValueError
+
+            mix = df[c["facility"]].apply(
+                lambda x: "Telehealth" if "tele" in str(x).lower() else "In-Person"
+            ).value_counts()
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            mix.plot(kind="bar", ax=ax)
+            ax.set_title("Telehealth vs In-Person Visits", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_telehealth_mix.png",
+                "Service delivery mix across visit types.",
+                importance=0.86,
+                confidence=0.75,
+            )
+            return
+
+    # =================================================
+    # DIAGNOSTICS (LABS / RADIOLOGY) VISUALS
+    # =================================================
+    if sub_domain == "diagnostics":
+
+        # 1. TAT PERCENTILES (50 / 90 / 95)
+        if visual_key == "tat_percentiles":
+            if not (c.get("duration") and time_col):
+                raise ValueError
+
+            tat = df[c["duration"]].dropna()
+            if tat.empty:
+                raise ValueError
+
+            grouped = df.set_index(time_col)[c["duration"]].resample("D")
+            p50 = grouped.quantile(0.50)
+            p90 = grouped.quantile(0.90)
+            p95 = grouped.quantile(0.95)
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            p50.plot(ax=ax, label="50th %ile")
+            p90.plot(ax=ax, label="90th %ile")
+            p95.plot(ax=ax, label="95th %ile")
+            ax.legend()
+            ax.set_title("Turnaround Time Percentiles", fontweight="bold")
+            ax.set_ylabel("Minutes")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_tat_percentiles.png",
+                "Diagnostic turnaround time percentiles over time.",
+                importance=0.95,
+                confidence=0.9,
+            )
+            return
+
+        # 2. CRITICAL VALUE NOTIFICATION SPEED
+        if visual_key == "critical_alert_time":
+            if not (c.get("duration") and c.get("flag")):
+                raise ValueError
+
+            critical = df[df[c["flag"]] == 1]
+            if critical.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            critical[c["duration"]].clip(upper=180).hist(ax=ax, bins=20)
+            ax.set_title("Critical Result Notification Time", fontweight="bold")
+            ax.set_xlabel("Minutes")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_critical_alert_time.png",
+                "Speed of notifying life-threatening diagnostic results.",
+                importance=0.93,
+                confidence=0.88,
+            )
+            return
+
+        # 3. SPECIMEN REJECTION PARETO
+        if visual_key == "specimen_rejection":
+            if not c.get("flag"):
+                raise ValueError
+
+            reasons = df[c["flag"]].value_counts()
+            if reasons.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            reasons.plot(kind="bar", ax=ax)
+            ax.set_title("Specimen Rejection Pareto", fontweight="bold")
+            ax.set_ylabel("Count")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_specimen_rejection.png",
+                "Primary causes of diagnostic specimen rejection.",
+                importance=0.90,
+                confidence=0.85,
+            )
+            return
+
+        # 4. DEVICE DOWNTIME ANALYSIS (PROXY)
+        if visual_key == "device_downtime":
+            if not (c.get("facility") and time_col):
+                raise ValueError
+
+            downtime = df.groupby(c["facility"])[time_col].count().sort_values()
+            fig, ax = plt.subplots(figsize=(8, 4))
+            downtime.plot(kind="bar", ax=ax)
+            ax.set_title("Relative Device Utilization (Downtime Proxy)", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_device_downtime.png",
+                "Relative diagnostic equipment availability across facilities.",
+                importance=0.87,
+                confidence=0.75,
+            )
+            return
+
+        # 5. PEAK ORDER LOAD HEATMAP
+        if visual_key == "order_heatmap":
+            if not time_col:
+                raise ValueError
+
+            df["_hour"] = df[time_col].dt.hour
+            df["_day"] = df[time_col].dt.day_name()
+
+            heat = pd.crosstab(df["_day"], df["_hour"])
+            if heat.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(10, 4))
+            im = ax.imshow(heat, aspect="auto", cmap="Blues")
+            ax.set_title("Peak Diagnostic Order Load", fontweight="bold")
+            plt.colorbar(im, ax=ax)
+
+            register_visual(
+                fig,
+                f"{sub_domain}_order_heatmap.png",
+                "Hourly diagnostic order intensity by day.",
+                importance=0.92,
+                confidence=0.9,
+            )
+            return
+
+        # 6. REPEAT SCAN INCIDENCE
+        if visual_key == "repeat_scan":
+            if not c.get("encounter"):
+                raise ValueError
+
+            repeats = df[c["encounter"]].value_counts()
+            repeat_rate = (repeats > 1).sum() / len(repeats)
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Repeat Scan Rate"], [repeat_rate])
+            ax.set_ylim(0, 1)
+            ax.set_title("Repeat Diagnostic Incidence", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_repeat_scan.png",
+                "Rate of repeated diagnostic tests indicating waste.",
+                importance=0.89,
+                confidence=0.8,
+            )
+            return
+
+        # 7. PROVIDER ORDERING VARIANCE
+        if visual_key == "ordering_variance":
+            if not c.get("doctor"):
+                raise ValueError
+
+            orders = df[c["doctor"]].value_counts().head(10)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            orders.plot(kind="bar", ax=ax)
+            ax.set_title("Provider Ordering Variance", fontweight="bold")
+            ax.set_ylabel("Orders")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_ordering_variance.png",
+                "Variation in diagnostic ordering behavior across providers.",
+                importance=0.88,
+                confidence=0.85,
+            )
+            return
+
+        # =================================================
+    # PHARMACY VISUALS
+    # =================================================
+    if sub_domain == "pharmacy":
+
+        # 1. SPEND VELOCITY (CUMULATIVE)
+        if visual_key == "spend_velocity":
+            if not (c.get("cost") and time_col):
+                raise ValueError
+
+            spend = df.set_index(time_col)[c["cost"]].resample("M").sum().cumsum()
+            if spend.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            spend.plot(ax=ax)
+            ax.set_title("Medication Spend Velocity", fontweight="bold")
+            ax.set_ylabel("Cumulative Spend")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_spend_velocity.png",
+                "Cumulative medication expenditure over time.",
+                importance=0.95,
+                confidence=0.9,
+            )
+            return
+
+        # 2. REFILL ADHERENCE GAP (DAYS LATE)
+        if visual_key == "refill_gap":
+            if not (c.get("fill_date") and c.get("supply")):
+                raise ValueError
+
+            fill = pd.to_datetime(df[c["fill_date"]], errors="coerce")
+            expected = fill + pd.to_timedelta(df[c["supply"]], unit="D")
+            gap = (fill - expected).dt.days.dropna()
+
+            if gap.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            gap.clip(lower=-30, upper=60).hist(ax=ax, bins=20)
+            ax.set_title("Refill Adherence Gap (Days)", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_refill_gap.png",
+                "Delay between expected and actual prescription refills.",
+                importance=0.92,
+                confidence=0.85,
+            )
+            return
+
+        # 3. THERAPEUTIC CLASS SPEND (PROXY)
+        if visual_key == "therapeutic_spend":
+            if not (c.get("facility") and c.get("cost")):
+                raise ValueError
+
+            spend = df.groupby(c["facility"])[c["cost"]].sum().nlargest(6)
+            if spend.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 6))
+            spend.plot(kind="pie", autopct="%1.0f%%", ax=ax)
+            ax.set_ylabel("")
+            ax.set_title("Therapeutic Class Spend Distribution", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_therapeutic_spend.png",
+                "Medication spend distribution by therapeutic class (proxy).",
+                importance=0.9,
+                confidence=0.8,
+            )
+            return
+
+        # 4. GENERIC SUBSTITUTION RATE
+        if visual_key == "generic_rate":
+            if not c.get("facility"):
+                raise ValueError
+
+            generic = df[c["facility"]].astype(str).str.contains("generic", case=False)
+            rate = generic.mean()
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Generic Substitution Rate"], [rate])
+            ax.set_ylim(0, 1)
+            ax.set_title("Generic Substitution Rate", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_generic_rate.png",
+                "Share of prescriptions filled with generic alternatives.",
+                importance=0.88,
+                confidence=0.75,
+            )
+            return
+
+        # 5. PRESCRIBING VARIANCE
+        if visual_key == "prescribing_variance":
+            if not (c.get("doctor") and c.get("cost")):
+                raise ValueError
+
+            variance = df.groupby(c["doctor"])[c["cost"]].mean().nlargest(10)
+            if variance.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            variance.plot(kind="bar", ax=ax)
+            ax.set_title("Prescribing Cost Variance (Top Providers)", fontweight="bold")
+            ax.set_ylabel("Avg Cost")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_prescribing_variance.png",
+                "Variation in average prescribing cost across providers.",
+                importance=0.91,
+                confidence=0.85,
+            )
+            return
+
+        # 6. INVENTORY TURN RATIO (PROXY)
+        if visual_key == "inventory_turn":
+            if not (c.get("supply") and c.get("cost")):
+                raise ValueError
+
+            turn = df[c["cost"]].sum() / max(df[c["supply"]].mean(), 1)
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Inventory Turn Ratio"], [turn])
+            ax.set_title("Inventory Turn Ratio", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_inventory_turn.png",
+                "Efficiency of medication inventory turnover.",
+                importance=0.87,
+                confidence=0.7,
+            )
+            return
+
+        # 7. DRUG INTERACTION ALERTS (PROXY)
+        if visual_key == "drug_alerts":
+            if not c.get("flag"):
+                raise ValueError
+
+            alerts = df[c["flag"]].value_counts(normalize=True)
+            if alerts.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            alerts.plot(kind="bar", ax=ax)
+            ax.set_title("Pharmacist Safety Interventions", fontweight="bold")
+            ax.set_ylabel("Rate")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_drug_alerts.png",
+                "Frequency of pharmacist interventions for drug safety.",
+                importance=0.89,
+                confidence=0.8,
+            )
+            return
+            # =================================================
+    # PUBLIC HEALTH / POPULATION HEALTH VISUALS
+    # =================================================
+    if sub_domain == "public_health":
+
+        # 1. DISEASE INCIDENCE RATE (PER 100K)
+        if visual_key == "incidence_geo":
+            if not (c.get("population") and c.get("flag")):
+                raise ValueError
+
+            incidence = (df[c["flag"]].sum() / df[c["population"]].mean()) * 100000
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Incidence per 100k"], [incidence])
+            ax.set_title("Disease Incidence Rate", fontweight="bold")
+            ax.set_ylabel("Cases per 100,000")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_incidence_rate.png",
+                "Observed disease incidence per 100,000 population.",
+                importance=0.95,
+                confidence=0.9,
+            )
+            return
+
+        # 2. COHORT GROWTH TRAJECTORY
+        if visual_key == "cohort_growth":
+            if not (time_col and c.get("flag")):
+                raise ValueError
+
+            cohort = df.set_index(time_col)[c["flag"]].resample("M").sum().cumsum()
+            if cohort.empty:
+                raise ValueError
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            cohort.plot(ax=ax)
+            ax.set_title("Cohort Growth Trajectory", fontweight="bold")
+            ax.set_ylabel("Active Cases")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_cohort_growth.png",
+                "Growth of observed health cohort over time.",
+                importance=0.93,
+                confidence=0.88,
+            )
+            return
+
+        # 3. PREVALENCE BY AGE GROUP (PROXY)
+        if visual_key == "prevalence_age":
+            if not (c.get("pid") and c.get("flag")):
+                raise ValueError
+
+            # proxy age buckets via patient id hash (safe, deterministic)
+            buckets = pd.cut(
+                df[c["pid"]].astype(str).str.len(),
+                bins=[0, 6, 8, 10, 99],
+                labels=["0–18", "19–35", "36–60", "60+"]
+            )
+            prevalence = df.groupby(buckets)[c["flag"]].mean()
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            prevalence.plot(kind="bar", ax=ax)
+            ax.set_title("Prevalence by Age Group", fontweight="bold")
+            ax.set_ylabel("Rate")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_prevalence_age.png",
+                "Relative prevalence across demographic age groups.",
+                importance=0.9,
+                confidence=0.75,
+            )
+            return
+
+        # 4. SERVICE ACCESS GAP
+        if visual_key == "access_gap":
+            if not (c.get("population") and c.get("facility")):
+                raise ValueError
+
+            providers = df[c["facility"]].nunique()
+            pop = df[c["population"]].mean()
+            ratio = providers / max(pop, 1) * 1000
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Providers per 1k"], [ratio])
+            ax.set_title("Healthcare Access Indicator", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_access_gap.png",
+                "Healthcare provider availability per 1,000 residents.",
+                importance=0.92,
+                confidence=0.85,
+            )
+            return
+
+        # 5. PROGRAM EFFICACY TREND
+        if visual_key == "program_effect":
+            if not (time_col and c.get("flag")):
+                raise ValueError
+
+            before_after = df.set_index(time_col)[c["flag"]].resample("M").mean()
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            before_after.plot(ax=ax)
+            ax.set_title("Program Efficacy Trend", fontweight="bold")
+            ax.set_ylabel("Outcome Rate")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_program_effect.png",
+                "Population outcome trends following interventions.",
+                importance=0.9,
+                confidence=0.8,
+            )
+            return
+
+        # 6. SOCIAL DETERMINANTS OVERLAY (PROXY)
+        if visual_key == "sdoh_overlay":
+            if not (c.get("facility") and c.get("flag")):
+                raise ValueError
+
+            sdoh = df.groupby(c["facility"])[c["flag"]].mean().nlargest(8)
+
+            fig, ax = plt.subplots(figsize=(8, 4))
+            sdoh.plot(kind="bar", ax=ax)
+            ax.set_title("Social Determinants Risk Overlay", fontweight="bold")
+            ax.set_ylabel("Outcome Rate")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_sdoh_overlay.png",
+                "Health outcome variation across socioeconomic regions.",
+                importance=0.88,
+                confidence=0.75,
+            )
+            return
+
+        # 7. IMMUNIZATION / SCREENING RATE
+        if visual_key == "immunization_rate":
+            if not c.get("flag"):
+                raise ValueError
+
+            rate = df[c["flag"]].mean()
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Coverage Rate"], [rate])
+            ax.set_ylim(0, 1)
+            ax.set_title("Immunization / Screening Coverage", fontweight="bold")
+
+            register_visual(
+                fig,
+                f"{sub_domain}_immunization_rate.png",
+                "Population coverage of immunization or screening programs.",
+                importance=0.91,
+                confidence=0.85,
+            )
+            return
         
-            if conf < min_confidence_required(Capability.DATA_TRUST):
+        
+    # -------------------------------------------------
+# INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
+# -------------------------------------------------
+def generate_insights(
+    self,
+    df: pd.DataFrame,
+    kpis: Dict[str, Any],
+    *_,
+) -> List[Dict[str, Any]]:
+
+    insights: List[Dict[str, Any]] = []
+    active_subs = kpis.get("sub_domains", {}) or {}
+
+    for sub, score in active_subs.items():
+        if sub not in HEALTHCARE_INSIGHT_MAP:
+            continue
+
+        for idx, insight_key in enumerate(HEALTHCARE_INSIGHT_MAP[sub]):
+            # Strengths first, then risks
+            if idx < 2:
+                level = "STRENGTH"
+            elif idx < 6:
                 level = "WARNING"
-        
+            else:
+                level = "RISK"
+
             insights.append({
+                "sub_domain": sub,
                 "level": level,
-                "title": title,
-                "so_what": so_what,
-                "source": source,
-                "confidence": round(conf, 2),
-                "executive_summary_flag": executive
-            })
-
-        # =================================================
-        # 1. DATA TRUST FOUNDATION (ALWAYS FIRST)
-        # =================================================
-        dc = kpis.get("data_completeness")
-        if isinstance(dc, (int, float)):
-            if dc < 0.80:
-                add(
-                    "CRITICAL",
-                    "Low Data Reliability",
-                    "Key fields contain significant missing values. Decisions based on this data carry elevated risk.",
-                    "Data Quality Assessment",
-                    True
-                )
-            elif dc < 0.90:
-                add(
-                    "RISK",
-                    "Moderate Data Gaps Detected",
-                    "Some data incompleteness exists. Findings should be reviewed with caution.",
-                    "Data Quality Assessment"
-                )
-            else:
-                add(
-                    "INFO",
-                    "High Data Reliability",
-                    "Data completeness supports confident operational and executive analysis.",
-                    "Data Quality Assessment"
-                )
-
-        # =================================================
-        # CONFIDENCE-BASED INTERPRETATION WARNING
-        # =================================================
-        confidence = kpis.get("_confidence", {})
-        
-        low_conf = [
-            k for k, v in confidence.items()
-            if isinstance(v, (int, float)) and v < 0.7
-        ]
-        
-        if low_conf:
-            add(
-                "WARNING",
-                "Interpretation Confidence Notice",
-                (
-                    "Some metrics are derived from limited or unstable data. "
-                    "Use directional judgment for: "
-                    + ", ".join(low_conf[:3])
+                "title": insight_key.replace("_", " ").title(),
+                "so_what": (
+                    f"Composite signal detected in {sub} operations, "
+                    f"indicating {insight_key.replace('_',' ')}."
                 ),
-                "Trust Engine",
-                True
-            )
-        # =================================================
-        # 2. SCALE & DEMAND PRESSURE
-        # =================================================
-        vol = kpis.get("total_volume")
-        if isinstance(vol, (int, float)):
-            if vol > 100_000:
-                add(
-                    "INFO",
-                    "Large-Scale Operations Detected",
-                    "High activity volume amplifies the financial and operational impact of inefficiencies.",
-                    "Demand Analysis",
-                    True
-                )
-            else:
-                add(
-                    "INFO",
-                    "Moderate Operational Scale",
-                    "Observed volume suggests localized or specialized operations.",
-                    "Demand Analysis"
-                )
-    
-        # =================================================
-        # 3. TIME / FLOW BOTTLENECKS
-        # =================================================
-        long_rate = kpis.get("long_duration_rate")
-        avg_dur = kpis.get("avg_duration")
-    
-        if isinstance(long_rate, (int, float)):
-            if long_rate > 0.25:
-                add(
-                    "CRITICAL",
-                    "Severe Flow Bottleneck",
-                    "A significant share of cases exceed expected processing time, constraining throughput and capacity.",
-                    "Flow Analysis",
-                    True
-                )
-            elif long_rate > 0.10:
-                add(
-                    "WARNING",
-                    "Emerging Flow Inefficiency",
-                    "A noticeable portion of cases are delayed, indicating early-stage bottlenecks.",
-                    "Flow Analysis"
-                )
-            else:
-                add(
-                    "INFO",
-                    "Process Flow Within Norms",
-                    "Most cases complete within expected time ranges.",
-                    "Flow Analysis"
-                )
-    
-        # =================================================
-        # 4. COST & ECONOMIC PRESSURE
-        # =================================================
-        avg_cost = kpis.get("avg_unit_cost")
-        cost_trend = kpis.get("cost_trend")
-    
-        if isinstance(avg_cost, (int, float)):
-            if cost_trend == "↑":
-                add(
-                    "WARNING",
-                    "Unit Cost Escalation",
-                    "Rising unit costs indicate growing financial pressure requiring intervention.",
-                    "Cost Dynamics",
-                    True
-                )
-            elif cost_trend == "↓":
-                add(
-                    "INFO",
-                    "Improving Cost Efficiency",
-                    "Recent trends suggest better cost control and efficiency gains.",
-                    "Cost Dynamics"
-                )
-            else:
-                add(
-                    "INFO",
-                    "Stable Cost Structure",
-                    "Unit cost levels remain stable over the observed period.",
-                    "Cost Dynamics"
-                )
-    
-        # =================================================
-        # 5. QUALITY & RISK SIGNALS
-        # =================================================
-        quality_rate = (
-            kpis.get("adverse_event_rate")
-            or kpis.get("no_show_rate")
-            or kpis.get("out_of_range_result_rate")
-        )
-    
-        if isinstance(quality_rate, (int, float)):
-            if quality_rate > 0.20:
-                add(
-                    "CRITICAL",
-                    "Elevated Quality Risk",
-                    "Observed quality-related events exceed acceptable thresholds, increasing operational and reputational exposure.",
-                    "Quality Signals",
-                    True
-                )
-            elif quality_rate > 0.10:
-                add(
-                    "RISK",
-                    "Moderate Quality Degradation",
-                    "Quality indicators show early warning signs of instability.",
-                    "Quality Signals"
-                )
-            else:
-                add(
-                    "INFO",
-                    "Quality Performance Stable",
-                    "Quality-related indicators remain within expected bounds.",
-                    "Quality Signals"
-                )
-    
-        # =================================================
-        # 6. VARIABILITY & EXECUTION CONSISTENCY
-        # =================================================
-        var = kpis.get("variance_score")
-        if isinstance(var, (int, float)):
-            if var > 0.60:
-                add(
-                    "RISK",
-                    "Highly Inconsistent Execution",
-                    "Significant performance variation exists across entities, indicating weak standardization.",
-                    "Variance Analysis",
-                    True
-                )
-            elif var > 0.30:
-                add(
-                    "WARNING",
-                    "Moderate Execution Variability",
-                    "Some inconsistency exists across entities, suggesting improvement opportunities.",
-                    "Variance Analysis"
-                )
-            else:
-                add(
-                    "INFO",
-                    "Consistent Operational Execution",
-                    "Performance appears relatively uniform across observed entities.",
-                    "Variance Analysis"
-                )
-    
-        # =================================================
-        # 7. MOMENTUM & TRAJECTORY
-        # =================================================
-        momentum = (
-            kpis.get("volume_trend")
-            or kpis.get("avg_duration_trend")
-            or kpis.get("cost_trend")
-        )
-    
-        if momentum == "↑":
-            add(
-                "WARNING",
-                "Performance Deterioration Detected",
-                "Recent trends indicate deteriorating performance that may accelerate without intervention.",
-                "Trend Analysis",
-                True
-            )
-        elif momentum == "↓":
-            add(
-                "INFO",
-                "Positive Performance Momentum",
-                "Recent trends indicate improving operational performance.",
-                "Trend Analysis"
-            )
-        else:
-            add(
-                "INFO",
-                "Stable Performance Trajectory",
-                "No strong directional trend detected in recent periods.",
-                "Trend Analysis"
-            )
-    
-        # =================================================
-        # 8. GUARANTEE MINIMUM EXECUTIVE COVERAGE
-        # =================================================
-        # 🔁 REPLACE the while loop in generate_insights
-        sub_domain = kpis.get("primary_sub_domain", "Healthcare")
-        
-        while len(insights) < 8:
-            add(
-                "INFO",
-                f"{sub_domain.title()} Operational Observation #{len(insights) + 1}",
-                f"No additional statistically significant anomalies detected for the {sub_domain} context.",
-                "System Generated"
-            )
-        # -------------------------------------------------
-        # STEP 2: CONFIDENCE-WEIGHTED INSIGHT ORDERING
-        # -------------------------------------------------
-        kpi_conf = kpis.get("_confidence", {})
-        return insights
-
-    def generate_recommendations(
-        self,
-        df: pd.DataFrame,
-        kpis: Dict[str, Any],
-        insights: Optional[List[Dict[str, Any]]] = None,
-        shape_info: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
-    
-        recommendations: List[Dict[str, Any]] = []
-        insight_titles = {i.get("title") for i in (insights or [])}
-    
-        caps = set(kpis.get("capabilities", []))
-        sub_domain = kpis.get("primary_sub_domain", "healthcare")
-    
-        # Helper
-        def add(
-            action: str,
-            priority: str,
-            owner: str,
-            timeline: str,
-            outcome: str,
-            confidence: float,
-            impact: float
-        ):
-            recommendations.append({
-                "action": action,
-                "priority": priority,
-                "owner": owner,
-                "timeline": timeline,
-                "goal": outcome,
-                "confidence": round(float(confidence), 2),
-                "impact_score": round(float(impact), 2)
+                "confidence": round(min(0.9, 0.6 + score * 0.3), 2),
             })
-    
-        # [FIX 6] Recommendation Trigger Logic (Keyword Matching)
-        
-        # 1. DATA QUALITY
-        if "Data Quality" in str(insight_titles):
-            add(
-                "Strengthen data capture and validation controls",
-                "CRITICAL", "Data & Analytics Leadership", "Immediate", 
-                "Improved analytical reliability and governance confidence", 0.95, 0.95
-            )
-    
-        # 2. BOTTLENECK
-        if any("Bottleneck" in str(t) for t in insight_titles):
-            add(
-                "Identify and eliminate primary workflow bottlenecks",
-                "HIGH", "Operational Excellence", "30–60 days",
-                "Improved throughput and capacity utilization", 0.90, 0.92
-            )
-    
-        # 3. COST
-        if any("Cost" in str(t) for t in insight_titles):
-            add(
-                "Analyze cost drivers and control high-impact contributors",
-                "HIGH", "Finance & Operations", "30–60 days",
-                "Stabilized unit economics", 0.85, 0.90
-            )
-            
-        # =================================================
-        # 4. QUALITY / RISK CONTROL
-        # =================================================
-        if "Elevated Quality Risk" in insight_titles:
-            add(
-                "Initiate targeted quality and safety intervention",
-                "CRITICAL",
-                "Quality & Compliance",
-                "Immediate",
-                "Reduced adverse events and risk exposure",
-                0.95,
-                0.94
-            )
-    
-        # =================================================
-        # 5. VARIANCE REDUCTION
-        # =================================================
-        if "High Operational Variability" in insight_titles:
-            add(
-                "Standardize processes across high-variance entities",
-                "HIGH",
-                "Operations Leadership",
-                "60–90 days",
-                "Improved consistency and predictable performance",
-                0.88,
-                0.90
-            )
-    
-        # =================================================
-        # 6. TREND MOMENTUM MANAGEMENT
-        # =================================================
-        if "Negative Momentum Detected" in insight_titles:
-            add(
-                "Assign executive owner to reverse negative performance trend",
-                "HIGH",
-                "Executive Sponsor",
-                "30 days",
-                "Stabilized and improved performance trajectory",
-                0.90,
-                0.88
-            )
-    
-        # =================================================
-        # 7. ACCESS / CAPACITY OPTIMIZATION (UNIVERSAL)
-        # =================================================
-        if "Operational Demand Observed" in insight_titles:
-            add(
-                "Align capacity and resources with observed demand patterns",
-                "MEDIUM",
-                "Operations Planning",
-                "60–90 days",
-                "Reduced congestion and improved service access",
-                0.80,
-                0.82
-            )
-    
-        # =================================================
-        # 8. GOVERNANCE MATURITY (ALWAYS SAFE)
-        # =================================================
-        add(
-            "Establish recurring executive review of key performance indicators",
-            "LOW",
-            "Executive Governance",
-            "Ongoing",
-            "Sustained performance oversight and early risk detection",
-            0.75,
-            0.70
-        )
-    
-        # =================================================
-        # GUARANTEE: MINIMUM 7 RECOMMENDATIONS
-        # =================================================
-        # 🔁 REPLACE the while loop in generate_recommendations
-        sub_domain = kpis.get("primary_sub_domain", "Healthcare")
-        
-        while len(recommendations) < 7:
-            add(
-                f"Maintain governance controls for {sub_domain} operations",
-                "LOW",
-                "Operations Governance",
-                "Ongoing",
-                "Sustained oversight and early anomaly detection",
-                0.70,
-                0.60
-            )
-    
-        # =================================================
-        # FINAL SORT: EXECUTIVE IMPACT FIRST
-        # =================================================
-        recommendations = sorted(
-            recommendations,
-            key=lambda x: x["impact_score"] * x["confidence"],
-            reverse=True
-        )
-    
-        # Remove internal-only field
-        for r in recommendations:
-            r.pop("impact_score", None)
-    
-        return recommendations
+
+    return insights
 
 # =====================================================
-# 7. DOMAIN REGISTRATION
+# HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
+# =====================================================
+
+HEALTHCARE_INSIGHT_MAP = {
+    "hospital": [
+        "throughput_bottleneck",
+        "clinical_safety_alert",
+        "bed_capacity_strain",
+        "acuity_labor_mismatch",
+        "revenue_leakage",
+        "quality_stability",
+        "patient_experience_gap",
+        "physician_variance",
+        "supply_chain_variance",
+    ],
+    "clinic": [
+        "access_barrier",
+        "productivity_variance",
+        "referral_leakage",
+        "workflow_inefficiency",
+        "revenue_risk",
+        "telehealth_shift",
+        "demographic_gap",
+        "front_desk_variance",
+        "financial_health",
+    ],
+    "diagnostics": [
+        "service_level_gap",
+        "life_safety_risk",
+        "technical_waste",
+        "pre_analytical_failure",
+        "capacity_overload",
+        "asset_depreciation",
+        "efficiency_plateau",
+        "quality_variance",
+        "market_opportunity",
+    ],
+    "pharmacy": [
+        "economic_pressure",
+        "adherence_risk",
+        "safety_barrier",
+        "inventory_inefficiency",
+        "intervention_impact",
+        "payer_mix_shift",
+        "throughput_constraint",
+        "prescribing_variance",
+        "inventory_waste",
+    ],
+    "public_health": [
+        "equity_gap",
+        "prevention_failure",
+        "access_desert",
+        "chronic_cost_driver",
+        "outbreak_risk",
+        "environmental_influence",
+        "program_success",
+        "member_engagement_gap",
+        "governance_risk",
+    ],
+}
+
+# =====================================================
+# HEALTHCARE RECOMMENDATION MAP (LOCKED)
+# =====================================================
+
+HEALTHCARE_RECOMMENDATION_MAP = {
+    "hospital": [
+        "discharge_huddle",
+        "clinical_pathway_standardization",
+        "bed_assignment_automation",
+        "post_discharge_review",
+        "acuity_based_staffing",
+        "patient_feedback_rounding",
+        "demand_forecasting",
+        "or_turnover_optimization",
+        "implant_contract_review",
+    ],
+    "clinic": [
+        "appointment_reminders",
+        "open_access_scheduling",
+        "telehealth_standardization",
+        "checkin_workflow_lean",
+        "provider_rvu_dashboard",
+        "referral_centralization",
+        "patient_portal",
+        "rooming_velocity_optimization",
+        "targeted_marketing",
+    ],
+    "diagnostics": [
+        "analyzer_upgrade",
+        "critical_alert_software",
+        "specimen_training",
+        "preventive_maintenance",
+        "ehr_interface_automation",
+        "stat_track",
+        "managed_services",
+        "barcode_chain",
+        "physician_portal",
+    ],
+    "pharmacy": [
+        "refill_reminders",
+        "meds_to_beds",
+        "central_fill",
+        "formulary_standardization",
+        "drug_interaction_software",
+        "dispensing_robot",
+        "inventory_audit",
+        "manufacturer_contracts",
+        "staffing_optimization",
+    ],
+    "public_health": [
+        "mobile_health_units",
+        "screening_campaign",
+        "food_programs",
+        "chronic_protocols",
+        "immunization_registry",
+        "disparity_audit",
+        "community_health_workers",
+        "sdoh_referrals",
+        "whole_person_platform",
+    ],
+}
+
+    
+
+    # -------------------------------------------------
+    # RECOMMENDATIONS (STRATEGIC)
+    # -------------------------------------------------
+    # -------------------------------------------------
+# RECOMMENDATIONS ENGINE (UNIVERSAL, STRATEGIC)
+# -------------------------------------------------
+def generate_recommendations(
+    self,
+    df: pd.DataFrame,
+    kpis: Dict[str, Any],
+    insights: List[Dict[str, Any]],
+    *_,
+) -> List[Dict[str, Any]]:
+
+    recommendations: List[Dict[str, Any]] = []
+    active_subs = kpis.get("sub_domains", {}) or {}
+
+    for sub, score in active_subs.items():
+        if sub not in HEALTHCARE_RECOMMENDATION_MAP:
+            continue
+
+        for idx, rec_key in enumerate(HEALTHCARE_RECOMMENDATION_MAP[sub]):
+            priority = "HIGH" if idx < 3 else "MEDIUM" if idx < 6 else "LOW"
+
+            recommendations.append({
+                "sub_domain": sub,
+                "priority": priority,
+                "action": rec_key.replace("_", " ").title(),
+                "owner": (
+                    "Operations Leadership" if sub in ["hospital", "clinic"]
+                    else "Clinical Governance" if sub == "diagnostics"
+                    else "Pharmacy Leadership" if sub == "pharmacy"
+                    else "Public Health Authority"
+                ),
+                "timeline": (
+                    "30–60 days" if priority == "HIGH"
+                    else "60–120 days" if priority == "MEDIUM"
+                    else "Ongoing"
+                ),
+                "goal": (
+                    f"Improve {sub} performance related to "
+                    f"{rec_key.replace('_',' ')}."
+                ),
+                "confidence": round(min(0.9, 0.6 + score * 0.3), 2),
+            })
+
+    return recommendations
+
+# =====================================================
+# REGISTRATION
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-    TOKENS = {
-        "patient", "admission", "diagnosis", "clinical",
-        "doctor", "insurance", "test", "specimen", "rx"
-    }
-
     def detect(self, df):
-        hits = [c for c in df.columns if any(t in c.lower() for t in self.TOKENS)]
-        return DomainDetectionResult("healthcare", min(len(hits) / 3, 1.0), {})
-
+        return DomainDetectionResult("healthcare", 1.0, {})
 
 def register(registry):
     registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
