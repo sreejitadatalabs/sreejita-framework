@@ -1,5 +1,8 @@
 from typing import Dict, Any, List
-
+from sreejita.core.capabilities import (
+    Capability,
+    get_capability_spec,
+)
 
 # =====================================================
 # EXECUTIVE RISK MODEL (CANONICAL)
@@ -82,7 +85,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     if not isinstance(kpis, dict) or "_kpi_capabilities" not in kpis:
         return []
-        
+
     cap_map = kpis.get("_kpi_capabilities", {})
     conf_map = kpis.get("_confidence", {})
     scored = []
@@ -93,7 +96,8 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
 
         confidence = conf_map.get(key, 0.6)
-        # Weight by inverse of required confidence (lower req = higher base importance)
+
+        # Capability-aware weighting (EXECUTIVE CONTRACT)
         priority = get_capability_spec(Capability(cap)).min_confidence
         score = abs(value) * confidence * (1 / priority)
 
