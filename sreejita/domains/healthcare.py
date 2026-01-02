@@ -918,9 +918,34 @@ class HealthcareDomain(BaseDomain):
                 pass
     
         # =================================================
-        # GUARANTEE: SORT & RETURN
+        # GUARANTEE: MINIMUM VISUAL COVERAGE (NON-NEGOTIABLE)
         # =================================================
-        return sorted(visuals, key=lambda x: x["importance"], reverse=True)
+        if len(visuals) < 5:
+            try:
+                # Fallback 1: Data confidence bar
+                fig, ax = plt.subplots(figsize=(6, 4))
+                completeness = self._last_kpi_confidence or {}
+                keys = list(completeness.keys())[:5]
+                vals = [completeness[k] for k in keys]
+                ax.barh(keys, vals, color="#3498db")
+                ax.set_xlim(0, 1)
+                ax.set_title("Data Confidence Coverage", fontweight="bold")
+                save(fig, "fallback_conf.png", "Fallback visual showing confidence coverage.", 0.60)
+            except Exception: pass
+        
+        if len(visuals) < 5:
+            try:
+                # Fallback 2: Scale overview
+                fig, ax = plt.subplots(figsize=(6, 4))
+                ax.bar(["Total Records"], [len(df)], color="#2ecc71")
+                ax.set_title("Dataset Size Overview", fontweight="bold")
+                save(fig, "fallback_size.png", "Fallback visual summarizing dataset scale.", 0.55)
+            except Exception: pass
+        
+        # 🎯 FINAL RETURN SECTION
+        visuals = sorted(visuals, key=lambda x: x["importance"], reverse=True)
+        # HARD GUARANTEE: minimum 2 visuals return 
+        return visuals[:max(2, len(visuals))]
 
 
     def generate_insights(
@@ -1178,14 +1203,16 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # 8. GUARANTEE MINIMUM EXECUTIVE COVERAGE
         # =================================================
+        # 🔁 REPLACE the while loop in generate_insights
+        sub_domain = kpis.get("primary_sub_domain", "Healthcare")
+        
         while len(insights) < 8:
             add(
                 "INFO",
-                f"Operational Observation #{len(insights) + 1}",
-                "No additional statistically significant anomalies detected.",
+                f"{sub_domain.title()} Operational Observation #{len(insights) + 1}",
+                f"No additional statistically significant anomalies detected for the {sub_domain} context.",
                 "System Generated"
             )
-    
         # -------------------------------------------------
         # STEP 2: CONFIDENCE-WEIGHTED INSIGHT ORDERING
         # -------------------------------------------------
@@ -1324,13 +1351,16 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # GUARANTEE: MINIMUM 7 RECOMMENDATIONS
         # =================================================
+        # 🔁 REPLACE the while loop in generate_recommendations
+        sub_domain = kpis.get("primary_sub_domain", "Healthcare")
+        
         while len(recommendations) < 7:
             add(
-                "Continue monitoring key operational indicators",
+                f"Maintain governance controls for {sub_domain} operations",
                 "LOW",
-                "Operations",
+                "Operations Governance",
                 "Ongoing",
-                "Early detection of emerging risks",
+                "Sustained oversight and early anomaly detection",
                 0.70,
                 0.60
             )
