@@ -112,22 +112,6 @@ def compute_kpi_confidence(kpis: Dict[str, Any], caps: List[str], total_records:
 
     return confidence
 
-    def infer_confidence(insight: Dict[str, Any]) -> float:
-        title = insight.get("title", "").lower()
-        if "cost" in title: return kpi_confidence.get("avg_unit_cost", 0.6)
-        if "flow" in title or "duration" in title: return kpi_confidence.get("avg_duration", 0.6)
-        if "quality" in title: return kpi_confidence.get("adverse_event_rate", 0.6)
-        if "variance" in title: return kpi_confidence.get("variance_score", 0.6)
-        if "data" in title: return kpi_confidence.get("data_completeness", 0.7)
-        return 0.65
-
-    def score(insight: Dict[str, Any]) -> float:
-        severity = SEVERITY_WEIGHT.get(insight.get("level", "INFO"), 1)
-        confidence = infer_confidence(insight)
-        executive_boost = 1.2 if insight.get("executive_summary_flag") else 1.0
-        return severity * confidence * executive_boost
-
-    return sorted(insights, key=score, reverse=True)
 # =====================================================
 # 3. FACT MAPPING (PURE DATA)
 # =====================================================
@@ -1217,7 +1201,7 @@ class HealthcareDomain(BaseDomain):
         # STEP 2: CONFIDENCE-WEIGHTED INSIGHT ORDERING
         # -------------------------------------------------
         kpi_conf = kpis.get("_confidence", {})
-        return confidence_weight_insights(insights=insights, kpi_confidence=kpi_conf)
+        return insights
 
     def generate_recommendations(
         self,
@@ -1231,7 +1215,7 @@ class HealthcareDomain(BaseDomain):
         insight_titles = {i.get("title") for i in (insights or [])}
     
         caps = set(kpis.get("capabilities", []))
-        sub_domain = kpis.get("sub_domain", "unknown")
+        sub_domain = kpis.get("primary_sub_domain", "healthcare")
     
         # Helper
         def add(
@@ -1248,7 +1232,7 @@ class HealthcareDomain(BaseDomain):
                 "priority": priority,
                 "owner": owner,
                 "timeline": timeline,
-                "expected_outcome": outcome,
+                "goal": outcome,
                 "confidence": round(float(confidence), 2),
                 "impact_score": round(float(impact), 2)
             })
