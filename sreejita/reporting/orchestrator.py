@@ -99,7 +99,7 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
     df = _read_tabular_file_safe(input_path)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CRITICAL)
+    # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(df)
@@ -130,23 +130,35 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         }
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION
+    # 4. DOMAIN EXECUTION (DICT-BASED CONTRACT)
     # -------------------------------------------------
     try:
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
         domain_result = engine.run(df)
-        kpis = domain_result.kpis
-        insights = domain_result.insights
 
+        if not isinstance(domain_result, dict):
+            raise RuntimeError(
+                f"Domain engine '{domain}' returned invalid result type: "
+                f"{type(domain_result)}"
+            )
+
+        kpis = domain_result.get("kpis", {})
+        insights = domain_result.get("insights", [])
+        raw_recs = domain_result.get("recommendations", [])
+        visuals = domain_result.get("visuals", [])
+
+        # Defensive recompute (preferred hooks)
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
             insights = engine.generate_insights(df, kpis)
 
         try:
-            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
+            raw_recs = engine.generate_recommendations(
+                df, kpis, insights, shape_info=shape_info
+            )
         except TypeError:
             raw_recs = engine.generate_recommendations(df, kpis, insights)
 
@@ -191,28 +203,20 @@ def generate_report_payload(input_path: str, config: Dict[str, Any]) -> Dict[str
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 6. VISUALS
+    # 6. VISUAL SAFETY & SORTING
     # -------------------------------------------------
-    visuals = []
-    if hasattr(engine, "generate_visuals"):
-        visuals_dir = run_dir / "visuals" / domain
-        visuals_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            generated = engine.generate_visuals(df, visuals_dir) or []
-        except Exception:
-            generated = []
+    visuals = [
+        v for v in visuals
+        if isinstance(v, dict) and Path(v.get("path", "")).exists()
+    ]
+    visuals = sorted(
+        visuals,
+        key=lambda x: x.get("importance", 0),
+        reverse=True
+    )
 
-        for v in generated:
-            p = Path(v.get("path", ""))
-            if p.exists():
-                visuals.append(v)
-        visuals = sorted(
-            visuals,
-            key=lambda x: x.get("importance", 0),
-            reverse=True
-        )
     # -------------------------------------------------
-    # 7. FINAL PAYLOAD (PDF-SAFE)
+    # 7. FINAL PAYLOAD (CANONICAL)
     # -------------------------------------------------
     return {
         domain: {
