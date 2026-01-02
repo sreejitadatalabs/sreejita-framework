@@ -1,13 +1,11 @@
 # sreejita/narrative/engine.py
 
 from dataclasses import dataclass
-from typing import Dict, Any, List
-
-from .benchmarks import HEALTHCARE_BENCHMARKS as B
+from typing import Dict, Any, List, Optional
 
 
 # =====================================================
-# OUTPUT MODELS
+# OUTPUT MODELS (STABLE)
 # =====================================================
 
 @dataclass
@@ -15,233 +13,118 @@ class ActionItem:
     action: str
     owner: str
     timeline: str
-    success_kpi: str
+    expected_outcome: str
 
 
 @dataclass
 class NarrativeResult:
     executive_summary: List[str]
-    financial_impact: List[str]
+    key_insights: List[str]
     risks: List[str]
     action_plan: List[ActionItem]
-    key_findings: List[Dict[str, Any]]
 
 
 # =====================================================
-# NARRATIVE ENGINE (DETERMINISTIC)
+# NARRATIVE ENGINE (DETERMINISTIC, FORMAT-ONLY)
 # =====================================================
 
-def build_narrative(
-    domain: str,
-    kpis: Dict[str, Any],
-    insights: List[Dict[str, Any]],
-    recommendations: List[Dict[str, Any]],
-) -> NarrativeResult:
+def build_narrative(executive_payload: Dict[str, Any]) -> NarrativeResult:
     """
-    Narrative Engine v6.3 — EXECUTIVE STABLE
+    Narrative Engine — FINAL UNIVERSAL VERSION
 
-    Design rules:
-    - Max 5 executive summary bullets
-    - No duplicate insight inflation
-    - Deterministic risk detection
-    - Zero dataset assumptions
+    RULES:
+    - Does NOT compute intelligence
+    - Does NOT read raw KPIs
+    - Does NOT apply benchmarks
+    - ONLY explains Executive Cognition output
     """
 
-    kpis = kpis or {}
-    insights = insights or []
-    recommendations = recommendations or []
+    if not isinstance(executive_payload, dict):
+        return NarrativeResult([], [], [], [])
 
+    # -------------------------------------------------
+    # EXECUTIVE SUMMARY (1-MINUTE)
+    # -------------------------------------------------
     summary: List[str] = []
-    financial: List[str] = []
+
+    brief = executive_payload.get("executive_brief")
+    if isinstance(brief, str) and brief.strip():
+        summary.append(brief.strip())
+
+    board = executive_payload.get("board_readiness", {})
+    if board:
+        summary.append(
+            f"Board Readiness Score: {board.get('score','-')} / 100 "
+            f"({board.get('band','Unknown')})."
+        )
+
+    # -------------------------------------------------
+    # KEY INSIGHTS (STRUCTURED)
+    # -------------------------------------------------
+    key_insights: List[str] = []
+    insight_block = executive_payload.get("insights", {})
+
+    for tier in ("strengths", "warnings", "risks"):
+        for ins in insight_block.get(tier, []):
+            so_what = ins.get("so_what")
+            if so_what:
+                key_insights.append(so_what)
+
+    # -------------------------------------------------
+    # RISKS (EXECUTIVE SAFE)
+    # -------------------------------------------------
     risks: List[str] = []
+
+    for ins in insight_block.get("risks", []):
+        title = ins.get("title")
+        if title:
+            risks.append(title)
+
+    if not risks and board.get("band") in ("LOW", "MODERATE"):
+        risks.append("Operational and governance risks require monitoring.")
+
+    # -------------------------------------------------
+    # ACTION PLAN (TOP 5 ONLY)
+    # -------------------------------------------------
     actions: List[ActionItem] = []
 
-    calculated_savings: str | None = None
-
-    # =================================================
-    # HEALTHCARE DOMAIN LOGIC
-    # =================================================
-    if domain == "healthcare":
-
-        # -------------------------------------------------
-        # 1. GOVERNANCE CONTEXT
-        # -------------------------------------------------
-        interpretation = kpis.get("board_confidence_interpretation")
-        if interpretation:
-            summary.append(f"GOVERNANCE ALERT: {interpretation}")
-
-        if kpis.get("dataset_shape") == "aggregated_operational":
-            summary.append(
-                "NOTICE: Assessment is based on aggregated operational data; conclusions reflect broad trends."
-            )
-
-        # -------------------------------------------------
-        # 2. OPERATIONAL IMPACT & PROJECTION
-        # -------------------------------------------------
-        avg_los = kpis.get("avg_los")
-        total_patients = kpis.get("total_patients")
-        cost_per_day = kpis.get("avg_cost_per_day", 2000)
-
-        if isinstance(avg_los, (int, float)) and avg_los > 0:
-            target = B["avg_los"]["good"]
-
-            if avg_los > target and isinstance(total_patients, (int, float)):
-                excess_days = avg_los - target
-                opportunity_loss = excess_days * cost_per_day * total_patients
-
-                if opportunity_loss >= 1_000_000:
-                    calculated_savings = f"${opportunity_loss / 1_000_000:.1f}M"
-                else:
-                    calculated_savings = f"${opportunity_loss / 1_000:.0f}K"
-
-                blocked_beds = (excess_days * total_patients) / 365
-
-                summary.append(
-                    f"FINANCIAL IMPACT: Excess LOS represents a {calculated_savings} opportunity and blocks ~{blocked_beds:.0f} beds annually."
-                )
-
-                one_day_value = total_patients * cost_per_day
-                one_day_str = (
-                    f"${one_day_value / 1_000_000:.1f}M"
-                    if one_day_value >= 1_000_000
-                    else f"${one_day_value / 1_000:.0f}K"
-                )
-                financial.append(
-                    f"Projection: Reducing average LOS by 1 day would recover approximately {one_day_str} annually."
-                )
-
-                if avg_los > B["avg_los"]["critical"]:
-                    summary.append(
-                        f"CRITICAL: Average LOS ({avg_los:.1f} days) exceeds crisis threshold."
-                    )
-                else:
-                    summary.append(
-                        f"Efficiency Gap: Average LOS ({avg_los:.1f} days) exceeds benchmark ({target} days)."
-                    )
-
-            else:
-                summary.append(
-                    f"Efficiency: LOS ({avg_los:.1f} days) performs within benchmark expectations."
-                )
-
-        # -------------------------------------------------
-        # 3. CLINICAL JUSTIFICATION BRIDGE
-        # -------------------------------------------------
-        readm = kpis.get("readmission_rate")
-        long_stay = kpis.get("long_stay_rate")
-
-        if isinstance(readm, (int, float)):
-            if readm > B["readmission_rate"]["critical"]:
-                summary.append(f"Quality Alert: Readmission rate ({readm:.1%}) is elevated.")
-                if isinstance(long_stay, (int, float)) and long_stay > 0.25:
-                    summary.append(
-                        "INEFFICIENCY SIGNAL: Extended LOS is not offset by improved outcomes."
-                    )
-            else:
-                if isinstance(long_stay, (int, float)) and long_stay > 0.25:
-                    summary.append(
-                        "CLINICAL CONTEXT: Extended LOS may be clinically justified as outcomes remain controlled."
-                    )
-        else:
-            risks.append(
-                "Outcome justification unavailable; efficiency vs quality trade-offs cannot be validated."
-            )
-
-        # -------------------------------------------------
-        # 4. FINANCIAL HEALTH
-        # -------------------------------------------------
-        avg_cost = kpis.get("avg_cost_per_patient")
-        benchmark_cost = kpis.get("benchmark_cost")
-
-        if isinstance(avg_cost, (int, float)) and isinstance(benchmark_cost, (int, float)):
-            if avg_cost > benchmark_cost:
-                diff = avg_cost - benchmark_cost
-                summary.append(
-                    f"Financial Alert: Cost per patient exceeds benchmark by ${diff:,.0f}."
-                )
-
-        # -------------------------------------------------
-        # 5. INSIGHT INTEGRATION (NON-DUPLICATIVE)
-        # -------------------------------------------------
-        for ins in insights:
-            if ins.get("executive_summary_flag"):
-                clean = ins.get("so_what", "").replace("<br/>", "; ")
-                summary.append(f"KEY DRIVER: {clean}")
-
-    # =================================================
-    # UNIVERSAL FALLBACKS
-    # =================================================
-    if not summary:
-        summary.append("Operational indicators are within expected thresholds.")
-
-    if not financial:
-        if isinstance(kpis.get("avg_cost_per_patient"), (int, float)):
-            financial.append(
-                f"Current cost structure is stable at ${kpis['avg_cost_per_patient']:,.0f} per patient."
-            )
-        else:
-            financial.append("No material financial risks detected.")
-
-    # =================================================
-    # RISK SYNTHESIS
-    # =================================================
-    if any("CRITICAL" in s for s in summary):
-        risks.append("Critical operational thresholds breached.")
-    if any("GOVERNANCE" in s for s in summary):
-        risks.append("Governance confidence degraded.")
-
-    # =================================================
-    # ACTION PLAN (TOP 5, IMPACT-AWARE)
-    # =================================================
-    for rec in recommendations[:5]:
-        if not isinstance(rec, dict):
-            continue
-
-        action_text = rec.get("action", "Review performance metrics")
-        outcome = rec.get("expected_outcome", "Improve KPI")
-        timeline = rec.get("timeline", "")
-
-        if calculated_savings and any(
-            k in action_text.lower() for k in ("los", "discharge", "pathway")
-        ):
-            outcome = f"{outcome} (Est. Impact: {calculated_savings})"
-
-        prefix = "⚡ [90-DAY FOCUS] " if any(
-            x in timeline.lower() for x in ("30", "60", "90", "immediate", "q1")
-        ) else ""
-
+    for rec in executive_payload.get("recommendations", [])[:5]:
         actions.append(
             ActionItem(
-                action=f"{prefix}{action_text}",
-                owner=rec.get("owner", "Operations"),
-                timeline=timeline,
-                success_kpi=outcome,
+                action=rec.get("action", "Review performance"),
+                owner=rec.get("owner", "Management"),
+                timeline=rec.get("timeline", "TBD"),
+                expected_outcome=rec.get("goal", "Improve outcomes"),
             )
         )
 
     if not actions:
         actions.append(
             ActionItem(
-                "Monitor key performance indicators",
-                "Operations",
-                "Ongoing",
-                "Sustained stability",
+                action="Continue monitoring key indicators",
+                owner="Leadership",
+                timeline="Ongoing",
+                expected_outcome="Sustained performance stability",
             )
         )
 
-    # =================================================
-    # FINAL EXECUTIVE DISCIPLINE
-    # =================================================
-    summary = list(dict.fromkeys(summary))[:5]
-
+    # -------------------------------------------------
+    # FINAL DISCIPLINE
+    # -------------------------------------------------
     return NarrativeResult(
-        executive_summary=summary,
-        financial_impact=financial,
-        risks=list(dict.fromkeys(risks)),
+        executive_summary=summary[:3],     # keep tight
+        key_insights=key_insights[:7],
+        risks=risks[:5],
         action_plan=actions,
-        key_findings=insights,
     )
 
 
-def generate_narrative(*args, **kwargs):
-    return build_narrative(*args, **kwargs)
+# =====================================================
+# BACKWARD-COMPATIBILITY ALIAS
+# =====================================================
+
+def generate_narrative(executive_payload: Dict[str, Any]):
+    """
+    Legacy alias — DO NOT USE for new logic.
+    """
+    return build_narrative(executive_payload)
