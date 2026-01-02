@@ -49,10 +49,18 @@ class HybridReport(BaseReport):
             primary_domain = self._sort_domains(domain_results.keys())[0]
             primary = domain_results.get(primary_domain)
 
+            # HARD SAFETY — recover instead of crash
             if not isinstance(primary, dict):
-                raise RuntimeError(
-                    f"Primary domain payload corrupted: {type(primary)}"
-                )
+                # Attempt unwrap if orchestrator returned nested payload
+                if isinstance(domain_results, dict) and len(domain_results) == 1:
+                    candidate = next(iter(domain_results.values()))
+                    if isinstance(candidate, dict):
+                        primary = candidate
+                    else:
+                        primary = {}
+                else:
+                    primary = {}
+
 
             executive = primary.get("executive", {}) or {}
 
