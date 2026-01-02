@@ -17,6 +17,7 @@ class HybridReport(BaseReport):
     Responsibilities:
     - Render executive-ready Markdown
     - Enforce narrative ordering
+    - Adapt orchestrator output to reporting layers
     - NEVER compute intelligence
     """
 
@@ -32,6 +33,9 @@ class HybridReport(BaseReport):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
+        if not isinstance(domain_results, dict):
+            raise RuntimeError("HybridReport.build expected domain_results dict")
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -41,30 +45,25 @@ class HybridReport(BaseReport):
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
 
-            # Primary domain drives executive cognition
-            if not isinstance(domain_results, dict):
-                raise RuntimeError("HybridReport.build expected domain_results dict")
-            
+            # ---------------- PRIMARY DOMAIN ----------------
             primary_domain = self._sort_domains(domain_results.keys())[0]
             primary = domain_results.get(primary_domain)
-            
+
             if not isinstance(primary, dict):
                 raise RuntimeError(
                     f"Primary domain payload corrupted: {type(primary)}"
                 )
-            
-            executive = primary.get("executive", {})
 
+            executive = primary.get("executive", {}) or {}
 
             self._write_executive_brief(f, executive)
             self._write_board_readiness(f, executive)
 
+            # ---------------- DOMAIN SECTIONS ----------------
             for domain in self._sort_domains(domain_results.keys()):
-                self._write_domain_section(
-                    f,
-                    domain,
-                    domain_results.get(domain, {}),
-                )
+                payload = domain_results.get(domain, {})
+                if isinstance(payload, dict):
+                    self._write_domain_section(f, domain, payload)
 
             self._write_footer(f)
 
@@ -87,7 +86,7 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _write_board_readiness(self, f, executive: Dict[str, Any]):
         br = executive.get("board_readiness")
-        if not br:
+        if not isinstance(br, dict):
             return
 
         f.write("## Board Readiness Assessment\n\n")
@@ -126,10 +125,14 @@ class HybridReport(BaseReport):
         if visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
-                f.write(f"![{vis.get('caption')}]({vis.get('path')})\n")
+                path = vis.get("path")
+                if not path:
+                    continue
+
+                f.write(f"![{vis.get('caption','Visual')}]({path})\n")
                 conf = int(vis.get("confidence", 0) * 100)
                 f.write(
-                    f"> {vis.get('caption')} "
+                    f"> {vis.get('caption','')} "
                     f"(Confidence: {conf}%)\n\n"
                 )
 
@@ -139,7 +142,7 @@ class HybridReport(BaseReport):
             for ins in insights[:5]:
                 f.write(
                     f"- **{ins.get('level','INFO')}** — "
-                    f"{ins.get('title')}: {ins.get('so_what')}\n"
+                    f"{ins.get('title','')}: {ins.get('so_what','')}\n"
                 )
             f.write("\n")
 
@@ -148,9 +151,9 @@ class HybridReport(BaseReport):
             f.write("### Recommendations\n")
             for r in recs[:5]:
                 f.write(
-                    f"- **{r.get('priority')}** — {r.get('action')} "
-                    f"(Owner: {r.get('owner')}, "
-                    f"Timeline: {r.get('timeline')})\n"
+                    f"- **{r.get('priority','')}** — {r.get('action','')} "
+                    f"(Owner: {r.get('owner','-')}, "
+                    f"Timeline: {r.get('timeline','-')})\n"
                 )
             f.write("\n")
 
@@ -181,7 +184,10 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _sort_domains(self, domains):
         priority = ["healthcare", "finance", "retail", "marketing"]
-        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
+        return sorted(
+            domains,
+            key=lambda d: priority.index(d) if d in priority else 99
+        )
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
@@ -196,7 +202,7 @@ class HybridReport(BaseReport):
 
 
 # =====================================================
-# PUBLIC ENTRY POINT
+# PUBLIC ENTRY POINT (USED BY CLI / UI)
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -204,12 +210,13 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     Thin glue layer.
     Intelligence is computed by orchestrator.
     """
+
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # ✅ AUTHORITATIVE DOMAIN RESULTS
+    # 🔒 AUTHORITATIVE DOMAIN RESULTS
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
@@ -219,13 +226,13 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         metadata=config.get("metadata"),
     )
 
-    # ✅ SAFELY EXTRACT PRIMARY DOMAIN
+    # 🔒 SAFE PRIMARY DOMAIN EXTRACTION
     primary_domain = engine._sort_domains(domain_results.keys())[0]
-    primary = domain_results.get(primary_domain, {})
+    primary = domain_results.get(primary_domain, {}) or {}
 
     return {
         "markdown": str(md_path),
-        "domain_results": domain_results,   # 🔒 KEEP FULL STRUCTURE
+        "domain_results": domain_results,   # KEEP FULL STRUCTURE
         "primary_domain": primary_domain,
         "executive": primary.get("executive", {}),
         "visuals": primary.get("visuals", []),
@@ -233,4 +240,3 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "recommendations": primary.get("recommendations", []),
         "run_dir": str(run_dir),
     }
-
