@@ -78,58 +78,35 @@ def rank_recommendations(
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Selects 3–5 KPIs by executive relevance.
+    Selects 3–5 KPIs based on capability priority, confidence, and relevance.
     """
-
     if not isinstance(kpis, dict):
         return []
 
-    preferred_order = [
-        "board_confidence_score",
-        "maturity_level",
-        "total_volume",
-        "total_patients",
-        "total_cost",
-        "avg_cost_per_patient",
-        "avg_duration",
-        "avg_los",
-        "readmission_rate",
-        "variance_score",
-    ]
+    cap_map = kpis.get("_kpi_capabilities", {})
+    conf_map = kpis.get("_confidence", {})
+    scored = []
 
-    selected: List[Dict[str, Any]] = []
+    for key, cap in cap_map.items():
+        value = kpis.get(key)
+        if value is None or not isinstance(value, (int, float)):
+            continue
 
-    for key in preferred_order:
-        if key in kpis and kpis[key] is not None:
-            selected.append({
-                "key": key,
-                "name": key.replace("_", " ").title(),
-                "value": kpis[key],
-            })
-        if len(selected) >= 5:
-            break
+        confidence = conf_map.get(key, 0.6)
+        # Weight by inverse of required confidence (lower req = higher base importance)
+        priority = get_capability_spec(Capability(cap)).min_confidence
+        score = abs(value) * confidence * (1 / priority)
 
-    # Fallback: magnitude-based selection
-    if len(selected) < 3:
-        numeric = [
-            (k, v) for k, v in kpis.items()
-            if isinstance(v, (int, float))
-        ]
-        numeric.sort(key=lambda x: abs(x[1]), reverse=True)
+        scored.append({
+            "key": key,
+            "name": key.replace("_", " ").title(),
+            "value": value,
+            "confidence": round(confidence, 2),
+            "score": score,
+        })
 
-        existing = {x["key"] for x in selected}
-        for k, v in numeric:
-            if len(selected) >= 5:
-                break
-            if k not in existing:
-                selected.append({
-                    "key": k,
-                    "name": k.replace("_", " ").title(),
-                    "value": v,
-                })
-
-    return selected[:5]
-
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:5]
 
 # =====================================================
 # INSIGHT PRIORITIZATION & CONFIDENCE WEIGHTING
@@ -283,6 +260,8 @@ def compute_board_readiness_score(
     final = round(
         max(0, min(100, kpi_score + insight_score + coverage_score - penalty))
     )
+    if kpis.get("data_completeness", 0) < 0.7:
+        final = min(final, 60)
 
     return {
         "score": final,
@@ -368,6 +347,6 @@ def build_executive_payload(
         "board_readiness": compute_board_readiness_score(kpis, insights),
         "_executive": {
             "primary_kpis": primary_kpis,
-            "sub_domain": kpis.get("sub_domain"),
+            "sub_domain": kpis.get("primary_sub_domain"),
         },
     }
