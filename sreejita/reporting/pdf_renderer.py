@@ -25,6 +25,10 @@ from reportlab.lib import utils
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Aligns PDF renderer with orchestrator + executive_cognition output.
+    Ensures nested dictionaries are flattened correctly for the renderer.
+    """
     if not isinstance(payload, dict):
         payload = {}
 
@@ -146,7 +150,7 @@ class ExecutivePDFRenderer:
         styles = getSampleStyleSheet()
         story: List[Any] = []
     
-        # ---------- SAFE CUSTOM STYLES ----------
+        # ---------- SAFE CUSTOM STYLES (Prevents KeyError in Streamlit) ----------
         if "SR_Title" not in styles:
             styles.add(ParagraphStyle(
                 "SR_Title", fontSize=22, alignment=TA_CENTER,
@@ -182,7 +186,7 @@ class ExecutivePDFRenderer:
             story.append(Spacer(1, 12))
             story.append(Paragraph("Executive Brief", styles["SR_Section"]))
             story.append(Paragraph(
-                snapshot.get("overall_risk", ""),
+                snapshot.get("overall_risk", "Risk level not determined."),
                 styles["SR_Body"],
             ))
     
@@ -192,9 +196,9 @@ class ExecutivePDFRenderer:
             bg_styles = []
     
             for idx, k in enumerate(payload["primary_kpis"][:5], start=1):
-                conf = k.get("confidence")
+                conf = k.get("confidence", 0)
                 rows.append([
-                    k.get("name"),
+                    k.get("name", "Unknown Metric"),
                     format_value(k.get("value")),
                     f"{confidence_badge(conf)} ({int(conf*100)}%)",
                 ])
@@ -216,35 +220,48 @@ class ExecutivePDFRenderer:
             story.append(table)
     
         # =====================================================
-        # PAGE 2+ — VISUAL EVIDENCE (2 PER PAGE)
+        # PAGE 2+ — VISUAL EVIDENCE
         # =====================================================
-        visuals = payload.get("visuals", [])
-        visual_pages = [visuals[i:i+2] for i in range(0, len(visuals), 2)]
-    
-        for page_idx, pair in enumerate(visual_pages):
-            story.append(PageBreak())
-            story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
-    
-            for v in pair:
-                p = Path(v.get("path", ""))
-                if p.exists():
-                    img = utils.ImageReader(str(p))
-                    iw, ih = img.getSize()
-                    w = 6 * inch
-                    h = min(w * ih / iw, 4 * inch)
-                    story.append(Image(str(p), width=w, height=h))
-                    if v.get("caption"):
-                        story.append(Paragraph(v["caption"], styles["SR_Body"]))
-                    story.append(Spacer(1, 12))
+        story.append(PageBreak())
+        story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
+
+        # 🛡️ CHANGE 5 — PDF SIDE (ONE-LINE SAFETY NET)
+        if not payload["visuals"]:
+            story.append(Paragraph(
+                "No statistically reliable visuals could be generated. "
+                "This typically indicates sparse or low-confidence data.",
+                styles["SR_Body"]
+            ))
+        else:
+            visuals = payload.get("visuals", [])
+            # Chunking visuals 2 per page
+            visual_pages = [visuals[i:i+2] for i in range(0, len(visuals), 2)]
+        
+            for page_idx, pair in enumerate(visual_pages):
+                if page_idx > 0: # Already added first page break/title above
+                    story.append(PageBreak())
+                    story.append(Paragraph("Visual Evidence (Cont.)", styles["SR_Section"]))
+        
+                for v in pair:
+                    p = Path(v.get("path", ""))
+                    if p.exists():
+                        img = utils.ImageReader(str(p))
+                        iw, ih = img.getSize()
+                        w = 6 * inch
+                        h = min(w * ih / iw, 4 * inch)
+                        story.append(Image(str(p), width=w, height=h))
+                        if v.get("caption"):
+                            story.append(Paragraph(v["caption"], styles["SR_Body"]))
+                        story.append(Spacer(1, 12))
     
         # =====================================================
-        # INSIGHTS (AFTER VISUALS)
+        # INSIGHTS
         # =====================================================
         if payload["insights"]:
             story.append(PageBreak())
             story.append(Paragraph("Key Insights", styles["SR_Section"]))
     
-            for ins in payload["insights"][:5]:
+            for ins in payload["insights"][:8]:
                 story.append(Paragraph(
                     f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
                     styles["SR_Body"],
@@ -253,13 +270,13 @@ class ExecutivePDFRenderer:
                 story.append(Spacer(1, 8))
     
         # =====================================================
-        # RECOMMENDATIONS (FLOW-BASED)
+        # RECOMMENDATIONS
         # =====================================================
         if payload["recommendations"]:
-            story.append(Spacer(1, 14))
+            story.append(PageBreak())
             story.append(Paragraph("Recommendations", styles["SR_Section"]))
     
-            for rec in payload["recommendations"][:5]:
+            for rec in payload["recommendations"][:7]:
                 story.append(Paragraph(
                     f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
                     styles["SR_Body"],
