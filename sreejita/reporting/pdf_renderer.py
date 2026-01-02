@@ -206,8 +206,9 @@ class ExecutivePDFRenderer:
                 rows.append([
                     k.get("name"),
                     format_value(k.get("value")),
-                    confidence_badge(conf),
+                    f"{confidence_badge(conf)} ({int(conf*100)}%)",
                 ])
+                
                 bg_styles.append((
                     "BACKGROUND",
                     (0, idx),
