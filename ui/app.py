@@ -36,6 +36,7 @@ enable_narrative = st.checkbox(
     "🤖 Enable AI Narrative",
     value=False,
 )
+st.caption("AI narratives are optional and never replace deterministic intelligence.")
 
 provider = st.selectbox(
     "AI Provider",
