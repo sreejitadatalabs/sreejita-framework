@@ -931,7 +931,7 @@ class HealthcareDomain(BaseDomain):
     ) -> List[Dict[str, Any]]:
         insights: List[Dict[str, Any]] = []
     
-        sub_domain = kpis.get("sub_domain", "unknown")
+        sub_domain = kpis.get("primary_sub_domain", "unknown")
         caps = set(kpis.get("capabilities", []))
     
         def add(level, title, so_what, source="System Analysis", executive=False):
