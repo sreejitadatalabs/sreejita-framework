@@ -1,162 +1,150 @@
 # sreejita/narrative/benchmarks.py
 
 """
-HEALTHCARE BENCHMARKS & THRESHOLDS (AUTHORITATIVE)
---------------------------------------------------
-This file defines "What Good Looks Like" for the Healthcare domain.
+UNIVERSAL EXECUTIVE BENCHMARKS & GUARDRAILS
+==========================================
 
-It contains:
-1. BENCHMARKS        → Narrative context (targets, sources, units)
-2. THRESHOLDS        → Flat logic thresholds (alerts & scoring)
-3. EXTERNAL LIMITS   → Governance caps to prevent internal bias
-4. ACCESS HELPERS    → Canonical, safe access for the entire framework
+This file defines UNIVERSAL, DOMAIN-AGNOSTIC benchmarks
+used only for EXECUTIVE NARRATIVE CONTEXT.
+
+RULES:
+- No domain-specific KPIs
+- No scoring logic
+- No hard dependencies
+- Safe for all domains (Healthcare, Retail, Finance, HR, etc.)
+
+This file answers:
+→ “What generally looks good / risky at an executive level?”
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 # =====================================================
-# 1. NARRATIVE BENCHMARKS (Context & Sources)
+# 1. CAPABILITY-LEVEL NARRATIVE BENCHMARKS
 # =====================================================
 
-HEALTHCARE_BENCHMARKS: Dict[str, Dict[str, Any]] = {
-    # --- Operational Efficiency ---
-    "avg_los": {
-        "good": 5.0,
-        "warning": 7.0,
-        "critical": 9.0,
-        "unit": "days",
-        "source": "CMS Inpatient Norms",
+CAPABILITY_BENCHMARKS: Dict[str, Dict[str, Any]] = {
+    "VOLUME": {
+        "low": "Low activity volume relative to historical norms.",
+        "normal": "Activity volume within expected operating range.",
+        "high": "Sustained high activity volume requiring capacity review.",
     },
-
-    # --- Clinical Quality ---
-    "readmission_rate": {
-        "good": 0.10,
-        "warning": 0.15,
-        "critical": 0.20,
-        "unit": "rate",
-        "source": "CMS Hospital Compare",
+    "TIME_FLOW": {
+        "good": "Process cycle times are within acceptable ranges.",
+        "warning": "Process delays indicate emerging flow constraints.",
+        "critical": "Sustained delays pose operational risk.",
     },
-
-    # --- Capacity Management ---
-    "bed_turnover_index": {
-        "good": 0.20,
-        "warning": 0.14,
-        "critical": 0.10,
-        "unit": "index",
-        "source": "Operational Efficiency Standard",
+    "COST": {
+        "efficient": "Costs appear aligned with delivered value.",
+        "warning": "Cost growth may outpace output or outcomes.",
+        "critical": "Cost structure presents material financial risk.",
     },
-
-    # --- Clinical Variation ---
-    "provider_variance_score": {
-        "good": 0.20,
-        "warning": 0.35,
-        "critical": 0.50,
-        "unit": "cv",
-        "source": "Clinical Variation Standard",
+    "QUALITY": {
+        "stable": "Quality indicators are stable and controlled.",
+        "warning": "Early signs of quality degradation detected.",
+        "critical": "Quality performance requires immediate attention.",
     },
-
-    # --- Financial Health ---
-    "cost_per_patient": {
-        "warning_multiplier": 1.2,
-        "critical_multiplier": 1.5,
-        "unit": "currency",
-        "source": "Internal Financial Baseline",
+    "VARIANCE": {
+        "low": "Performance variation is well-controlled.",
+        "high": "Significant variance suggests standardization gaps.",
+    },
+    "ACCESS": {
+        "adequate": "Access levels appear sufficient for demand.",
+        "limited": "Access constraints may affect outcomes or experience.",
     },
 }
 
 
 # =====================================================
-# 2. LOGIC THRESHOLDS (Scoring & Alerts)
+# 2. EXECUTIVE CONFIDENCE BANDS (UNIVERSAL)
 # =====================================================
 
-HEALTHCARE_THRESHOLDS: Dict[str, float] = {
-    # Operations
-    "avg_los_warning": 6.0,
-    "avg_los_critical": 7.0,
-    "long_stay_rate_warning": 0.20,
-    "long_stay_rate_critical": 0.30,
+CONFIDENCE_BANDS = [
+    (0.85, "HIGH", "🟢"),
+    (0.70, "MEDIUM", "🟡"),
+    (0.00, "LOW", "🔴"),
+]
 
-    # Clinical
-    "readmission_warning": 0.15,
-    "readmission_critical": 0.18,
 
-    # Financial
-    "cost_multiplier_warning": 1.2,
-    "cost_multiplier_critical": 1.5,
+def classify_confidence(confidence: Optional[float]) -> Dict[str, Any]:
+    """
+    Converts a numeric confidence (0–1) into
+    an executive-friendly label and icon.
+    """
+    if confidence is None:
+        return {"label": "UNKNOWN", "icon": "⚪"}
 
-    # Workforce / Capacity
-    "provider_variance_warning": 0.40,
-    "weekend_rate_warning": 0.35,
+    for threshold, label, icon in CONFIDENCE_BANDS:
+        if confidence >= threshold:
+            return {
+                "label": label,
+                "icon": icon,
+                "value": round(confidence, 2),
+            }
+
+    return {"label": "LOW", "icon": "🔴", "value": round(confidence, 2)}
+
+
+# =====================================================
+# 3. GOVERNANCE GUARDRAILS (UNIVERSAL SAFETY)
+# =====================================================
+
+GOVERNANCE_LIMITS: Dict[str, Dict[str, Any]] = {
+    "COST": {
+        "soft_cap_multiplier": 1.3,
+        "hard_cap_multiplier": 2.0,
+        "source": "Executive financial governance heuristic",
+    },
+    "TIME_FLOW": {
+        "soft_cap_multiplier": 1.5,
+        "hard_cap_multiplier": 2.5,
+        "source": "Operational resilience guideline",
+    },
 }
 
 
-# =====================================================
-# 3. EXTERNAL GOVERNANCE LIMITS (Reality Anchors)
-# =====================================================
-
-HEALTHCARE_EXTERNAL_LIMITS: Dict[str, Dict[str, Any]] = {
-    "avg_cost_per_patient": {
-        "soft_cap": 12000,
-        "hard_cap": 20000,
-        "source": "CMS / OECD blended heuristic",
-    },
-    "avg_los": {
-        "soft_cap": 5.0,
-        "hard_cap": 10.0,
-        "source": "Standard Acute Care Norms",
-    },
-}
-
-
-# =====================================================
-# 4. ACCESS HELPERS (CANONICAL API)
-# =====================================================
-
-def get_benchmark(metric: str) -> Dict[str, Any]:
+def apply_governance_cap(
+    capability: str,
+    baseline: Optional[float],
+    observed: Optional[float],
+) -> Optional[float]:
     """
-    Returns narrative benchmark metadata for a metric.
+    Applies a universal governance cap to prevent
+    narrative distortion due to extreme values.
     """
-    return HEALTHCARE_BENCHMARKS.get(metric, {})
+    if baseline is None or observed is None:
+        return observed
 
-
-def get_threshold(key: str, default: float = None) -> float:
-    """
-    Safe accessor for flat logic thresholds.
-    """
-    return HEALTHCARE_THRESHOLDS.get(key, default)
-
-
-def apply_external_limits(metric: str, value: float) -> float:
-    """
-    Enforces governance caps on KPI values to prevent internal inflation.
-    """
-    if value is None:
-        return value
-
-    limits = HEALTHCARE_EXTERNAL_LIMITS.get(metric)
+    limits = GOVERNANCE_LIMITS.get(capability)
     if not limits:
-        return value
+        return observed
 
-    soft = limits.get("soft_cap")
-    hard = limits.get("hard_cap")
+    hard = limits.get("hard_cap_multiplier")
+    if hard:
+        return min(observed, baseline * hard)
 
-    if hard is not None:
-        value = min(value, hard)
-    elif soft is not None:
-        value = min(value, soft)
-
-    return value
-
-
-def explain_external_limit(metric: str) -> str:
-    """
-    Returns governance source for an external limit, if any.
-    """
-    limit = HEALTHCARE_EXTERNAL_LIMITS.get(metric, {})
-    return limit.get("source", "")
+    return observed
 
 
 # =====================================================
-# END OF FILE — AUTHORITATIVE TRUTH LAYER
+# 4. SAFE ACCESS HELPERS (CANONICAL API)
+# =====================================================
+
+def get_capability_benchmark(capability: str) -> Dict[str, str]:
+    """
+    Returns narrative benchmark text for a capability.
+    """
+    return CAPABILITY_BENCHMARKS.get(capability, {})
+
+
+def get_governance_source(capability: str) -> str:
+    """
+    Returns governance reference source for a capability.
+    """
+    return GOVERNANCE_LIMITS.get(capability, {}).get("source", "")
+
+
+# =====================================================
+# END OF FILE — UNIVERSAL EXECUTIVE CONTEXT LAYER
 # =====================================================
