@@ -306,6 +306,10 @@ class HealthcareDomain(BaseDomain):
         active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
         primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
         is_mixed = len(active_subs) > 1
+
+        if (self.cols.get("los") and self.cols.get("facility") and len(df) >= 50):
+            primary_sub = "hospital"
+            is_mixed = False
     
         kpis: Dict[str, Any] = {
             "primary_sub_domain": "mixed" if is_mixed else primary_sub,
