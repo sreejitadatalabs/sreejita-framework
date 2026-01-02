@@ -8,7 +8,7 @@ from sreejita.core.capabilities import Capability
 
 
 # =====================================================
-# RISK BANDS (EXECUTIVE SAFE)
+# EXECUTIVE RISK BANDS (SAFE, BOARD-LEGIBLE)
 # =====================================================
 
 EXECUTIVE_RISK_BANDS = [
@@ -28,71 +28,69 @@ def derive_risk_level(score: int) -> Dict[str, Any]:
                 "label": label,
                 "icon": icon,
                 "score": score,
-                "display": f"{icon} {label} (Score: {score} / 100)",
+                "display": f"{icon} {label} (Score: {score}/100)",
             }
 
     return {
         "label": "CRITICAL",
         "icon": "🔴",
         "score": score,
-        "display": f"🔴 CRITICAL (Score: {score} / 100)",
+        "display": f"🔴 CRITICAL (Score: {score}/100)",
     }
 
 
 # =====================================================
-# KPI SELECTION (MAX 9, CONFIDENCE-DRIVEN)
+# EXECUTIVE KPI SELECTION (MAX 9, CAPABILITY-AWARE)
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
-    cap_map = kpis.get("_kpi_capabilities", {})
-    conf_map = kpis.get("_confidence", {})
+    cap_map = kpis.get("_kpi_capabilities", {}) or {}
+    conf_map = kpis.get("_confidence", {}) or {}
 
     ranked: List[Dict[str, Any]] = []
 
-    for key, cap in cap_map.items():
+    for key, capability in cap_map.items():
         value = kpis.get(key)
 
         if not isinstance(value, (int, float)):
             continue
 
-        confidence = conf_map.get(key, 0.6)
+        confidence = float(conf_map.get(key, 0.6))
 
-        # Capability importance weights (NOT magnitude-based)
-        cap_weight = {
-            Capability.QUALITY.value: 1.3,
-            Capability.TIME_FLOW.value: 1.2,
-            Capability.COST.value: 1.1,
-            Capability.VOLUME.value: 1.0,
-            Capability.VARIANCE.value: 1.0,
-            Capability.ACCESS.value: 1.0,
-        }.get(cap, 1.0)
+        capability_weight = {
+            Capability.QUALITY.value: 1.30,
+            Capability.TIME_FLOW.value: 1.20,
+            Capability.COST.value: 1.10,
+            Capability.VOLUME.value: 1.00,
+            Capability.VARIANCE.value: 1.00,
+            Capability.ACCESS.value: 1.00,
+        }.get(capability, 1.0)
 
-        score = confidence * cap_weight
+        score = confidence * capability_weight
 
         ranked.append({
             "key": key,
             "name": key.replace("_", " ").title(),
             "value": round(value, 2),
-            "capability": cap,
+            "capability": capability,
             "confidence": round(confidence, 2),
-            "score": round(score, 3),
+            "rank_score": round(score, 3),
         })
 
-    ranked.sort(key=lambda x: x["score"], reverse=True)
-    return ranked[:9]   # 🔒 HARD MAX
+    ranked.sort(key=lambda x: x["rank_score"], reverse=True)
+
+    # 🔒 HARD RULE: max 9 KPIs
+    return ranked[:9]
 
 
 # =====================================================
-# INSIGHT STRUCTURING (EXECUTIVE LOGIC)
+# INSIGHT STRUCTURING (EXECUTIVE FLOW)
 # =====================================================
 
-def structure_insights(
-    insights: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-
+def structure_insights(insights: List[Dict[str, Any]]) -> Dict[str, Any]:
     strengths = [i for i in insights if i.get("level") == "STRENGTH"][:2]
-    warnings = [i for i in insights if i.get("level") == "WARNING"][:2]
-    risks = [i for i in insights if i.get("level") == "RISK"][:1]
+    warnings  = [i for i in insights if i.get("level") == "WARNING"][:2]
+    risks     = [i for i in insights if i.get("level") == "RISK"][:1]
 
     avg_conf = round(
         sum(i.get("confidence", 0.7) for i in insights) / max(len(insights), 1),
@@ -102,8 +100,8 @@ def structure_insights(
     composite = {
         "title": "Overall Executive Assessment",
         "summary": (
-            "Performance shows identifiable strengths, with "
-            "manageable risk areas requiring focused leadership attention."
+            "Operational performance demonstrates identifiable strengths, "
+            "with targeted risks requiring focused leadership action."
         ),
         "confidence": avg_conf,
     }
@@ -117,7 +115,7 @@ def structure_insights(
 
 
 # =====================================================
-# BOARD READINESS SCORE (UNIVERSAL & HONEST)
+# BOARD READINESS SCORE (HONEST & GOVERNED)
 # =====================================================
 
 def compute_board_readiness_score(
@@ -125,31 +123,32 @@ def compute_board_readiness_score(
     insights: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
 
-    confidence_map = kpis.get("_confidence", {})
+    conf_map = kpis.get("_confidence", {}) or {}
     confident_kpis = [
-        v for v in confidence_map.values()
+        v for v in conf_map.values()
         if isinstance(v, (int, float)) and v >= 0.6
     ]
 
     # Evidence strength (0–45)
     evidence_score = (len(confident_kpis) / 9) * 45
 
-    # Coverage (0–25)
-    coverage_keys = ["record_count", "data_completeness", "time_coverage_days"]
-    coverage = sum(1 for k in coverage_keys if k in kpis and kpis[k] is not None)
-    coverage_score = (coverage / len(coverage_keys)) * 25
+    # Coverage score (0–25)
+    coverage_keys = ["total_volume", "data_completeness"]
+    coverage_hits = sum(
+        1 for k in coverage_keys
+        if isinstance(kpis.get(k), (int, float))
+    )
+    coverage_score = (coverage_hits / len(coverage_keys)) * 25
 
     # Risk penalty
-    risk_penalty = sum(
-        10 for i in insights if i.get("level") == "RISK"
-    )
+    risk_penalty = sum(10 for i in insights if i.get("level") == "RISK")
 
     score = round(
         max(0, min(100, evidence_score + coverage_score + 30 - risk_penalty))
     )
 
-    # Hard cap for weak data
-    if kpis.get("data_completeness", 1) < 0.7:
+    # Hard safety cap for weak data
+    if isinstance(kpis.get("data_completeness"), (int, float)) and kpis["data_completeness"] < 0.7:
         score = min(score, 60)
 
     return {
@@ -164,7 +163,7 @@ def compute_board_readiness_score(
 
 
 # =====================================================
-# 1-MINUTE EXECUTIVE BRIEF (FINAL)
+# 1-MINUTE EXECUTIVE BRIEF (CEO LEGIBLE)
 # =====================================================
 
 def build_executive_brief(
@@ -175,23 +174,25 @@ def build_executive_brief(
 
     risk = derive_risk_level(board_score)
 
-    brief = [
-        f"This {sub_domain.replace('_',' ')} performance review is assessed as "
+    brief: List[str] = []
+
+    brief.append(
+        f"This {sub_domain.replace('_', ' ')} performance review is assessed as "
         f"{risk['label'].lower()}, with a Board Readiness Score of "
         f"{risk['score']} out of 100."
-    ]
+    )
 
-    if insight_block["strengths"]:
+    if insight_block.get("strengths"):
         brief.append(
-            f"Positive signals include "
+            f"Key positive signal includes "
             f"{insight_block['strengths'][0]['title'].lower()}."
         )
 
-    if insight_block["risks"]:
+    if insight_block.get("risks"):
         brief.append(
             f"The primary risk relates to "
             f"{insight_block['risks'][0]['title'].lower()}, "
-            "which requires timely leadership action."
+            "requiring timely leadership intervention."
         )
 
     brief.append(
@@ -203,14 +204,14 @@ def build_executive_brief(
 
 
 # =====================================================
-# RECOMMENDATION NORMALIZATION
+# RECOMMENDATION NORMALIZATION (EXECUTIVE SAFE)
 # =====================================================
 
 def normalize_recommendations(
     recommendations: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
 
-    normalized = []
+    normalized: List[Dict[str, Any]] = []
 
     for r in recommendations[:5]:
         normalized.append({
@@ -219,7 +220,7 @@ def normalize_recommendations(
             "owner": r.get("owner"),
             "timeline": r.get("timeline"),
             "goal": r.get("goal"),
-            "confidence": round(r.get("confidence", 0.7), 2),
+            "confidence": round(float(r.get("confidence", 0.7)), 2),
         })
 
     return normalized
