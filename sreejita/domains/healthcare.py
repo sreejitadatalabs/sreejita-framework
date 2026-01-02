@@ -325,8 +325,30 @@ class HealthcareDomain(BaseDomain):
             return df[col].dropna().mean() if col and col in df.columns else None
     
         def safe_rate(col):
-            return df[col].mean() if col and col in df.columns else None
-    
+            """
+            Safely computes a rate from numeric or Yes/No style columns.
+            Supports: Yes/No, Y/N, True/False, 1/0
+            """
+            if not col or col not in df.columns:
+                return None
+        
+            series = df[col].dropna()
+        
+            if series.empty:
+                return None
+        
+            # Normalize common boolean encodings
+            if series.dtype == object:
+                normalized = series.astype(str).str.strip().str.lower().map({
+                    "yes": 1, "y": 1, "true": 1, "1": 1,
+                    "no": 0, "n": 0, "false": 0, "0": 0,
+                })
+                normalized = pd.to_numeric(normalized, errors="coerce")
+                return normalized.mean()
+        
+            # Already numeric
+            return pd.to_numeric(series, errors="coerce").mean()
+
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
