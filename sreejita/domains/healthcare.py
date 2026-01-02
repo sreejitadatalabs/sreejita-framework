@@ -15,8 +15,8 @@ from matplotlib.ticker import FuncFormatter
 from sreejita.core.capabilities import Capability
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
-from sreejita.domains.contracts import BaseDomain, BaseDomainDetector, DomainDetectionResult
-
+from .base import BaseDomain
+from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 # CONSTANTS
 # =====================================================
