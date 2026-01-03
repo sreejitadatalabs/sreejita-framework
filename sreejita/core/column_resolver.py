@@ -6,8 +6,8 @@ from typing import Dict, List, Optional, Tuple
 # =====================================================
 # UNIVERSAL SEMANTIC COLUMN MAP (HARDENED)
 # =====================================================
-# Central source of truth for industry synonyms.
-# This ensures a "Hospital Strong" detection even with messy headers.
+# This map serves as the single source of truth for industry-standard aliases.
+# Expanding these lists directly increases the detection strength of sub-domains.
 
 SEMANTIC_COLUMN_MAP: Dict[str, List[str]] = {
     # ---------- Identity ----------
@@ -24,7 +24,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, List[str]] = {
 
     # ---------- Dates ----------
     "date": ["date", "created_date", "timestamp", "time", "event_date", "datetime"],
-    "admission_date": ["admission_date", "admit_date", "admission", "admitted_at"],
+    "admission_date": ["admission_date", "admit_date", "admission", "admitted_at", "date_of_admission"],
     "discharge_date": ["discharge_date", "discharge", "discharged_at"],
     "order_date": ["order_date", "purchase_date", "transaction_date"],
     "fill_date": ["fill_date", "dispense_date", "rx_date", "prescribed_date"],
@@ -91,7 +91,8 @@ def resolve_column(
     cutoff: float = 0.72,
 ) -> Optional[str]:
     """
-    Backward-compatible resolver for simple mapping.
+    Standard resolver for mapping logic.
+    Returns the original column name if found, else None.
     """
     col, _ = resolve_column_with_confidence(df, semantic_key, cutoff)
     return col
@@ -111,8 +112,7 @@ def resolve_column_with_confidence(
     if df is None or df.empty or semantic_key not in SEMANTIC_COLUMN_MAP:
         return None, 0.0
 
-    # Cache normalized dataframe columns for speed
-    # { 'normalized_name': 'Original Name' }
+    # Cache normalized dataframe columns for mapping
     norm_cols = { _normalize(c): c for c in df.columns }
     
     target_aliases = SEMANTIC_COLUMN_MAP[semantic_key]
@@ -120,28 +120,27 @@ def resolve_column_with_confidence(
     best_match = None
     best_score = 0.0
 
-    # 1. Primary Pass: Search through synonyms
+    # Primary pass through semantic synonyms
     for alias in target_aliases:
         alias_norm = _normalize(alias)
         
-        # Check against every column in the dataframe
         for norm_col, original_col in norm_cols.items():
-            # Quick exit for exact match
+            # Exact match (normalized) is immediate win
             if alias_norm == norm_col:
                 return original_col, 1.0
             
-            # Fuzzy scoring
+            # Fuzzy match scoring
             score = _similarity(alias_norm, norm_col)
             if score > best_score:
                 best_score = score
                 best_match = original_col
 
-    # 2. Threshold Check
+    # Final threshold validation
     if best_score >= cutoff:
         return best_match, round(best_score, 2)
 
     return None, 0.0
 
 def bulk_resolve(df: pd.DataFrame, keys: List[str]) -> Dict[str, Optional[str]]:
-    """Resolves multiple keys at once. Useful for engine preprocess methods."""
+    """Resolves multiple semantic intents in a single pass."""
     return {key: resolve_column(df, key) for key in keys}
