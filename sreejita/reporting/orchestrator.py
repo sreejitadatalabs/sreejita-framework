@@ -17,7 +17,6 @@ from sreejita.narrative.executive_cognition import build_executive_payload
 
 log = logging.getLogger("sreejita.orchestrator")
 
-
 # =====================================================
 # SAFE FILE LOADER
 # =====================================================
@@ -73,7 +72,6 @@ def _trend(prev: int | None, curr: int | None) -> str:
         return "↓"
     return "→"
 
-
 # =====================================================
 # CANONICAL ENTRY POINT
 # =====================================================
@@ -83,15 +81,15 @@ def generate_report_payload(
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
 
-    dataset_key = str(input_path.absolute())
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
+    # 🎯 FIX A5: Absolute path prevents two files named 'data.csv' from colliding
+    dataset_key = str(input_path.absolute()) 
+
     run_dir = Path(config.get("run_dir", "runs/current"))
     run_dir.mkdir(parents=True, exist_ok=True)
-
-    dataset_key = input_path.stem
 
     # -------------------------------------------------
     # 1. LOAD DATA
@@ -206,8 +204,8 @@ def generate_report_payload(
     # -------------------------------------------------
     return {
         domain: {
-            "kpis": executive.get("primary_kpis", []), # 🔒 Force List for PDF
-            "raw_kpis": kpis, # Keep dict here for debugging
+            "domain": domain, # 🎯 ADD: Required for PDF titles
+            "kpis": executive.get("primary_kpis", []), 
             "visuals": valid_visuals,
             "insights": insights,
             "recommendations": recommendations,
