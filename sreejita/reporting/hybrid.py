@@ -273,7 +273,11 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "markdown": str(md_path),
-        "domain_results": domain_results,   # 🔒 authoritative
+        "domain_results": domain_results,
         "primary_domain": primary_domain,
+        "executive": primary.get("executive", {}),
+        "visuals": primary.get("visuals", []),
+        "insights": primary.get("insights", []),
+        "recommendations": primary.get("recommendations", []),
         "run_dir": str(run_dir),
     }
