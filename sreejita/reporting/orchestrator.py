@@ -83,6 +83,7 @@ def generate_report_payload(
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
 
+    dataset_key = str(input_path.absolute())
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(input_path)
@@ -205,10 +206,11 @@ def generate_report_payload(
     # -------------------------------------------------
     return {
         domain: {
-            "kpis": kpis or {},
+            "kpis": executive.get("primary_kpis", []), # 🔒 Force List for PDF
+            "raw_kpis": kpis, # Keep dict here for debugging
             "visuals": valid_visuals,
-            "insights": insights if isinstance(insights, list) else [],
-            "recommendations": recommendations if isinstance(recommendations, list) else [],
+            "insights": insights,
+            "recommendations": recommendations,
             "executive": executive,
             "shape": shape_info,
         }
