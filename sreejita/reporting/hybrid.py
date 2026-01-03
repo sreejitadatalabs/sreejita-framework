@@ -55,8 +55,8 @@ class HybridReport(BaseReport):
             primary_domain = self._sort_domains(domains)[0]
             primary = domain_results.get(primary_domain)
 
+            # HARD SAFETY — NEVER CRASH
             if not isinstance(primary, dict):
-                # Hard fallback – NEVER crash
                 primary = {
                     "kpis": {},
                     "visuals": [],
@@ -112,26 +112,30 @@ class HybridReport(BaseReport):
     def _write_domain_section(self, f, domain: str, result: Dict[str, Any]):
         f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
 
+        # ---------------- SAFE EXTRACTION ----------------
         kpis = {
             k: v for k, v in (result.get("kpis") or {}).items()
             if isinstance(k, str) and not k.startswith("_")
         }
 
-        visuals = result.get("visuals") if isinstance(result.get("visuals"), list) else []
-        raw_insights = result.get("insights", [])
+        visuals = result.get("visuals")
+        visuals = visuals if isinstance(visuals, list) else []
+
+        raw_insights = result.get("insights")
+
         if isinstance(raw_insights, dict):
-            ordered = (
-                raw_insights.get("strengths", []) +
-                raw_insights.get("warnings", []) +
-                raw_insights.get("risks", [])
+            insights = (
+                raw_insights.get("strengths", [])
+                + raw_insights.get("warnings", [])
+                + raw_insights.get("risks", [])
             )
         elif isinstance(raw_insights, list):
-            ordered = raw_insights
+            insights = raw_insights
         else:
-            ordered = []
-        
-        insights = ordered
-        recs = result.get("recommendations") if isinstance(result.get("recommendations"), list) else []
+            insights = []
+
+        recs = result.get("recommendations")
+        recs = recs if isinstance(recs, list) else []
 
         # ---------------- KPIs ----------------
         if kpis:
@@ -163,18 +167,9 @@ class HybridReport(BaseReport):
                 f.write(f"> {caption} (Confidence: {confidence}%)\n\n")
 
         # ---------------- INSIGHTS ----------------
-        ordered_insights = []
-
-        if isinstance(insights, dict):
-            ordered_insights.extend(insights.get("strengths", []))
-            ordered_insights.extend(insights.get("warnings", []))
-            ordered_insights.extend(insights.get("risks", []))
-        elif isinstance(insights, list):
-            ordered_insights = insights
-
-        if ordered_insights:
+        if insights:
             f.write("### Key Insights\n")
-            for ins in ordered_insights[:5]:
+            for ins in insights[:5]:
                 if not isinstance(ins, dict):
                     continue
                 f.write(
@@ -265,6 +260,9 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("Invalid domain_results returned")
 
     domains = list(domain_results.keys())
+    if not domains:
+        raise RuntimeError("No domains returned")
+
     primary_domain = engine._sort_domains(domains)[0]
     primary = domain_results.get(primary_domain)
 
