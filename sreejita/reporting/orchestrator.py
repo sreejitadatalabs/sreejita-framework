@@ -203,16 +203,12 @@ def generate_report_payload(
     # 8. FINAL PAYLOAD (FLAT, ENFORCED)
     # -------------------------------------------------
     return {
-        "domain": domain,
-        "executive": executive,
-        "kpis": executive.get("primary_kpis", []),
-        "visuals": valid_visuals,
-        "insights": executive.get("insights", {}),
-        "recommendations": executive.get("recommendations", []),
-        "metadata": {
-            "rows": len(df),
-            "visual_count": len(valid_visuals),
-            "kpi_count": len(executive.get("primary_kpis", [])),
-            "dataset_shape": shape_info,
-        },
+        domain: {
+            "kpis": kpis,
+            "visuals": visuals,
+            "insights": insights,
+            "recommendations": recommendations,
+            "executive": executive,
+            "shape": shape_info,
+        }
     }
