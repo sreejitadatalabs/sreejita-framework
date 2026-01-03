@@ -239,38 +239,72 @@ class HealthcareDomain(BaseDomain):
     # PREPROCESS
     # -------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Healthcare domain preprocessing.
+        - Resolves semantic columns robustly
+        - Normalizes numeric / date / boolean fields
+        - Derives LOS when admission + discharge dates exist
+        - Emits stable self.cols + self.time_col
+        """
+    
+        # ---------------------------------------------
+        # DATASET SHAPE (TRACEABILITY)
+        # ---------------------------------------------
         self.shape_info = detect_dataset_shape(df)
     
+        # ---------------------------------------------
+        # SEMANTIC COLUMN RESOLUTION (ORDER MATTERS)
+        # ---------------------------------------------
         self.cols = {
-            "pid": resolve_column(df, "patient_id") or resolve_column(df, "mrn"),
+            # Identity
+            "pid": resolve_column(df, "patient_id"),
             "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id"),
-            "los": resolve_column(df, "length_of_stay") or resolve_column(df, "los"),
-            "duration": resolve_column(df, "duration") or resolve_column(df, "wait_time"),
-            "cost": resolve_column(df, "cost") or resolve_column(df, "charges"),
-            "readmitted": resolve_column(df, "readmitted") or resolve_column(df, "flag"),
-            "facility": resolve_column(df, "facility") or resolve_column(df, "hospital"),
-            "doctor": resolve_column(df, "doctor") or resolve_column(df, "provider"),
-            "date": resolve_column(df, "date") or resolve_column(df, "admit_date"),
-            "fill_date": resolve_column(df, "fill_date"),
-            "supply": resolve_column(df, "days_supply"),
-            "population": resolve_column(df, "population"),
+    
+            # Time / Lifecycle
+            "los": resolve_column(df, "length_of_stay"),
+            "duration": resolve_column(df, "duration"),
+            "date": resolve_column(df, "admission_date"),
+            "discharge_date": resolve_column(df, "discharge_date"),
+    
+            # Financial
+            "cost": resolve_column(df, "cost"),
+    
+            # Outcomes / Flags
+            "readmitted": resolve_column(df, "readmitted"),
             "flag": resolve_column(df, "flag"),
-            "bed_id": resolve_column(df, "bed_id"),       # For Room Number/Wards
-            "admit_type": resolve_column(df, "admission_type"), # Emergency vs Elective
-            "diagnosis": resolve_column(df, "diagnosis"), # Clinical Condition
+    
+            # Clinical / Operational
+            "facility": resolve_column(df, "facility"),
+            "doctor": resolve_column(df, "doctor"),
+            "diagnosis": resolve_column(df, "diagnosis"),
+            "admit_type": resolve_column(df, "admission_type"),
+            "bed_id": resolve_column(df, "bed_id"),
+    
+            # Pharmacy / Population
+            "fill_date": resolve_column(df, "fill_date"),
+            "supply": resolve_column(df, "supply"),
+            "population": resolve_column(df, "population"),
         }
     
-        # Numeric coercion
-        for k in ["los", "duration", "cost", "supply", "population"]:
-            col = self.cols.get(k)
+        # ---------------------------------------------
+        # NUMERIC COERCION (SAFE)
+        # ---------------------------------------------
+        for key in ["los", "duration", "cost", "supply", "population"]:
+            col = self.cols.get(key)
             if col and col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
     
-        # Date coercion
-        if self.cols.get("date") and self.cols["date"] in df.columns:
-            df[self.cols["date"]] = pd.to_datetime(df[self.cols["date"]], errors="coerce")
+        # ---------------------------------------------
+        # DATE COERCION
+        # ---------------------------------------------
+        for key in ["date", "discharge_date", "fill_date"]:
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
     
-        # ✅ YES / NO NORMALIZATION (CRITICAL)
+        # ---------------------------------------------
+        # BOOLEAN / FLAG NORMALIZATION (YES / NO / TRUE)
+        # ---------------------------------------------
         for key in ["readmitted", "flag"]:
             col = self.cols.get(key)
             if col and col in df.columns:
@@ -286,7 +320,32 @@ class HealthcareDomain(BaseDomain):
                 )
                 df[col] = pd.to_numeric(df[col], errors="coerce")
     
+        # ---------------------------------------------
+        # DERIVE LOS IF MISSING (CRITICAL FOR DATASET-2)
+        # ---------------------------------------------
+        if (
+            not self.cols.get("los")
+            and self.cols.get("date")
+            and self.cols.get("discharge_date")
+            and self.cols["date"] in df.columns
+            and self.cols["discharge_date"] in df.columns
+        ):
+            try:
+                los = (
+                    df[self.cols["discharge_date"]] -
+                    df[self.cols["date"]]
+                ).dt.days
+    
+                df["_derived_los"] = pd.to_numeric(los, errors="coerce")
+                self.cols["los"] = "_derived_los"
+            except Exception:
+                pass  # absolute safety
+    
+        # ---------------------------------------------
+        # CANONICAL TIME COLUMN
+        # ---------------------------------------------
         self.time_col = self.cols.get("date")
+    
         return df
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
@@ -295,17 +354,33 @@ class HealthcareDomain(BaseDomain):
         volume = len(df)
     
         # -------------------------------------------------
-        # SUB-DOMAIN SCORING (SIGNAL-BASED, NON-BIASED)
+        # SUB-DOMAIN SCORING (DETERMINISTIC & SAFE)
         # -------------------------------------------------
+        has_los = bool(self.cols.get("los"))
+        has_date = bool(self.cols.get("date"))
+        has_bed = bool(self.cols.get("bed_id"))
+        has_admit_type = bool(self.cols.get("admit_type"))
+    
+        # Hospital lifecycle signal (CRITICAL FIX)
+        hospital_signal = any([
+            has_los,
+            has_date and bool(self.cols.get("discharge_date")),
+            has_bed,
+            has_admit_type,
+        ])
+    
         sub_scores = {
-            "hospital": 0.9 if self.cols.get("los") else 0.0,
+            "hospital": 0.9 if hospital_signal else 0.0,
             "clinic": 0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0,
             "diagnostics": 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
             "pharmacy": 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
             "public_health": 0.9 if self.cols.get("population") else 0.0,
         }
     
-        active_subs = {k: v for k, v in sub_scores.items() if v >= 0.3}
+        active_subs = {
+            k: v for k, v in sub_scores.items()
+            if isinstance(v, (int, float)) and v >= 0.3
+        }
     
         if not active_subs:
             primary_sub = "unknown"
@@ -315,7 +390,7 @@ class HealthcareDomain(BaseDomain):
             is_mixed = len(active_subs) > 1
     
         # -------------------------------------------------
-        # BASE KPI CONTEXT (UNIVERSAL)
+        # BASE KPI CONTEXT
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
             "primary_sub_domain": "mixed" if is_mixed else primary_sub,
@@ -325,7 +400,7 @@ class HealthcareDomain(BaseDomain):
             "data_completeness": round(1 - df.isna().mean().mean(), 3),
             "time_coverage_days": (
                 (df[self.time_col].max() - df[self.time_col].min()).days
-                if self.time_col and df[self.time_col].notna().any()
+                if self.time_col and self.time_col in df.columns and df[self.time_col].notna().any()
                 else None
             ),
         }
@@ -334,89 +409,69 @@ class HealthcareDomain(BaseDomain):
         # SAFE KPI HELPERS
         # -------------------------------------------------
         def safe_mean(col):
-            return (
-                df[col].dropna().mean()
-                if col and col in df.columns and df[col].notna().any()
-                else None
-            )
+            if not col or col not in df.columns:
+                return None
+            s = pd.to_numeric(df[col], errors="coerce")
+            return s.mean() if s.notna().any() else None
     
         def safe_rate(col):
             if not col or col not in df.columns:
                 return None
-    
-            series = df[col].dropna()
-            if series.empty:
-                return None
-    
-            if series.dtype == object:
-                series = series.astype(str).str.strip().str.lower().map({
-                    "yes": 1, "y": 1, "true": 1, "1": 1,
-                    "no": 0, "n": 0, "false": 0, "0": 0,
-                })
-    
-            series = pd.to_numeric(series, errors="coerce")
-            return series.mean() if series.notna().any() else None
+            s = pd.to_numeric(df[col], errors="coerce")
+            return s.mean() if s.notna().any() else None
     
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
         for sub in active_subs:
-            
-            # ---------------- HOSPITAL (STRENGTHENED v1.2) ----------------
+    
+            # ---------------- HOSPITAL ----------------
             if sub == "hospital":
                 avg_los = safe_mean(self.cols.get("los"))
                 total_cost = safe_mean(self.cols.get("cost"))
-                
-                # 🛡️ CAPABILITY: THROUGHPUT & QUALITY
+    
                 kpis.update({
                     "avg_los": avg_los,
                     "readmission_rate": safe_rate(self.cols.get("readmitted")),
                     "mortality_rate": safe_rate(self.cols.get("flag")),
                     "long_stay_rate": (
-                        (df[self.cols["los"]] > 7).mean() 
+                        (df[self.cols["los"]] > 7).mean()
                         if self.cols.get("los") in df.columns else None
                     ),
+                    "avg_cost_per_day": (
+                        total_cost / avg_los if avg_los and total_cost else None
+                    ),
+                    "labor_cost_per_day": total_cost,
                 })
-
-                # 🛡️ CAPABILITY: CAPACITY & UTILIZATION (STRENGTHENED)
-                # Uses Bed ID/Room Number to determine physical asset efficiency
+    
+                # Bed utilization proxy
                 bed_col = self.cols.get("bed_id")
                 kpis["bed_occupancy_ratio"] = (
-                    df[bed_col].nunique() / volume 
-                    if bed_col and bed_col in df.columns and volume > 0 else None
+                    df[bed_col].nunique() / volume
+                    if bed_col and bed_col in df.columns and volume > 0
+                    else None
                 )
-                
-                # 🛡️ CAPABILITY: CLINICAL INTENSITY
-                # Identifies the percentage of high-stakes emergency cases
+    
+                # Emergency admissions
                 admit_col = self.cols.get("admit_type")
-                if admit_col and admit_col in df.columns:
-                    kpis["emergency_admission_rate"] = (
-                        df[admit_col].astype(str).str.lower().str.contains("emergency").mean()
-                    )
-                else:
-                    kpis["emergency_admission_rate"] = None
-
-                # 🛡️ CAPABILITY: COST EFFICIENCY
-                # Calculates resource burn-rate per clinical day
-                kpis.update({
-                    "avg_cost_per_day": (total_cost / avg_los if avg_los and total_cost else None),
-                    "labor_cost_per_day": total_cost, # Proxy based on framework constants
-                })
-
-                # 🛡️ CAPABILITY: VARIANCE (GOVERNANCE)
-                # Measures how inconsistent performance is across different branches/facilities
+                kpis["emergency_admission_rate"] = (
+                    df[admit_col].astype(str).str.lower().str.contains("emergency").mean()
+                    if admit_col and admit_col in df.columns
+                    else None
+                )
+    
+                # Facility variance (GOVERNANCE SAFE)
                 fac_col = self.cols.get("facility")
                 los_col = self.cols.get("los")
                 if fac_col and los_col and fac_col in df.columns and los_col in df.columns:
-                    facility_means = df.groupby(fac_col)[los_col].mean()
+                    means = df.groupby(fac_col)[los_col].mean()
                     kpis["facility_variance_score"] = (
-                        facility_means.std() / facility_means.mean() 
-                        if facility_means.mean() > 0 else 0.0
+                        means.std() / means.mean()
+                        if means.mean() > 0 else None
                     )
                 else:
                     kpis["facility_variance_score"] = None
-                
-                # 🛡️ CAPABILITY: FLOW
+    
                 kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
     
             # ---------------- CLINIC ----------------
@@ -426,7 +481,7 @@ class HealthcareDomain(BaseDomain):
                     "avg_wait_time": safe_mean(self.cols.get("duration")),
                     "provider_productivity": (
                         volume / max(df[self.cols["doctor"]].nunique(), 1)
-                        if self.cols.get("doctor") else None
+                        if self.cols.get("doctor") in df.columns else None
                     ),
                     "visit_cycle_time": safe_mean(self.cols.get("duration")),
                 })
@@ -439,7 +494,7 @@ class HealthcareDomain(BaseDomain):
                     "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
                     "tests_per_fte": (
                         volume / max(df[self.cols["doctor"]].nunique(), 1)
-                        if self.cols.get("doctor") else None
+                        if self.cols.get("doctor") in df.columns else None
                     ),
                     "supply_cost_per_test": safe_mean(self.cols.get("cost")),
                 })
@@ -457,10 +512,15 @@ class HealthcareDomain(BaseDomain):
             # ---------------- PUBLIC HEALTH ----------------
             if sub == "public_health":
                 pop = safe_mean(self.cols.get("population"))
-                cases = df[self.cols.get("flag")].sum() if self.cols.get("flag") else None
+                cases = (
+                    df[self.cols["flag"]].sum()
+                    if self.cols.get("flag") in df.columns else None
+                )
     
                 kpis.update({
-                    "incidence_per_100k": (cases / pop * 100000) if pop and cases else None,
+                    "incidence_per_100k": (
+                        cases / pop * 100000 if pop and cases else None
+                    ),
                     "screening_coverage_rate": safe_rate(self.cols.get("flag")),
                     "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
                     "immunization_rate": safe_rate(self.cols.get("flag")),
@@ -468,7 +528,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
         # -------------------------------------------------
-        # KPI → CAPABILITY (EXECUTIVE CONTRACT)
+        # KPI → CAPABILITY CONTRACT
         # -------------------------------------------------
         kpis["_kpi_capabilities"] = {
             "avg_los": Capability.TIME_FLOW.value,
@@ -485,7 +545,7 @@ class HealthcareDomain(BaseDomain):
         }
     
         # -------------------------------------------------
-        # KPI CONFIDENCE (EXECUTIVE CONTRACT)
+        # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {
             k: 0.9 if isinstance(v, (int, float)) else 0.4
