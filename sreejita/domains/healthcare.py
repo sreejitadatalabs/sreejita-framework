@@ -23,6 +23,9 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 MIN_SAMPLE_SIZE = 30
 
+# NOTE: 'flag' is a generalized binary outcome proxy used across:
+# mortality, alerts, specimen rejection, screening, immunization, etc.
+# This is intentional for universal-domain support in v3.x.
 # =====================================================
 # SUB-DOMAINS
 # =====================================================
@@ -383,6 +386,11 @@ class HealthcareDomain(BaseDomain):
             k: v for k, v in sub_scores.items()
             if isinstance(v, (int, float)) and v >= 0.3
         }
+        active_subs = {
+        HealthcareSubDomain(k).value: v
+            for k, v in active_subs.items()
+        }
+
     
         if not active_subs:
             primary_sub = "unknown"
@@ -392,21 +400,33 @@ class HealthcareDomain(BaseDomain):
             is_mixed = len(active_subs) > 1
     
         # -------------------------------------------------
-        # BASE KPI CONTEXT
+        # BASE KPI CONTEXT (UNIVERSAL, EXECUTIVE SAFE)
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
-            "primary_sub_domain": "mixed" if is_mixed else primary_sub,
+            "primary_sub_domain": (
+                HealthcareSubDomain.MIXED.value if is_mixed else primary_sub
+            ),
             "sub_domains": active_subs,
             "total_volume": volume,
             "record_count": volume,
             "data_completeness": round(1 - df.isna().mean().mean(), 3),
             "time_coverage_days": (
                 (df[self.time_col].max() - df[self.time_col].min()).days
-                if self.time_col and self.time_col in df.columns and df[self.time_col].notna().any()
+                if (
+                    self.time_col
+                    and self.time_col in df.columns
+                    and df[self.time_col].notna().any()
+                )
                 else None
             ),
         }
-    
+        
+        # -------------------------------------------------
+        # DATA GOVERNANCE WARNING (NON-BLOCKING)
+        # -------------------------------------------------
+        if volume < MIN_SAMPLE_SIZE:
+            kpis["data_warning"] = "Sample size below recommended threshold"
+
         # -------------------------------------------------
         # SAFE KPI HELPERS
         # -------------------------------------------------
@@ -428,7 +448,7 @@ class HealthcareDomain(BaseDomain):
         for sub in active_subs:
     
             # ---------------- HOSPITAL ----------------
-            if sub == "hospital":
+            if sub == HealthcareSubDomain.HOSPITAL.value:
                 avg_los = safe_mean(self.cols.get("los"))
                 total_cost = safe_mean(self.cols.get("cost"))
     
@@ -465,23 +485,23 @@ class HealthcareDomain(BaseDomain):
                 # Facility variance (GOVERNANCE SAFE)
                 fac_col = self.cols.get("facility")
                 los_col = self.cols.get("los")
-                if fac_col and los_col and fac_col in df.columns and los_col in df.columns:
+                
+                if volume < MIN_SAMPLE_SIZE:
+                    kpis["facility_variance_score"] = None
+                elif fac_col and los_col and fac_col in df.columns and los_col in df.columns:
                     means = df.groupby(fac_col)[los_col].mean()
-
                     kpis["facility_variance_score"] = (
                         means.std() / means.mean()
                         if means.mean() and means.mean() > 0
                         else None
                     )
-
                 else:
-                    if volume < MIN_SAMPLE_SIZE:
-                        kpis["facility_variance_score"] = None
-    
+                    kpis["facility_variance_score"] = None
+
                 kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
     
             # ---------------- CLINIC ----------------
-            if sub == "clinic":
+            if sub == HealthcareSubDomain.CLINIC.value:
                 kpis.update({
                     "no_show_rate": safe_rate(self.cols.get("readmitted")),
                     "avg_wait_time": safe_mean(self.cols.get("duration")),
@@ -493,7 +513,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- DIAGNOSTICS ----------------
-            if sub == "diagnostics":
+            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
                 kpis.update({
                     "avg_tat": safe_mean(self.cols.get("duration")),
                     "critical_alert_time": safe_mean(self.cols.get("duration")),
@@ -506,7 +526,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- PHARMACY ----------------
-            if sub == "pharmacy":
+            if sub == HealthcareSubDomain.PHARMACY.value:
                 kpis.update({
                     "days_supply_on_hand": safe_mean(self.cols.get("supply")),
                     "cost_per_rx": safe_mean(self.cols.get("cost")),
@@ -516,7 +536,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- PUBLIC HEALTH ----------------
-            if sub == "public_health":
+            if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 pop = safe_mean(self.cols.get("population"))
                 cases = (
                     df[self.cols["flag"]].sum()
@@ -684,7 +704,7 @@ class HealthcareDomain(BaseDomain):
                         "path": str(fallback_path),
                         "caption": "Fallback evidence due to limited structured data.",
                         "importance": 0.5,
-                        "confidence": 0.6,
+                        "confidence": round(0.6 * sub_domain_weight(sub), 2),
                         "sub_domain": sub,
                     })
                 except Exception:
@@ -1160,10 +1180,12 @@ class HealthcareDomain(BaseDomain):
                 if not time_col:
                     raise ValueError
     
-                df["_hour"] = df[time_col].dt.hour
-                df["_day"] = df[time_col].dt.day_name()
-    
-                heat = pd.crosstab(df["_day"], df["_hour"])
+                tmp = df[[time_col]].copy()
+                tmp["_hour"] = tmp[time_col].dt.hour
+                tmp["_day"] = tmp[time_col].dt.day_name()
+                
+                heat = pd.crosstab(tmp["_day"], tmp["_hour"])
+
                 if heat.empty:
                     raise ValueError
     
@@ -1569,7 +1591,7 @@ class HealthcareDomain(BaseDomain):
             # =================================================
             # 1–2. STRENGTHS (ALWAYS AT LEAST ONE)
             # =================================================
-            if sub == "hospital":
+            if sub == HealthcareSubDomain.HOSPITAL.value:
                 avg_los = kpis.get("avg_los")
                 if isinstance(avg_los, (int, float)):
                     sub_insights.append({
@@ -1583,7 +1605,7 @@ class HealthcareDomain(BaseDomain):
                         "confidence": conf(0.72, score),
                     })
     
-            if sub == "clinic":
+            if sub == HealthcareSubDomain.CLINIC.value:
                 sub_insights.append({
                     "sub_domain": sub,
                     "level": "STRENGTH",
@@ -1595,7 +1617,7 @@ class HealthcareDomain(BaseDomain):
             # =================================================
             # 3–6. WARNINGS (CONDITIONAL)
             # =================================================
-            if sub == "hospital":
+            if sub == HealthcareSubDomain.HOSPITAL.value:
                 long_stay = kpis.get("long_stay_rate")
                 if isinstance(long_stay, (int, float)) and long_stay >= 0.2:
                     sub_insights.append({
@@ -1609,7 +1631,7 @@ class HealthcareDomain(BaseDomain):
                         "confidence": conf(0.80, score),
                     })
     
-            if sub == "diagnostics":
+            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
                 avg_tat = kpis.get("avg_tat")
                 if isinstance(avg_tat, (int, float)) and avg_tat > 120:
                     sub_insights.append({
@@ -1626,7 +1648,7 @@ class HealthcareDomain(BaseDomain):
             # =================================================
             # 7–9. RISKS (CONDITIONAL)
             # =================================================
-            if sub == "hospital":
+            if sub == HealthcareSubDomain.HOSPITAL.value:
                 fac_var = kpis.get("facility_variance_score")
                 if isinstance(fac_var, (int, float)) and fac_var > 0.5:
                     sub_insights.append({
@@ -1640,7 +1662,7 @@ class HealthcareDomain(BaseDomain):
                         "confidence": conf(0.85, score),
                     })
     
-            if sub == "public_health":
+            if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 inc = kpis.get("incidence_per_100k")
                 if isinstance(inc, (int, float)) and inc > 300:
                     sub_insights.append({
@@ -1693,7 +1715,7 @@ class HealthcareDomain(BaseDomain):
             sub_recs: List[Dict[str, Any]] = []
     
             # ---------------- HOSPITAL ----------------
-            if sub == "hospital":
+            if sub == HealthcareSubDomain.HOSPITAL.value:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
@@ -1727,7 +1749,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             # ---------------- CLINIC ----------------
-            if sub == "clinic":
+            if sub == HealthcareSubDomain.CLINIC.value:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
@@ -1739,7 +1761,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- DIAGNOSTICS ----------------
-            if sub == "diagnostics":
+            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
@@ -1751,7 +1773,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- PHARMACY ----------------
-            if sub == "pharmacy":
+            if sub == HealthcareSubDomain.PHARMACY.value:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "LOW",
@@ -1763,7 +1785,7 @@ class HealthcareDomain(BaseDomain):
                 })
     
             # ---------------- PUBLIC HEALTH ----------------
-            if sub == "public_health":
+            if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "HIGH",
