@@ -291,92 +291,70 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
-
+    
         # -------------------------------------------------
-        # SUB-DOMAIN SCORING (SIGNAL-BASED)
+        # SUB-DOMAIN SCORING (SIGNAL-BASED, NON-BIASED)
         # -------------------------------------------------
         sub_scores = {
             "hospital": 0.9 if self.cols.get("los") else 0.0,
-            "clinic": 0.8 if self.cols.get("duration") and not self.cols.get("cost") else 0.0,
+            "clinic": 0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0,
             "diagnostics": 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
             "pharmacy": 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
             "public_health": 0.9 if self.cols.get("population") else 0.0,
         }
-        
-        active_subs = {k: v for k, v in sub_scores.items() if v > 0.2}
-        primary_sub = max(active_subs, key=active_subs.get) if active_subs else "unknown"
-        
-        # -------------------------------------------------
-        # HOSPITAL DOMINANCE OVERRIDE (NON-NEGOTIABLE)
-        # -------------------------------------------------
-        if (
-            self.cols.get("los")
-            and self.cols.get("facility")
-            and len(df) >= 50
-        ):
-            primary_sub = "hospital"
-            is_mixed = len(active_subs) > 1 and "hospital" not in active_subs
+    
+        active_subs = {k: v for k, v in sub_scores.items() if v >= 0.3}
+    
+        if not active_subs:
+            primary_sub = "unknown"
+            is_mixed = False
         else:
+            primary_sub = max(active_subs, key=active_subs.get)
             is_mixed = len(active_subs) > 1
     
+        # -------------------------------------------------
+        # BASE KPI CONTEXT (UNIVERSAL)
+        # -------------------------------------------------
         kpis: Dict[str, Any] = {
             "primary_sub_domain": "mixed" if is_mixed else primary_sub,
             "sub_domains": active_subs,
             "total_volume": volume,
+            "record_count": volume,
             "data_completeness": round(1 - df.isna().mean().mean(), 3),
+            "time_coverage_days": (
+                (df[self.time_col].max() - df[self.time_col].min()).days
+                if self.time_col and df[self.time_col].notna().any()
+                else None
+            ),
         }
     
         # -------------------------------------------------
-        # UNIVERSAL KPI HELPERS
+        # SAFE KPI HELPERS
         # -------------------------------------------------
-        def sub_domain_weight(sub: str, sub_scores: Dict[str, float]) -> float:
-            """
-            Returns confidence multiplier based on sub-domain strength.
-            """
-            return round(min(1.0, max(0.4, sub_scores.get(sub, 0.5))), 2)
-
         def safe_mean(col):
-            return df[col].dropna().mean() if col and col in df.columns else None
+            return (
+                df[col].dropna().mean()
+                if col and col in df.columns and df[col].notna().any()
+                else None
+            )
     
         def safe_rate(col):
-            """
-            Safely computes a rate from numeric or Yes/No style columns.
-            Supports: Yes/No, Y/N, True/False, 1/0
-            """
             if not col or col not in df.columns:
                 return None
-        
+    
             series = df[col].dropna()
-        
             if series.empty:
                 return None
-
-            # -------------------------------------------------
-            # KPI GOVERNANCE FALLBACK (EXECUTIVE SAFE)
-            # -------------------------------------------------
-            kpis.setdefault("record_count", len(df))
-            kpis.setdefault(
-                "time_coverage_days",
-                (df[self.time_col].max() - df[self.time_col].min()).days
-                if self.time_col else None
-            )
-            kpis.setdefault(
-                "data_completeness",
-                round(1 - df.isna().mean().mean(), 3)
-            )
-        
-            # Normalize common boolean encodings
+    
             if series.dtype == object:
-                normalized = series.astype(str).str.strip().str.lower().map({
+                series = series.astype(str).str.strip().str.lower().map({
                     "yes": 1, "y": 1, "true": 1, "1": 1,
                     "no": 0, "n": 0, "false": 0, "0": 0,
                 })
-                normalized = pd.to_numeric(normalized, errors="coerce")
-                return normalized.mean()
-        
-            # Already numeric
-            return pd.to_numeric(series, errors="coerce").mean()
-
+    
+            series = pd.to_numeric(series, errors="coerce")
+            return series.mean() if series.notna().any() else None
+    
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
@@ -385,21 +363,26 @@ class HealthcareDomain(BaseDomain):
             # ---------------- HOSPITAL ----------------
             if sub == "hospital":
                 avg_los = safe_mean(self.cols.get("los"))
-                readm = safe_rate(self.cols.get("readmitted"))
                 cost = safe_mean(self.cols.get("cost"))
+    
                 kpis.update({
-                    "avg_los": safe_mean(self.cols.get("los")),
+                    "avg_los": avg_los,
                     "readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    "long_stay_rate": ((df[self.cols["los"]] > 7).mean() if self.cols.get("los") in df.columns else None),
+                    "long_stay_rate": (
+                        (df[self.cols["los"]] > 7).mean()
+                        if self.cols.get("los") in df.columns
+                        else None
+                    ),
                     "avg_cost_per_day": (cost / avg_los if avg_los and cost else None),
-                    "facility_variance_score": (df.groupby(self.cols["facility"])[self.cols["los"]].mean().std()/ df[self.cols["los"]].mean() if self.cols.get("facility") and self.cols.get("los") else None),
-                    "bed_occupancy_rate": None,
-                    "case_mix_index": None,
-                    "hcahps_score": None,
+                    "facility_variance_score": (
+                        df.groupby(self.cols["facility"])[self.cols["los"]].mean().std()
+                        / df[self.cols["los"]].mean()
+                        if self.cols.get("facility") and self.cols.get("los")
+                        else None
+                    ),
                     "mortality_rate": safe_rate(self.cols.get("flag")),
                     "er_boarding_time": safe_mean(self.cols.get("duration")),
-                    "labor_cost_per_day": safe_mean(self.cols.get("cost")),
-                    "surgical_complication_rate": None,
+                    "labor_cost_per_day": cost,
                 })
     
             # ---------------- CLINIC ----------------
@@ -408,15 +391,10 @@ class HealthcareDomain(BaseDomain):
                     "no_show_rate": safe_rate(self.cols.get("readmitted")),
                     "avg_wait_time": safe_mean(self.cols.get("duration")),
                     "provider_productivity": (
-                        volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                        volume / max(df[self.cols["doctor"]].nunique(), 1)
                         if self.cols.get("doctor") else None
                     ),
-                    "third_next_available": None,
-                    "referral_conversion_rate": None,
                     "visit_cycle_time": safe_mean(self.cols.get("duration")),
-                    "patient_acquisition_cost": None,
-                    "telehealth_mix": None,
-                    "net_collection_ratio": None,
                 })
     
             # ---------------- DIAGNOSTICS ----------------
@@ -425,27 +403,19 @@ class HealthcareDomain(BaseDomain):
                     "avg_tat": safe_mean(self.cols.get("duration")),
                     "critical_alert_time": safe_mean(self.cols.get("duration")),
                     "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
-                    "equipment_downtime_rate": None,
-                    "repeat_test_rate": None,
                     "tests_per_fte": (
-                        volume / max(df[self.cols.get("doctor")].nunique(), 1)
+                        volume / max(df[self.cols["doctor"]].nunique(), 1)
                         if self.cols.get("doctor") else None
                     ),
                     "supply_cost_per_test": safe_mean(self.cols.get("cost")),
-                    "order_completeness_ratio": None,
-                    "outpatient_market_share": None,
                 })
     
             # ---------------- PHARMACY ----------------
             if sub == "pharmacy":
                 kpis.update({
                     "days_supply_on_hand": safe_mean(self.cols.get("supply")),
-                    "generic_dispensing_rate": None,
-                    "refill_adherence_rate": None,
                     "cost_per_rx": safe_mean(self.cols.get("cost")),
                     "med_error_rate": safe_rate(self.cols.get("flag")),
-                    "pharmacist_intervention_rate": safe_rate(self.cols.get("flag")),
-                    "inventory_turnover": None,
                     "spend_velocity": safe_mean(self.cols.get("cost")),
                     "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
                 })
@@ -457,14 +427,10 @@ class HealthcareDomain(BaseDomain):
     
                 kpis.update({
                     "incidence_per_100k": (cases / pop * 100000) if pop and cases else None,
-                    "sdoh_risk_score": None,
                     "screening_coverage_rate": safe_rate(self.cols.get("flag")),
                     "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
                     "immunization_rate": safe_rate(self.cols.get("flag")),
-                    "provider_access_gap": None,
-                    "ed_visits_per_1k": None,
                     "cost_per_member": safe_mean(self.cols.get("cost")),
-                    "healthy_days_index": None,
                 })
     
         # -------------------------------------------------
@@ -480,7 +446,7 @@ class HealthcareDomain(BaseDomain):
             "readmission_rate": Capability.QUALITY.value,
             "mortality_rate": Capability.QUALITY.value,
             "specimen_rejection_rate": Capability.QUALITY.value,
-            "inventory_turnover": Capability.VARIANCE.value,
+            "facility_variance_score": Capability.VARIANCE.value,
             "incidence_per_100k": Capability.VOLUME.value,
         }
     
@@ -488,13 +454,12 @@ class HealthcareDomain(BaseDomain):
         # KPI CONFIDENCE (EXECUTIVE CONTRACT)
         # -------------------------------------------------
         kpis["_confidence"] = {
-            k: 0.9 if v is not None else 0.4
+            k: 0.9 if isinstance(v, (int, float)) else 0.4
             for k, v in kpis.items()
-            if not k.startswith("_") and isinstance(v, (int, float))
+            if not k.startswith("_")
         }
     
         return kpis
-
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
     # -------------------------------------------------
@@ -567,10 +532,10 @@ class HealthcareDomain(BaseDomain):
                         df=df,
                         output_dir=output_dir,
                         sub_domain=sub,
-                        register_visual=register_visual,
+                        # 🎯 FIX: Pass a partial or lambda to handle the 'sub' argument
+                        register_visual=lambda f, n, c, i, conf, s=sub: register_visual(f, n, c, i, conf, s),
                     )
                 except Exception:
-                    # Silent fail — fallback logic handles coverage
                     continue
     
         # -------------------------------------------------
@@ -801,10 +766,12 @@ class HealthcareDomain(BaseDomain):
     
             # 7. Mortality Trend
             if visual_key == "mortality_trend":
-                if not (c.get("readmitted") and time_col):
+                # 🎯 FIX: Use 'flag' instead of 'readmitted' for mortality proxy
+                target_col = c.get("flag")
+                if not (target_col and time_col):
                     raise ValueError
-    
-                rate = df.groupby(pd.Grouper(key=time_col, freq="M"))[c["readmitted"]].mean()
+            
+                rate = df.groupby(pd.Grouper(key=time_col, freq="ME"))[target_col].mean()
                 fig, ax = plt.subplots(figsize=(8, 4))
                 rate.plot(ax=ax, marker="o")
                 ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
