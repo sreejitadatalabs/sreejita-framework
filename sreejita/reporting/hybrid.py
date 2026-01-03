@@ -7,7 +7,7 @@ from sreejita.reporting.base import BaseReport
 
 
 # =====================================================
-# HYBRID REPORT ENGINE — UNIVERSAL (FINAL)
+# HYBRID REPORT ENGINE — UNIVERSAL (FINAL, HARDENED)
 # =====================================================
 
 class HybridReport(BaseReport):
@@ -34,7 +34,9 @@ class HybridReport(BaseReport):
     ) -> Path:
 
         if not isinstance(domain_results, dict):
-            raise RuntimeError("HybridReport.build expected domain_results dict")
+            raise RuntimeError(
+                f"HybridReport.build expected dict, got {type(domain_results)}"
+            )
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -46,30 +48,27 @@ class HybridReport(BaseReport):
             self._write_header(f, run_id, metadata)
 
             # ---------------- PRIMARY DOMAIN ----------------
-            primary_domain = self._sort_domains(domain_results.keys())[0]
+            domains = list(domain_results.keys())
+            if not domains:
+                raise RuntimeError("No domains returned by orchestrator")
+
+            primary_domain = self._sort_domains(domains)[0]
             primary = domain_results.get(primary_domain)
 
-            # HARD SAFETY — recover instead of crash
+            # HARD SAFETY — never crash on corruption
             if not isinstance(primary, dict):
-                # Attempt unwrap if orchestrator returned nested payload
-                if isinstance(domain_results, dict) and len(domain_results) == 1:
-                    candidate = next(iter(domain_results.values()))
-                    if isinstance(candidate, dict):
-                        primary = candidate
-                    else:
-                        primary = {}
-                else:
-                    primary = {}
+                primary = {}
 
-
-            executive = primary.get("executive", {}) or {}
+            executive = primary.get("executive")
+            if not isinstance(executive, dict):
+                executive = {}
 
             self._write_executive_brief(f, executive)
             self._write_board_readiness(f, executive)
 
             # ---------------- DOMAIN SECTIONS ----------------
-            for domain in self._sort_domains(domain_results.keys()):
-                payload = domain_results.get(domain, {})
+            for domain in self._sort_domains(domains):
+                payload = domain_results.get(domain)
                 if isinstance(payload, dict):
                     self._write_domain_section(f, domain, payload)
 
@@ -78,16 +77,14 @@ class HybridReport(BaseReport):
         return report_path
 
     # -------------------------------------------------
-    # EXECUTIVE BRIEF (PAGE 1)
+    # EXECUTIVE BRIEF
     # -------------------------------------------------
     def _write_executive_brief(self, f, executive: Dict[str, Any]):
         brief = executive.get("executive_brief")
-        if not brief:
-            return
-
-        f.write("## Executive Brief\n\n")
-        f.write(f"{brief}\n\n")
-        f.write("---\n\n")
+        if isinstance(brief, str) and brief.strip():
+            f.write("## Executive Brief\n\n")
+            f.write(f"{brief}\n\n")
+            f.write("---\n\n")
 
     # -------------------------------------------------
     # BOARD READINESS
@@ -110,11 +107,12 @@ class HybridReport(BaseReport):
 
         kpis = {
             k: v for k, v in (result.get("kpis") or {}).items()
-            if not k.startswith("_")
+            if isinstance(k, str) and not k.startswith("_")
         }
-        visuals = result.get("visuals", []) or []
-        insights = result.get("insights", []) or []
-        recs = result.get("recommendations", []) or []
+
+        visuals = result.get("visuals") if isinstance(result.get("visuals"), list) else []
+        insights = result.get("insights")
+        recs = result.get("recommendations") if isinstance(result.get("recommendations"), list) else []
 
         # ---------------- KPIs ----------------
         if kpis:
@@ -124,8 +122,7 @@ class HybridReport(BaseReport):
 
             for k, v in list(kpis.items())[:9]:
                 f.write(
-                    f"| {k.replace('_',' ').title()} | "
-                    f"{self._format_value(k, v)} |\n"
+                    f"| {k.replace('_',' ').title()} | {self._format_value(k, v)} |\n"
                 )
             f.write("\n")
 
@@ -133,45 +130,46 @@ class HybridReport(BaseReport):
         if visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
+                if not isinstance(vis, dict):
+                    continue
+
                 path = vis.get("path")
                 if not path:
                     continue
 
-                f.write(f"![{vis.get('caption','Visual')}]({path})\n")
-                conf = int(vis.get("confidence", 0) * 100)
-                f.write(
-                    f"> {vis.get('caption','')} "
-                    f"(Confidence: {conf}%)\n\n"
-                )
+                caption = vis.get("caption", "Visual evidence")
+                confidence = int(float(vis.get("confidence", 0)) * 100)
+
+                f.write(f"![{caption}]({path})\n")
+                f.write(f"> {caption} (Confidence: {confidence}%)\n\n")
 
         # ---------------- INSIGHTS ----------------
-        # ---------------- INSIGHTS ----------------
-        if insights:
+        ordered_insights = []
+
+        if isinstance(insights, dict):
+            ordered_insights.extend(insights.get("strengths", []))
+            ordered_insights.extend(insights.get("warnings", []))
+            ordered_insights.extend(insights.get("risks", []))
+        elif isinstance(insights, list):
+            ordered_insights = insights
+
+        if ordered_insights:
             f.write("### Key Insights\n")
-        
-            # Executive cognition returns structured insight blocks
-            if isinstance(insights, dict):
-                ordered = []
-                ordered.extend(insights.get("strengths", []))
-                ordered.extend(insights.get("warnings", []))
-                ordered.extend(insights.get("risks", []))
-            elif isinstance(insights, list):
-                ordered = insights
-            else:
-                ordered = []
-        
-            for ins in ordered[:5]:
+            for ins in ordered_insights[:5]:
+                if not isinstance(ins, dict):
+                    continue
                 f.write(
                     f"- **{ins.get('level','INFO')}** — "
                     f"{ins.get('title','')}: {ins.get('so_what','')}\n"
                 )
-        
             f.write("\n")
 
         # ---------------- RECOMMENDATIONS ----------------
         if recs:
             f.write("### Recommendations\n")
             for r in recs[:5]:
+                if not isinstance(r, dict):
+                    continue
                 f.write(
                     f"- **{r.get('priority','')}** — {r.get('action','')} "
                     f"(Owner: {r.get('owner','-')}, "
@@ -191,9 +189,9 @@ class HybridReport(BaseReport):
             f"**Generated:** {datetime.utcnow():%Y-%m-%d %H:%M UTC}\n\n"
         )
 
-        if metadata:
+        if isinstance(metadata, dict):
             for k, v in metadata.items():
-                f.write(f"- **{k.replace('_',' ').title()}**: {v}\n")
+                f.write(f"- **{str(k).replace('_',' ').title()}**: {v}\n")
 
         f.write("\n---\n\n")
 
@@ -206,10 +204,7 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _sort_domains(self, domains):
         priority = ["healthcare", "finance", "retail", "marketing"]
-        return sorted(
-            domains,
-            key=lambda d: priority.index(d) if d in priority else 99
-        )
+        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
@@ -238,7 +233,6 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     run_dir = Path(config.get("run_dir", "./runs"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 🔒 AUTHORITATIVE DOMAIN RESULTS
     domain_results = generate_report_payload(input_path, config)
 
     engine = HybridReport()
@@ -248,17 +242,23 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
         metadata=config.get("metadata"),
     )
 
-    # 🔒 SAFE PRIMARY DOMAIN EXTRACTION
-    primary_domain = engine._sort_domains(domain_results.keys())[0]
-    primary = domain_results.get(primary_domain, {}) or {}
+    if not isinstance(domain_results, dict):
+        raise RuntimeError("Invalid domain_results returned")
+
+    domains = list(domain_results.keys())
+    primary_domain = engine._sort_domains(domains)[0]
+    primary = domain_results.get(primary_domain)
+
+    if not isinstance(primary, dict):
+        primary = {}
 
     return {
         "markdown": str(md_path),
-        "domain_results": domain_results,   # KEEP FULL STRUCTURE
+        "domain_results": domain_results,
         "primary_domain": primary_domain,
         "executive": primary.get("executive", {}),
-        "visuals": primary.get("visuals", []),
-        "insights": primary.get("insights", []),
-        "recommendations": primary.get("recommendations", []),
+        "visuals": primary.get("visuals", []) if isinstance(primary.get("visuals"), list) else [],
+        "insights": primary.get("insights", {}),
+        "recommendations": primary.get("recommendations", []) if isinstance(primary.get("recommendations"), list) else [],
         "run_dir": str(run_dir),
     }
