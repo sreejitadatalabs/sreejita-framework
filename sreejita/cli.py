@@ -21,9 +21,9 @@ from sreejita.automation.scheduler import start_scheduler
 logger = logging.getLogger(__name__)
 
 
-# -------------------------------------------------
-# PROGRAMMATIC ENTRY (CLI / Streamlit / API)
-# -------------------------------------------------
+# =====================================================
+# PROGRAMMATIC ENTRY (CLI / UI / API)
+# =====================================================
 def run_single_file(
     input_path: str,
     config_path: Optional[str] = None,
@@ -62,23 +62,37 @@ def run_single_file(
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
-    # HYBRID REPORT (MARKDOWN + EXECUTIVE PAYLOAD)
+    # HYBRID REPORT (MARKDOWN + DOMAIN RESULTS)
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
+    # ---------------- CONTRACT VALIDATION ----------------
     if not isinstance(result, dict):
         raise RuntimeError(
-            "Hybrid.run() returned invalid type. "
-            "Expected dict with keys: markdown, payload, run_dir"
+            f"Hybrid.run() returned invalid type: {type(result)}"
         )
 
-    if "markdown" not in result or "payload" not in result:
+    required_keys = {"markdown", "domain_results", "primary_domain", "run_dir"}
+    missing = required_keys - set(result.keys())
+    if missing:
         raise RuntimeError(
-            f"Hybrid.run() returned invalid contract: {result}"
+            f"Hybrid.run() returned invalid contract. Missing keys: {missing}"
+        )
+
+    domain_results = result["domain_results"]
+    primary_domain = result["primary_domain"]
+
+    if (
+        not isinstance(domain_results, dict)
+        or primary_domain not in domain_results
+        or not isinstance(domain_results[primary_domain], dict)
+    ):
+        raise RuntimeError(
+            f"Hybrid.run() returned corrupted domain_results: {domain_results}"
         )
 
     md_path = Path(result["markdown"])
-    payload = result["payload"]
+    primary_payload = domain_results[primary_domain]
 
     pdf_path = None
 
@@ -95,12 +109,20 @@ def run_single_file(
                 raise ImportError("ExecutivePDFRenderer not found")
 
             pdf_renderer = pdf_mod.ExecutivePDFRenderer()
-
             pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
 
-            # Keyword-safe render (matches fixed renderer)
+            # 🔒 PAYLOAD NORMALIZATION (AUTHORITATIVE)
+            pdf_payload = {
+                "executive": primary_payload.get("executive", {}),
+                "visuals": primary_payload.get("visuals", []),
+                "insights": primary_payload.get("executive", {}).get("insights", {}),
+                "recommendations": primary_payload.get("recommendations", []),
+                "domain": primary_domain,
+                "kpis": primary_payload.get("executive", {}).get("primary_kpis", []),
+            }
+
             pdf_renderer.render(
-                payload=payload,
+                payload=pdf_payload,
                 output_path=pdf_path,
             )
 
@@ -117,9 +139,9 @@ def run_single_file(
     }
 
 
-# -------------------------------------------------
-# CLI ENTRY
-# -------------------------------------------------
+# =====================================================
+# CLI ENTRY POINT
+# =====================================================
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=f"Sreejita Framework v{__version__}"
