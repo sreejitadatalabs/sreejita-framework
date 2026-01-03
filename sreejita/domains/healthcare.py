@@ -336,8 +336,10 @@ class HealthcareDomain(BaseDomain):
                     df[self.cols["date"]]
                 ).dt.days
     
-                df["_derived_los"] = pd.to_numeric(los, errors="coerce")
-                self.cols["los"] = "_derived_los"
+                derived_col = "__derived_los"
+                df[derived_col] = pd.to_numeric(los, errors="coerce")
+                self.cols["los"] = derived_col
+                
             except Exception:
                 pass  # absolute safety
     
@@ -370,13 +372,13 @@ class HealthcareDomain(BaseDomain):
         ])
     
         sub_scores = {
-            "hospital": 0.9 if hospital_signal else 0.0,
-            "clinic": 0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0,
-            "diagnostics": 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
-            "pharmacy": 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
-            "public_health": 0.9 if self.cols.get("population") else 0.0,
+            HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
+            HealthcareSubDomain.CLINIC.value: 0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0,
+            HealthcareSubDomain.DIAGNOSTICS.value: 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
+            HealthcareSubDomain.PHARMACY.value: 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
+            HealthcareSubDomain.PUBLIC_HEALTH.value: 0.9 if self.cols.get("population") else 0.0,
         }
-    
+
         active_subs = {
             k: v for k, v in sub_scores.items()
             if isinstance(v, (int, float)) and v >= 0.3
@@ -446,12 +448,12 @@ class HealthcareDomain(BaseDomain):
     
                 # Bed utilization proxy
                 bed_col = self.cols.get("bed_id")
-                kpis["bed_occupancy_ratio"] = (
+                kpis["bed_occupancy_rate"] = (
                     df[bed_col].nunique() / volume
                     if bed_col and bed_col in df.columns and volume > 0
                     else None
                 )
-    
+
                 # Emergency admissions
                 admit_col = self.cols.get("admit_type")
                 kpis["emergency_admission_rate"] = (
@@ -465,12 +467,16 @@ class HealthcareDomain(BaseDomain):
                 los_col = self.cols.get("los")
                 if fac_col and los_col and fac_col in df.columns and los_col in df.columns:
                     means = df.groupby(fac_col)[los_col].mean()
+
                     kpis["facility_variance_score"] = (
                         means.std() / means.mean()
-                        if means.mean() > 0 else None
+                        if means.mean() and means.mean() > 0
+                        else None
                     )
+
                 else:
-                    kpis["facility_variance_score"] = None
+                    if volume < MIN_SAMPLE_SIZE:
+                        kpis["facility_variance_score"] = None
     
                 kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
     
@@ -552,7 +558,8 @@ class HealthcareDomain(BaseDomain):
             for k, v in kpis.items()
             if not k.startswith("_")
         }
-    
+        self._last_kpis = kpis
+        
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
@@ -605,7 +612,10 @@ class HealthcareDomain(BaseDomain):
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
     
-            final_conf = round(base_confidence * sub_domain_weight(sub), 2)
+            final_conf = round(
+                min(0.95, base_confidence * sub_domain_weight(sub)),
+                2
+            )
     
             visuals.append({
                 "path": str(path),
@@ -1789,8 +1799,29 @@ class HealthcareDomain(BaseDomain):
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
+
     def detect(self, df):
-        return DomainDetectionResult("healthcare", 1.0, {})
+        cols = {
+            "patient": resolve_column(df, "patient_id"),
+            "admit": resolve_column(df, "admission_date"),
+            "discharge": resolve_column(df, "discharge_date"),
+            "los": resolve_column(df, "length_of_stay"),
+            "diagnosis": resolve_column(df, "diagnosis"),
+            "facility": resolve_column(df, "facility"),
+        }
+
+        signals = {k: bool(v) for k, v in cols.items()}
+        confidence = sum(signals.values()) / 6
+
+        if confidence < 0.3:
+            return DomainDetectionResult(None, 0.0, signals)
+
+        return DomainDetectionResult(
+            domain="healthcare",
+            confidence=round(confidence, 2),
+            signals=signals,
+        )
+
 
 def register(registry):
     registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
