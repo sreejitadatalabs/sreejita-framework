@@ -254,11 +254,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "markdown": str(md_path),
-        "domain_results": domain_results,
+        "domain_results": domain_results,   # 🔒 authoritative
         "primary_domain": primary_domain,
-        "executive": primary.get("executive", {}),
-        "visuals": primary.get("visuals", []) if isinstance(primary.get("visuals"), list) else [],
-        "insights": primary.get("insights", {}),
-        "recommendations": primary.get("recommendations", []) if isinstance(primary.get("recommendations"), list) else [],
         "run_dir": str(run_dir),
     }
