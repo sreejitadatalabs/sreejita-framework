@@ -130,31 +130,33 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # STYLES
+        # STYLES (HARDENED FOR STREAMLIT)
         # -------------------------------------------------
-        styles.add(ParagraphStyle(
-            "SR_Title",
-            fontSize=22,
-            alignment=TA_CENTER,
-            spaceAfter=18,
-            fontName="Helvetica-Bold",
-        ))
+        if "SR_Title" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Title",
+                fontSize=22,
+                alignment=TA_CENTER,
+                spaceAfter=18,
+                fontName="Helvetica-Bold",
+            ))
 
-        styles.add(ParagraphStyle(
-            "SR_Section",
-            fontSize=15,
-            spaceBefore=18,
-            spaceAfter=10,
-            fontName="Helvetica-Bold",
-        ))
+        if "SR_Section" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Section",
+                fontSize=15,
+                spaceBefore=18,
+                spaceAfter=10,
+                fontName="Helvetica-Bold",
+            ))
 
-        styles.add(ParagraphStyle(
-            "SR_Body",
-            fontSize=11,
-            leading=15,
-            spaceAfter=6,
-        ))
-
+        if "SR_Body" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Body",
+                fontSize=11,
+                leading=15,
+                spaceAfter=6,
+            ))
         # =================================================
         # PAGE 1 — EXECUTIVE OVERVIEW
         # =================================================
