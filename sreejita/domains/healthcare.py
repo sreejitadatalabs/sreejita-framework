@@ -386,12 +386,7 @@ class HealthcareDomain(BaseDomain):
             k: v for k, v in sub_scores.items()
             if isinstance(v, (int, float)) and v >= 0.3
         }
-        active_subs = {
-        HealthcareSubDomain(k).value: v
-            for k, v in active_subs.items()
-        }
 
-    
         if not active_subs:
             primary_sub = "unknown"
             is_mixed = False
