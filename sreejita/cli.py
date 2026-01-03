@@ -51,7 +51,7 @@ def run_single_file(
     # Config & run directory (AUTHORITATIVE)
     # -------------------------------------------------
     if config:
-        final_config = config
+        final_config = dict(config)
         run_dir = Path(final_config["run_dir"])
     else:
         final_config = load_config(config_path)
@@ -66,13 +66,21 @@ def run_single_file(
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
-    # ---------------- CONTRACT VALIDATION ----------------
+    # -------------------------------------------------
+    # CONTRACT VALIDATION (NON-NEGOTIABLE)
+    # -------------------------------------------------
     if not isinstance(result, dict):
         raise RuntimeError(
             f"Hybrid.run() returned invalid type: {type(result)}"
         )
 
-    required_keys = {"markdown", "domain_results", "primary_domain", "run_dir"}
+    required_keys = {
+        "markdown",
+        "domain_results",
+        "primary_domain",
+        "run_dir",
+    }
+
     missing = required_keys - set(result.keys())
     if missing:
         raise RuntimeError(
@@ -82,19 +90,23 @@ def run_single_file(
     domain_results = result["domain_results"]
     primary_domain = result["primary_domain"]
 
-    if (
-        not isinstance(domain_results, dict)
-        or primary_domain not in domain_results
-        or not isinstance(domain_results[primary_domain], dict)
-    ):
+    if not isinstance(domain_results, dict):
+        raise RuntimeError("domain_results must be a dict")
+
+    if primary_domain not in domain_results:
         raise RuntimeError(
-            f"Hybrid.run() returned corrupted domain_results: {domain_results}"
+            f"Primary domain '{primary_domain}' missing in domain_results"
+        )
+
+    primary_payload = domain_results[primary_domain]
+
+    if not isinstance(primary_payload, dict):
+        raise RuntimeError(
+            f"Primary domain payload corrupted: {type(primary_payload)}"
         )
 
     md_path = Path(result["markdown"])
-    primary_payload = domain_results[primary_domain]
-
-    pdf_path = None
+    pdf_path: Optional[Path] = None
 
     # -------------------------------------------------
     # EXECUTIVE PDF (ReportLab — FINAL)
@@ -111,14 +123,18 @@ def run_single_file(
             pdf_renderer = pdf_mod.ExecutivePDFRenderer()
             pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
 
-            # 🔒 PAYLOAD NORMALIZATION (AUTHORITATIVE)
+            # 🔒 AUTHORITATIVE PDF PAYLOAD
             pdf_payload = {
                 "executive": primary_payload.get("executive", {}),
                 "visuals": primary_payload.get("visuals", []),
-                "insights": primary_payload.get("executive", {}).get("insights", {}),
+                "insights": primary_payload
+                    .get("executive", {})
+                    .get("insights", {}),
                 "recommendations": primary_payload.get("recommendations", []),
                 "domain": primary_domain,
-                "kpis": primary_payload.get("executive", {}).get("primary_kpis", []),
+                "kpis": primary_payload
+                    .get("executive", {})
+                    .get("primary_kpis", []),
             }
 
             pdf_renderer.render(
@@ -128,10 +144,13 @@ def run_single_file(
 
             logger.info("PDF generated successfully: %s", pdf_path)
 
-        except Exception as e:
+        except Exception:
             logger.exception("PDF generation failed")
             pdf_path = None
 
+    # -------------------------------------------------
+    # FINAL RETURN (UI / API SAFE)
+    # -------------------------------------------------
     return {
         "markdown": str(md_path),
         "pdf": str(pdf_path) if pdf_path else None,
