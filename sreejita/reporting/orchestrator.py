@@ -1,6 +1,6 @@
 # =====================================================
 # ORCHESTRATOR — UNIVERSAL (FINAL, ENFORCED)
-# Sreejita Framework
+# Sreejita Framework v3.5.1
 # =====================================================
 
 import logging
@@ -114,17 +114,19 @@ def generate_report_payload(
     engine = decision.engine
     domain = decision.selected_domain
 
-    if engine is None:
+    if engine is None or not domain:
         raise RuntimeError(
             "Unsupported or unknown domain. "
             "Executive report cannot be generated safely."
         )
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION
+    # 4. DOMAIN EXECUTION (STRICT)
     # -------------------------------------------------
     try:
-        df = engine.preprocess(df)
+        if hasattr(engine, "preprocess"):
+            df = engine.preprocess(df)
+
         kpis = engine.calculate_kpis(df)
 
         visuals = engine.generate_visuals(
@@ -138,7 +140,9 @@ def generate_report_payload(
             insights = engine.generate_insights(df, kpis)
 
         try:
-            raw_recs = engine.generate_recommendations(df, kpis, insights, shape_info=shape_info)
+            raw_recs = engine.generate_recommendations(
+                df, kpis, insights, shape_info=shape_info
+            )
         except TypeError:
             raw_recs = engine.generate_recommendations(df, kpis, insights)
 
@@ -149,11 +153,11 @@ def generate_report_payload(
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL ENFORCEMENT (HARD RULE)
+    # 5. VISUAL SAFETY ENFORCEMENT (NON-CRASHING)
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
-    for v in visuals:
+    for v in visuals or []:
         try:
             path = Path(v.get("path", ""))
             conf = float(v.get("confidence", 0))
@@ -161,9 +165,6 @@ def generate_report_payload(
                 valid_visuals.append(v)
         except Exception:
             continue
-
-    if len(visuals) < 2:
-        log.warning("Insufficient visuals after filtering — fallback visuals expected.")
 
     valid_visuals = sorted(
         valid_visuals,
@@ -176,8 +177,8 @@ def generate_report_payload(
     # -------------------------------------------------
     executive = build_executive_payload(
         kpis=kpis,
-        insights=insights,
-        recommendations=recommendations,
+        insights=insights if isinstance(insights, list) else [],
+        recommendations=recommendations if isinstance(recommendations, list) else [],
     )
 
     # -------------------------------------------------
@@ -200,11 +201,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 8. FINAL PAYLOAD (FLAT, ENFORCED)
-    # -------------------------------------------------
-    # -------------------------------------------------
-    # -------------------------------------------------
-    # 8. FINAL PAYLOAD (STRICT CONTRACT)
+    # 8. FINAL PAYLOAD (STRICT CONTRACT — NO LEAKS)
     # -------------------------------------------------
     return {
         domain: {
@@ -212,7 +209,7 @@ def generate_report_payload(
             "visuals": valid_visuals,
             "insights": insights if isinstance(insights, list) else [],
             "recommendations": recommendations if isinstance(recommendations, list) else [],
-            "executive": executive if isinstance(executive, dict) else {},
+            "executive": executive,
             "shape": shape_info,
         }
     }
