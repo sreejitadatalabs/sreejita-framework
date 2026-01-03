@@ -202,13 +202,17 @@ def generate_report_payload(
     # -------------------------------------------------
     # 8. FINAL PAYLOAD (FLAT, ENFORCED)
     # -------------------------------------------------
+    # -------------------------------------------------
+    # -------------------------------------------------
+    # 8. FINAL PAYLOAD (STRICT CONTRACT)
+    # -------------------------------------------------
     return {
         domain: {
-            "kpis": kpis,
-            "visuals": visuals,
-            "insights": insights,
-            "recommendations": recommendations,
-            "executive": executive,
+            "kpis": kpis or {},
+            "visuals": valid_visuals,
+            "insights": insights if isinstance(insights, list) else [],
+            "recommendations": recommendations if isinstance(recommendations, list) else [],
+            "executive": executive if isinstance(executive, dict) else {},
             "shape": shape_info,
         }
     }
