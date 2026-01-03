@@ -145,13 +145,27 @@ class HybridReport(BaseReport):
                 )
 
         # ---------------- INSIGHTS ----------------
+        # ---------------- INSIGHTS ----------------
         if insights:
             f.write("### Key Insights\n")
-            for ins in insights[:5]:
+        
+            # Executive cognition returns structured insight blocks
+            if isinstance(insights, dict):
+                ordered = []
+                ordered.extend(insights.get("strengths", []))
+                ordered.extend(insights.get("warnings", []))
+                ordered.extend(insights.get("risks", []))
+            elif isinstance(insights, list):
+                ordered = insights
+            else:
+                ordered = []
+        
+            for ins in ordered[:5]:
                 f.write(
                     f"- **{ins.get('level','INFO')}** — "
                     f"{ins.get('title','')}: {ins.get('so_what','')}\n"
                 )
+        
             f.write("\n")
 
         # ---------------- RECOMMENDATIONS ----------------
