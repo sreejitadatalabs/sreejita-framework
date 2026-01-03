@@ -55,9 +55,16 @@ class HybridReport(BaseReport):
             primary_domain = self._sort_domains(domains)[0]
             primary = domain_results.get(primary_domain)
 
-            # HARD SAFETY — never crash on corruption
             if not isinstance(primary, dict):
-                primary = {}
+                # Hard fallback – NEVER crash
+                primary = {
+                    "kpis": {},
+                    "visuals": [],
+                    "insights": [],
+                    "recommendations": [],
+                    "executive": {},
+                    "shape": {},
+                }
 
             executive = primary.get("executive")
             if not isinstance(executive, dict):
@@ -111,7 +118,19 @@ class HybridReport(BaseReport):
         }
 
         visuals = result.get("visuals") if isinstance(result.get("visuals"), list) else []
-        insights = result.get("insights")
+        raw_insights = result.get("insights", [])
+        if isinstance(raw_insights, dict):
+            ordered = (
+                raw_insights.get("strengths", []) +
+                raw_insights.get("warnings", []) +
+                raw_insights.get("risks", [])
+            )
+        elif isinstance(raw_insights, list):
+            ordered = raw_insights
+        else:
+            ordered = []
+        
+        insights = ordered
         recs = result.get("recommendations") if isinstance(result.get("recommendations"), list) else []
 
         # ---------------- KPIs ----------------
