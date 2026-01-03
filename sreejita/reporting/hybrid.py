@@ -113,10 +113,16 @@ class HybridReport(BaseReport):
         f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
 
         # ---------------- SAFE EXTRACTION ----------------
-        kpis = {
-            k: v for k, v in (result.get("kpis") or {}).items()
-            if isinstance(k, str) and not k.startswith("_")
-        }
+        raw_kpis = result.get("kpis")
+
+        if isinstance(raw_kpis, dict):
+            kpis = {
+                k: v for k, v in raw_kpis.items()
+                if isinstance(k, str) and not k.startswith("_")
+            }
+        else:
+            kpis = {}
+
 
         visuals = result.get("visuals")
         visuals = visuals if isinstance(visuals, list) else []
