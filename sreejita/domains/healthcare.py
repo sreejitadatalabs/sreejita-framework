@@ -255,6 +255,9 @@ class HealthcareDomain(BaseDomain):
             "supply": resolve_column(df, "days_supply"),
             "population": resolve_column(df, "population"),
             "flag": resolve_column(df, "flag"),
+            "bed_id": resolve_column(df, "bed_id"),       # For Room Number/Wards
+            "admit_type": resolve_column(df, "admission_type"), # Emergency vs Elective
+            "diagnosis": resolve_column(df, "diagnosis"), # Clinical Condition
         }
     
         # Numeric coercion
@@ -285,7 +288,6 @@ class HealthcareDomain(BaseDomain):
     
         self.time_col = self.cols.get("date")
         return df
-
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
@@ -359,31 +361,63 @@ class HealthcareDomain(BaseDomain):
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
         for sub in active_subs:
-    
-            # ---------------- HOSPITAL ----------------
+            
+            # ---------------- HOSPITAL (STRENGTHENED v1.2) ----------------
             if sub == "hospital":
                 avg_los = safe_mean(self.cols.get("los"))
-                cost = safe_mean(self.cols.get("cost"))
-    
+                total_cost = safe_mean(self.cols.get("cost"))
+                
+                # 🛡️ CAPABILITY: THROUGHPUT & QUALITY
                 kpis.update({
                     "avg_los": avg_los,
                     "readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    "long_stay_rate": (
-                        (df[self.cols["los"]] > 7).mean()
-                        if self.cols.get("los") in df.columns
-                        else None
-                    ),
-                    "avg_cost_per_day": (cost / avg_los if avg_los and cost else None),
-                    "facility_variance_score": (
-                        df.groupby(self.cols["facility"])[self.cols["los"]].mean().std()
-                        / df[self.cols["los"]].mean()
-                        if self.cols.get("facility") and self.cols.get("los")
-                        else None
-                    ),
                     "mortality_rate": safe_rate(self.cols.get("flag")),
-                    "er_boarding_time": safe_mean(self.cols.get("duration")),
-                    "labor_cost_per_day": cost,
+                    "long_stay_rate": (
+                        (df[self.cols["los"]] > 7).mean() 
+                        if self.cols.get("los") in df.columns else None
+                    ),
                 })
+
+                # 🛡️ CAPABILITY: CAPACITY & UTILIZATION (STRENGTHENED)
+                # Uses Bed ID/Room Number to determine physical asset efficiency
+                bed_col = self.cols.get("bed_id")
+                kpis["bed_occupancy_ratio"] = (
+                    df[bed_col].nunique() / volume 
+                    if bed_col and bed_col in df.columns and volume > 0 else None
+                )
+                
+                # 🛡️ CAPABILITY: CLINICAL INTENSITY
+                # Identifies the percentage of high-stakes emergency cases
+                admit_col = self.cols.get("admit_type")
+                if admit_col and admit_col in df.columns:
+                    kpis["emergency_admission_rate"] = (
+                        df[admit_col].astype(str).str.lower().str.contains("emergency").mean()
+                    )
+                else:
+                    kpis["emergency_admission_rate"] = None
+
+                # 🛡️ CAPABILITY: COST EFFICIENCY
+                # Calculates resource burn-rate per clinical day
+                kpis.update({
+                    "avg_cost_per_day": (total_cost / avg_los if avg_los and total_cost else None),
+                    "labor_cost_per_day": total_cost, # Proxy based on framework constants
+                })
+
+                # 🛡️ CAPABILITY: VARIANCE (GOVERNANCE)
+                # Measures how inconsistent performance is across different branches/facilities
+                fac_col = self.cols.get("facility")
+                los_col = self.cols.get("los")
+                if fac_col and los_col and fac_col in df.columns and los_col in df.columns:
+                    facility_means = df.groupby(fac_col)[los_col].mean()
+                    kpis["facility_variance_score"] = (
+                        facility_means.std() / facility_means.mean() 
+                        if facility_means.mean() > 0 else 0.0
+                    )
+                else:
+                    kpis["facility_variance_score"] = None
+                
+                # 🛡️ CAPABILITY: FLOW
+                kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
     
             # ---------------- CLINIC ----------------
             if sub == "clinic":
@@ -666,25 +700,20 @@ class HealthcareDomain(BaseDomain):
     
             # 2. Bed Turnover Velocity
             if visual_key == "bed_turnover":
-                if not time_col:
+                if not (self.cols.get("bed_id") and time_col):
                     raise ValueError
-    
-                gaps = df.sort_values(time_col)[time_col].diff().dt.total_seconds() / 3600
-                gaps = gaps.dropna()
-                if gaps.empty:
-                    raise ValueError
-    
+                
+                # Logic: How many patients per room in this period?
+                turnover = df.groupby(self.cols["bed_id"])[time_col].count()
+                
                 fig, ax = plt.subplots(figsize=(6, 4))
-                gaps.clip(upper=72).hist(ax=ax, bins=20)
-                ax.set_title("Bed Turnover Velocity (Hours)", fontweight="bold")
-    
-                register_visual(
-                    fig,
-                    f"{sub_domain}_bed_turnover.png",
-                    "Time gap between discharge and next admission.",
-                    importance=0.9,
-                    confidence=0.85,
-                )
+                turnover.plot(kind="hist", bins=15, ax=ax, color="#2c3e50")
+                ax.set_title("Bed Turnover Velocity (Volume per Room)", fontweight="bold")
+                ax.set_xlabel("Patients per Room")
+                
+                register_visual(fig, f"{sub_domain}_bed_velocity.png", 
+                               "Utilization frequency of physical hospital beds.", 
+                               0.92, 0.88)
                 return
     
             # 3. Readmission Risk
