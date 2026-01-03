@@ -1,114 +1,176 @@
-from difflib import get_close_matches
-from typing import Dict, List, Optional
+from difflib import SequenceMatcher
+from typing import Dict, List, Optional, Tuple
 import pandas as pd
+import re
 
 
 # =====================================================
-# UNIVERSAL SEMANTIC COLUMN MAP
+# NORMALIZATION (CRITICAL)
 # =====================================================
-# This map is DOMAIN-NEUTRAL by design.
-# Domains may reuse keys but should NOT hardcode logic here.
+
+def _normalize(name: str) -> str:
+    """
+    Aggressively normalize column names to handle:
+    - spelling mistakes
+    - punctuation
+    - spaces / dots / hyphens
+    - casing
+    """
+    name = name.lower().strip()
+    name = re.sub(r"[^\w\s]", "", name)   # remove punctuation
+    name = re.sub(r"\s+", "_", name)      # spaces -> underscore
+    return name
+
+
+def _similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+
+# =====================================================
+# UNIVERSAL SEMANTIC COLUMN MAP (EXPANDED)
+# =====================================================
 
 SEMANTIC_COLUMN_MAP: Dict[str, List[str]] = {
+
     # ---------- Identity ----------
     "id": ["id", "uid", "uuid"],
     "record_id": ["record_id", "row_id", "entry_id"],
 
     # ---------- Person / Entity ----------
-    "customer_id": ["customer_id", "customerid", "cust_id", "cid", "customer"],
-    "patient_id": ["patient_id", "patientid", "pid", "patient"],
-    "employee_id": ["employee_id", "emp_id", "staff_id", "eid"],
+    "patient_id": [
+        "patient_id", "patientid", "pid", "ptid", "pt_id",
+        "patient", "mrn", "uhid", "medical_record",
+    ],
+    "customer_id": [
+        "customer_id", "customerid", "cust_id", "cid", "customer",
+    ],
+    "employee_id": [
+        "employee_id", "emp_id", "staff_id", "eid",
+    ],
 
     # ---------- Dates ----------
-    "date": ["date", "created_date", "timestamp"],
-    "admission_date": ["admission_date", "admit_date", "admission"],
-    "discharge_date": ["discharge_date", "discharge"],
-    "order_date": ["order_date", "purchase_date"],
+    "date": [
+        "date", "created_date", "timestamp", "time", "event_date",
+    ],
+    "admission_date": [
+        "admission_date", "admit_date", "admission",
+    ],
+    "discharge_date": [
+        "discharge_date", "discharge",
+    ],
+    "order_date": [
+        "order_date", "purchase_date",
+    ],
+    "fill_date": [
+        "fill_date", "dispense_date", "rx_date",
+    ],
 
-    # ---------- Quantities ----------
-    "quantity": ["quantity", "qty", "units"],
-    "length_of_stay": ["length_of_stay", "los", "stay_length", "lengthofstay"],
+    # ---------- Time / Duration ----------
+    "duration": [
+        "duration", "wait_time", "tat", "turnaround",
+        "cycle_time", "delay",
+    ],
+    "length_of_stay": [
+        "length_of_stay", "los", "stay_length", "lengthofstay",
+    ],
 
     # ---------- Financial ----------
-    "billing_amount": ["billing_amount", "bill_amount", "charges", "claim_amount", "cost"],
-    "revenue": ["revenue", "sales", "turnover"],
-    "profit": ["profit", "margin", "net_profit"],
-    "discount": ["discount", "discount_rate", "rebate"],
+    "cost": [
+        "cost", "charges", "charge", "billing",
+        "bill_amount", "expense", "amount",
+    ],
+    "revenue": [
+        "revenue", "sales", "turnover",
+    ],
+    "discount": [
+        "discount", "discount_rate", "rebate",
+    ],
 
-    # ---------- Outcomes / Status ----------
-    "readmitted": ["readmitted", "readmit", "re_admitted"],
-    "mortality": ["mortality", "death", "expired", "is_dead"],
-    "status": ["status", "state", "result", "outcome"],
+    # ---------- Outcomes / Flags ----------
+    "readmitted": [
+        "readmitted", "readmit", "re_admitted", "no_show",
+    ],
+    "flag": [
+        "flag", "indicator", "binary", "event", "outcome",
+    ],
+    "mortality": [
+        "mortality", "death", "expired", "is_dead",
+    ],
 
     # ---------- Categorical ----------
-    "diagnosis": ["diagnosis", "dx", "condition"],
-    "department": ["department", "dept", "unit", "team"],
-    "doctor": ["doctor", "physician", "provider", "consultant"],
-    "insurance": ["insurance", "payer", "insurance_provider"],
+    "facility": [
+        "facility", "hospital", "site", "location", "center",
+    ],
+    "doctor": [
+        "doctor", "physician", "provider", "consultant", "clinician",
+    ],
+    "department": [
+        "department", "dept", "unit", "team",
+    ],
+    "insurance": [
+        "insurance", "payer", "insurance_provider",
+    ],
+
+    # ---------- Supply / Population ----------
+    "supply": [
+        "days_supply", "supply", "inventory_days",
+    ],
+    "population": [
+        "population", "members", "covered_lives", "people",
+    ],
 }
 
 
 # =====================================================
-# COLUMN RESOLUTION ENGINE
+# COLUMN RESOLUTION ENGINE (v2)
 # =====================================================
 
 def resolve_column(
     df: pd.DataFrame,
     semantic_key: str,
-    cutoff: float = 0.75
+    cutoff: float = 0.72,
 ) -> Optional[str]:
     """
-    Resolve a semantic column name to an actual dataframe column.
+    Backward-compatible resolver.
+    Returns column name or None.
+    """
+    col, _ = resolve_column_with_confidence(df, semantic_key, cutoff)
+    return col
 
-    Resolution strategy:
-    1. Exact match (case-insensitive)
-    2. Synonym match from SEMANTIC_COLUMN_MAP
-    3. Fuzzy match fallback
 
-    Args:
-        df: Input dataframe
-        semantic_key: Logical column intent (e.g., 'revenue', 'patient_id')
-        cutoff: Similarity threshold for fuzzy matching
+def resolve_column_with_confidence(
+    df: pd.DataFrame,
+    semantic_key: str,
+    cutoff: float = 0.72,
+) -> Tuple[Optional[str], float]:
+    """
+    Authoritative resolver with confidence.
 
     Returns:
-        Actual column name if resolved, else None
-
-    Guarantees:
-        - Deterministic
-        - Domain-agnostic
-        - Safe fallback behavior
+        (column_name | None, confidence 0–1)
     """
 
-    if df is None or semantic_key is None:
-        return None
+    if df is None or semantic_key not in SEMANTIC_COLUMN_MAP:
+        return None, 0.0
 
-    cols = list(df.columns)
-    cols_lower = {c.lower(): c for c in cols}
+    # Normalize dataframe columns
+    norm_cols = {
+        _normalize(c): c for c in df.columns
+    }
 
-    semantic_key = semantic_key.lower()
+    best_match = None
+    best_score = 0.0
 
-    # -----------------------------
-    # 1. Exact match
-    # -----------------------------
-    if semantic_key in cols_lower:
-        return cols_lower[semantic_key]
+    for alias in SEMANTIC_COLUMN_MAP[semantic_key]:
+        alias_norm = _normalize(alias)
 
-    # -----------------------------
-    # 2. Synonym match
-    # -----------------------------
-    candidates = SEMANTIC_COLUMN_MAP.get(semantic_key, [])
-    for c in cols:
-        if c.lower() in candidates:
-            return c
+        for norm_col, original_col in norm_cols.items():
+            score = _similarity(alias_norm, norm_col)
+            if score > best_score:
+                best_score = score
+                best_match = original_col
 
-    # -----------------------------
-    # 3. Fuzzy fallback (last resort)
-    # -----------------------------
-    matches = get_close_matches(
-        semantic_key,
-        cols_lower.keys(),
-        n=1,
-        cutoff=cutoff
-    )
+    if best_score >= cutoff:
+        return best_match, round(best_score, 2)
 
-    return cols_lower[matches[0]] if matches else None
+    return None, 0.0
