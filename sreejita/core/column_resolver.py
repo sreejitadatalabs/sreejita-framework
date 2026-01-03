@@ -1,128 +1,88 @@
+import re
+import pandas as pd
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
-import pandas as pd
-import re
-
 
 # =====================================================
-# NORMALIZATION (CRITICAL)
+# UNIVERSAL SEMANTIC COLUMN MAP (HARDENED)
 # =====================================================
-
-def _normalize(name: str) -> str:
-    """
-    Aggressively normalize column names to handle:
-    - spelling mistakes
-    - punctuation
-    - spaces / dots / hyphens
-    - casing
-    """
-    name = name.lower().strip()
-    name = re.sub(r"[^\w\s]", "", name)   # remove punctuation
-    name = re.sub(r"\s+", "_", name)      # spaces -> underscore
-    return name
-
-
-def _similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
-
-
-# =====================================================
-# UNIVERSAL SEMANTIC COLUMN MAP (EXPANDED)
-# =====================================================
+# Central source of truth for industry synonyms.
+# This ensures a "Hospital Strong" detection even with messy headers.
 
 SEMANTIC_COLUMN_MAP: Dict[str, List[str]] = {
-
     # ---------- Identity ----------
-    "id": ["id", "uid", "uuid"],
-    "record_id": ["record_id", "row_id", "entry_id"],
+    "id": ["id", "uid", "uuid", "key", "pk"],
+    "record_id": ["record_id", "row_id", "entry_id", "transaction_id"],
 
     # ---------- Person / Entity ----------
     "patient_id": [
         "patient_id", "patientid", "pid", "ptid", "pt_id",
-        "patient", "mrn", "uhid", "medical_record",
+        "patient", "mrn", "uhid", "medical_record_number", "member_id"
     ],
-    "customer_id": [
-        "customer_id", "customerid", "cust_id", "cid", "customer",
-    ],
-    "employee_id": [
-        "employee_id", "emp_id", "staff_id", "eid",
-    ],
+    "customer_id": ["customer_id", "customerid", "cust_id", "cid", "customer", "client_id"],
+    "employee_id": ["employee_id", "emp_id", "staff_id", "eid", "provider_id"],
 
     # ---------- Dates ----------
-    "date": [
-        "date", "created_date", "timestamp", "time", "event_date",
-    ],
-    "admission_date": [
-        "admission_date", "admit_date", "admission",
-    ],
-    "discharge_date": [
-        "discharge_date", "discharge",
-    ],
-    "order_date": [
-        "order_date", "purchase_date",
-    ],
-    "fill_date": [
-        "fill_date", "dispense_date", "rx_date",
-    ],
+    "date": ["date", "created_date", "timestamp", "time", "event_date", "datetime"],
+    "admission_date": ["admission_date", "admit_date", "admission", "admitted_at"],
+    "discharge_date": ["discharge_date", "discharge", "discharged_at"],
+    "order_date": ["order_date", "purchase_date", "transaction_date"],
+    "fill_date": ["fill_date", "dispense_date", "rx_date", "prescribed_date"],
 
     # ---------- Time / Duration ----------
     "duration": [
-        "duration", "wait_time", "tat", "turnaround",
-        "cycle_time", "delay",
+        "duration", "wait_time", "tat", "turnaround", 
+        "cycle_time", "delay", "processing_time"
     ],
-    "length_of_stay": [
-        "length_of_stay", "los", "stay_length", "lengthofstay",
-    ],
+    "length_of_stay": ["length_of_stay", "los", "stay_length", "lengthofstay", "days_in_hospital"],
 
     # ---------- Financial ----------
     "cost": [
-        "cost", "charges", "charge", "billing",
-        "bill_amount", "expense", "amount",
+        "cost", "charges", "charge", "billing", 
+        "bill_amount", "expense", "amount", "total_cost"
     ],
-    "revenue": [
-        "revenue", "sales", "turnover",
-    ],
-    "discount": [
-        "discount", "discount_rate", "rebate",
-    ],
+    "revenue": ["revenue", "sales", "turnover", "gross_amount"],
+    "discount": ["discount", "discount_rate", "rebate", "markdown"],
 
     # ---------- Outcomes / Flags ----------
-    "readmitted": [
-        "readmitted", "readmit", "re_admitted", "no_show",
-    ],
-    "flag": [
-        "flag", "indicator", "binary", "event", "outcome",
-    ],
-    "mortality": [
-        "mortality", "death", "expired", "is_dead",
-    ],
+    "readmitted": ["readmitted", "readmit", "re_admitted", "is_readmission"],
+    "flag": ["flag", "indicator", "binary", "event", "outcome", "status_flag"],
+    "mortality": ["mortality", "death", "expired", "is_dead", "deceased"],
+    "no_show": ["no_show", "missed_appointment", "is_noshow"],
 
     # ---------- Categorical ----------
-    "facility": [
-        "facility", "hospital", "site", "location", "center",
-    ],
-    "doctor": [
-        "doctor", "physician", "provider", "consultant", "clinician",
-    ],
-    "department": [
-        "department", "dept", "unit", "team",
-    ],
-    "insurance": [
-        "insurance", "payer", "insurance_provider",
-    ],
+    "facility": ["facility", "hospital", "site", "location", "center", "clinic_name", "ward"],
+    "doctor": ["doctor", "physician", "provider", "consultant", "clinician", "md"],
+    "department": ["department", "dept", "unit", "team", "specialty"],
+    "insurance": ["insurance", "payer", "insurance_provider", "plan_name"],
 
     # ---------- Supply / Population ----------
-    "supply": [
-        "days_supply", "supply", "inventory_days",
-    ],
-    "population": [
-        "population", "members", "covered_lives", "people",
-    ],
+    "supply": ["days_supply", "supply", "inventory_days", "qty_on_hand", "stock_level"],
+    "population": ["population", "members", "covered_lives", "people", "census"],
 }
 
+# =====================================================
+# INTERNAL HELPERS
+# =====================================================
+
+def _normalize(name: str) -> str:
+    """
+    Standardizes strings by removing punctuation, spaces, and casing.
+    Example: 'Pat. ID #' -> 'pat_id'
+    """
+    if not isinstance(name, str):
+        return str(name)
+    name = name.lower().strip()
+    name = re.sub(r"[^\w\s]", "", name)   # Remove punctuation
+    name = re.sub(r"\s+", "_", name)      # Replace spaces with underscore
+    return name
+
+def _similarity(a: str, b: str) -> float:
+    """Computes the ratio of similarity between two strings."""
+    return SequenceMatcher(None, a, b).ratio()
 
 # =====================================================
-# COLUMN RESOLUTION ENGINE (v2)
+# PUBLIC RESOLUTION ENGINE
 # =====================================================
 
 def resolve_column(
@@ -131,12 +91,10 @@ def resolve_column(
     cutoff: float = 0.72,
 ) -> Optional[str]:
     """
-    Backward-compatible resolver.
-    Returns column name or None.
+    Backward-compatible resolver for simple mapping.
     """
     col, _ = resolve_column_with_confidence(df, semantic_key, cutoff)
     return col
-
 
 def resolve_column_with_confidence(
     df: pd.DataFrame,
@@ -144,33 +102,46 @@ def resolve_column_with_confidence(
     cutoff: float = 0.72,
 ) -> Tuple[Optional[str], float]:
     """
-    Authoritative resolver with confidence.
-
+    Authoritative Resolver.
+    Checks for exact normalized matches, synonyms, and then fuzzy similarity.
+    
     Returns:
-        (column_name | None, confidence 0–1)
+        (original_column_name | None, confidence_score 0.0 - 1.0)
     """
-
-    if df is None or semantic_key not in SEMANTIC_COLUMN_MAP:
+    if df is None or df.empty or semantic_key not in SEMANTIC_COLUMN_MAP:
         return None, 0.0
 
-    # Normalize dataframe columns
-    norm_cols = {
-        _normalize(c): c for c in df.columns
-    }
-
+    # Cache normalized dataframe columns for speed
+    # { 'normalized_name': 'Original Name' }
+    norm_cols = { _normalize(c): c for c in df.columns }
+    
+    target_aliases = SEMANTIC_COLUMN_MAP[semantic_key]
+    
     best_match = None
     best_score = 0.0
 
-    for alias in SEMANTIC_COLUMN_MAP[semantic_key]:
+    # 1. Primary Pass: Search through synonyms
+    for alias in target_aliases:
         alias_norm = _normalize(alias)
-
+        
+        # Check against every column in the dataframe
         for norm_col, original_col in norm_cols.items():
+            # Quick exit for exact match
+            if alias_norm == norm_col:
+                return original_col, 1.0
+            
+            # Fuzzy scoring
             score = _similarity(alias_norm, norm_col)
             if score > best_score:
                 best_score = score
                 best_match = original_col
 
+    # 2. Threshold Check
     if best_score >= cutoff:
         return best_match, round(best_score, 2)
 
     return None, 0.0
+
+def bulk_resolve(df: pd.DataFrame, keys: List[str]) -> Dict[str, Optional[str]]:
+    """Resolves multiple keys at once. Useful for engine preprocess methods."""
+    return {key: resolve_column(df, key) for key in keys}
