@@ -17,7 +17,7 @@ class HybridReport(BaseReport):
     Responsibilities:
     - Render executive-ready Markdown
     - Enforce narrative ordering
-    - Render per-sub-domain executive cognition
+    - Render global + per-sub-domain executive cognition
     - NEVER compute intelligence
     """
 
@@ -62,9 +62,9 @@ class HybridReport(BaseReport):
                 self._write_global_executive(f, executive)
 
             # =================================================
-            # PER-SUB-DOMAIN EXECUTIVE SECTIONS
+            # PER-SUB-DOMAIN EXECUTIVE SECTIONS (CRITICAL)
             # =================================================
-            self._write_sub_domain_executives(f, primary)
+            self._write_sub_domain_executives(f, executive)
 
             # =================================================
             # DOMAIN DEEP DIVES
@@ -94,13 +94,21 @@ class HybridReport(BaseReport):
             f.write(f"- **Score:** {board.get('score', '-')} / 100\n")
             f.write(f"- **Status:** {board.get('band', '-')}\n\n")
 
+        trend = executive.get("board_readiness_trend")
+        if isinstance(trend, dict):
+            f.write(
+                f"- **Trend:** {trend.get('trend','→')} "
+                f"(Prev: {trend.get('previous_score','—')}, "
+                f"Current: {trend.get('current_score','—')})\n\n"
+            )
+
         f.write("---\n\n")
 
     # -------------------------------------------------
-    # SUB-DOMAIN EXECUTIVE SECTIONS
+    # SUB-DOMAIN EXECUTIVE SECTIONS (AUTHORITATIVE)
     # -------------------------------------------------
-    def _write_sub_domain_executives(self, f, primary: Dict[str, Any]):
-        exec_by_sub = primary.get("executive_by_sub_domain")
+    def _write_sub_domain_executives(self, f, executive: Dict[str, Any]):
+        exec_by_sub = executive.get("executive_by_sub_domain")
 
         if not isinstance(exec_by_sub, dict) or not exec_by_sub:
             return
@@ -158,7 +166,6 @@ class HybridReport(BaseReport):
                 )
                 shown += 1
 
-            # HARD GUARANTEE — minimum 5 KPIs
             while shown < 5:
                 f.write("| Data Coverage | Insufficient signal |\n")
                 shown += 1
