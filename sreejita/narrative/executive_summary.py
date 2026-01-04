@@ -29,16 +29,57 @@ def generate_executive_summary(
     """
     Generate a CEO / Board-ready executive summary.
 
-    Accepts legacy parameters but ONLY trusts
-    Executive Cognition output.
+    Supports:
+    - Global executive cognition
+    - Per-sub-domain executive cognition
 
-    Expected executive payload locations:
-    - kpis["executive_brief"]
-    - kpis["executive"]
+    Accepted executive payload locations:
+    - kpis["executive_brief"]                (single payload)
+    - kpis["executive"]                      (single payload)
+    - kpis["executive_by_sub_domain"]        (multi payload)
     """
 
     # -------------------------------------------------
-    # 1. DETECT EXECUTIVE PAYLOAD (STRICT)
+    # 1. MULTI–SUB-DOMAIN EXECUTIVE PAYLOAD (PREFERRED)
+    # -------------------------------------------------
+    if isinstance(kpis, dict) and "executive_by_sub_domain" in kpis:
+        sub_execs = kpis.get("executive_by_sub_domain")
+
+        if isinstance(sub_execs, dict) and sub_execs:
+            paragraphs: List[str] = []
+
+            for sub, payload in sub_execs.items():
+                if not isinstance(payload, dict):
+                    continue
+
+                brief = payload.get("executive_brief")
+                board = payload.get("board_readiness", {}) or {}
+
+                score = board.get("score")
+                band = board.get("band")
+
+                # ---- Opening (per sub-domain)
+                if isinstance(score, (int, float)):
+                    paragraphs.append(
+                        f"{sub.replace('_',' ').title()} operations reflect a "
+                        f"{band.lower()} position, with a Board Readiness Score "
+                        f"of {int(score)} out of 100."
+                    )
+                else:
+                    paragraphs.append(
+                        f"{sub.replace('_',' ').title()} operations were assessed "
+                        "using available operational and risk signals."
+                    )
+
+                # ---- Executive brief sentence (authoritative)
+                if isinstance(brief, str) and brief.strip():
+                    paragraphs.append(brief.strip())
+
+            if paragraphs:
+                return " ".join(paragraphs).strip()
+
+    # -------------------------------------------------
+    # 2. SINGLE EXECUTIVE PAYLOAD (BACKWARD COMPATIBLE)
     # -------------------------------------------------
     executive: Dict[str, Any] | None = None
 
@@ -52,7 +93,7 @@ def generate_executive_summary(
         return _safe_fallback(domain)
 
     # -------------------------------------------------
-    # 2. CORE EXECUTIVE SIGNALS
+    # 3. CORE EXECUTIVE SIGNALS
     # -------------------------------------------------
     board = executive.get("board_readiness", {}) or {}
     score = board.get("score")
@@ -60,12 +101,12 @@ def generate_executive_summary(
 
     primary_kpis: List[Dict[str, Any]] = executive.get("primary_kpis", []) or []
     insight_block: Dict[str, Any] = executive.get("insights", {}) or {}
-    recommendations = executive.get("recommendations", []) or []
+    recs = executive.get("recommendations", []) or []
 
     paragraphs: List[str] = []
 
     # -------------------------------------------------
-    # 3. OPENING STATEMENT (MANDATORY)
+    # 4. OPENING STATEMENT (MANDATORY)
     # -------------------------------------------------
     if isinstance(score, (int, float)):
         paragraphs.append(
@@ -80,34 +121,30 @@ def generate_executive_summary(
         )
 
     # -------------------------------------------------
-    # 4. POSITIVE SIGNAL (MAX 1)
+    # 5. POSITIVE SIGNAL (MAX 1)
     # -------------------------------------------------
     strengths = insight_block.get("strengths", []) or []
-    if strengths:
-        s = strengths[0]
-        if s.get("title"):
-            paragraphs.append(
-                f"Encouragingly, {s['title'].lower()} are operating within "
-                "acceptable or improving ranges."
-            )
+    if strengths and strengths[0].get("title"):
+        paragraphs.append(
+            f"Encouragingly, {strengths[0]['title'].lower()} are operating "
+            "within acceptable or improving ranges."
+        )
 
     # -------------------------------------------------
-    # 5. PRIMARY RISK (MAX 1)
+    # 6. PRIMARY RISK (MAX 1)
     # -------------------------------------------------
     risks = insight_block.get("risks", []) or []
-    if risks:
-        r = risks[0]
-        if r.get("title"):
-            paragraphs.append(
-                f"The most significant risk relates to {r['title'].lower()}, "
-                "which warrants focused leadership attention."
-            )
+    if risks and risks[0].get("title"):
+        paragraphs.append(
+            f"The most significant risk relates to {risks[0]['title'].lower()}, "
+            "which warrants focused leadership attention."
+        )
 
     # -------------------------------------------------
-    # 6. KPI EVIDENCE (TOP 2 ONLY)
+    # 7. KPI EVIDENCE (TOP 2 ONLY)
     # -------------------------------------------------
     if primary_kpis:
-        evidence = []
+        evidence: List[str] = []
         for k in primary_kpis[:2]:
             name = k.get("name")
             value = k.get("value")
@@ -122,10 +159,10 @@ def generate_executive_summary(
             )
 
     # -------------------------------------------------
-    # 7. ACTION ORIENTATION (MANDATORY)
+    # 8. ACTION ORIENTATION (MANDATORY)
     # -------------------------------------------------
-    if recommendations:
-        top = recommendations[0]
+    if recs:
+        top = recs[0]
         action = top.get("action")
         timeline = top.get("timeline", "the next 60–90 days")
 
@@ -146,7 +183,7 @@ def generate_executive_summary(
         )
 
     # -------------------------------------------------
-    # 8. FINAL ONE-PARAGRAPH OUTPUT
+    # 9. FINAL OUTPUT (NEVER EMPTY)
     # -------------------------------------------------
     return " ".join(p.strip() for p in paragraphs if p).strip()
 
