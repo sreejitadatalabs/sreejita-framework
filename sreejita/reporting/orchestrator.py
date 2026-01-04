@@ -6,13 +6,14 @@
 import logging
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import pandas as pd
 
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
+from sreejita.core.fingerprint import dataframe_fingerprint
 
 log = logging.getLogger("sreejita.orchestrator")
 
@@ -62,7 +63,7 @@ def _save_history(run_dir: Path, history: Dict[str, int]) -> None:
         pass
 
 
-def _trend(prev: int | None, curr: int | None) -> str:
+def _trend(prev: Optional[int], curr: Optional[int]) -> str:
     if prev is None or curr is None:
         return "→"
     if curr >= prev + 5:
@@ -85,8 +86,6 @@ def generate_report_payload(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
-    dataset_key = str(input_path.absolute())
-
     run_dir = Path(config.get("run_dir", "runs/current"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -96,6 +95,8 @@ def generate_report_payload(
     df = _read_tabular_file_safe(input_path)
     if df.empty:
         raise RuntimeError("Dataset is empty")
+
+    dataset_key = dataframe_fingerprint(df)
 
     # -------------------------------------------------
     # 2. DATASET SHAPE (CONTEXT ONLY)
@@ -116,7 +117,7 @@ def generate_report_payload(
         raise RuntimeError("Unsupported or unknown domain")
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT)
+    # 4. DOMAIN EXECUTION (STRICT & ISOLATED)
     # -------------------------------------------------
     visuals: List[Dict[str, Any]] = []
 
@@ -128,19 +129,22 @@ def generate_report_payload(
         # --- KPIs
         kpis = engine.calculate_kpis(df)
 
-        # --- Visuals
-        visuals = engine.generate_visuals(
-            df=df,
-            output_dir=run_dir / "visuals" / domain,
-        ) or []
+        # --- Visuals (isolated failure)
+        try:
+            visuals = engine.generate_visuals(
+                df=df,
+                output_dir=run_dir / "visuals" / domain,
+            ) or []
+        except Exception:
+            visuals = []
 
-        # --- Insights (shape-aware fallback)
+        # --- Insights
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
             insights = engine.generate_insights(df, kpis)
 
-        # --- Recommendations (shape-aware fallback)
+        # --- Recommendations
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -150,7 +154,7 @@ def generate_report_payload(
 
         recommendations = enrich_recommendations(raw_recs)
 
-        # --- Executive Cognition (GLOBAL + SUB-DOMAIN)
+        # --- Executive Cognition
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -182,21 +186,23 @@ def generate_report_payload(
     )[:6]
 
     # -------------------------------------------------
-    # ✅ UNIVERSAL VISUAL HARDENING (BASE DOMAIN)
+    # ✅ UNIVERSAL VISUAL HARDENING
     # -------------------------------------------------
     if hasattr(engine, "ensure_minimum_visuals"):
-        valid_visuals = engine.ensure_minimum_visuals(
+        hardened = engine.ensure_minimum_visuals(
             valid_visuals,
             df,
             run_dir / "visuals" / domain,
         )
+        if isinstance(hardened, list):
+            valid_visuals = hardened
 
     # -------------------------------------------------
     # 6. BOARD READINESS HISTORY
     # -------------------------------------------------
     history = _load_history(run_dir)
 
-    board = executive.get("board_readiness", {})
+    board = executive.get("board_readiness", {}) if isinstance(executive, dict) else {}
     current_score = board.get("score")
     previous_score = history.get(dataset_key)
 
