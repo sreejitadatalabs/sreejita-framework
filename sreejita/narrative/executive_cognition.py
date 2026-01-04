@@ -8,7 +8,7 @@ from sreejita.core.capabilities import Capability
 
 
 # =====================================================
-# EXECUTIVE RISK BANDS (SAFE, BOARD-LEGIBLE)
+# EXECUTIVE RISK BANDS (BOARD LEGIBLE, GOVERNED)
 # =====================================================
 
 EXECUTIVE_RISK_BANDS = [
@@ -40,7 +40,7 @@ def derive_risk_level(score: int) -> Dict[str, Any]:
 
 
 # =====================================================
-# EXECUTIVE KPI SELECTION (MAX 9, CAPABILITY-AWARE)
+# EXECUTIVE KPI SELECTION (CAPABILITY-AWARE, MAX 9)
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -66,7 +66,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
             Capability.ACCESS.value: 1.00,
         }.get(capability, 1.0)
 
-        score = confidence * capability_weight
+        rank_score = confidence * capability_weight
 
         ranked.append({
             "key": key,
@@ -74,12 +74,12 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
             "value": round(value, 2),
             "capability": capability,
             "confidence": round(confidence, 2),
-            "rank_score": round(score, 3),
+            "rank_score": round(rank_score, 3),
         })
 
     ranked.sort(key=lambda x: x["rank_score"], reverse=True)
 
-    # 🔒 HARD RULE: max 9 KPIs
+    # 🔒 HARD RULE: EXECUTIVE MAX = 9 KPIs
     return ranked[:9]
 
 
@@ -124,6 +124,7 @@ def compute_board_readiness_score(
 ) -> Dict[str, Any]:
 
     conf_map = kpis.get("_confidence", {}) or {}
+
     confident_kpis = [
         v for v in conf_map.values()
         if isinstance(v, (int, float)) and v >= 0.6
@@ -140,25 +141,28 @@ def compute_board_readiness_score(
     )
     coverage_score = (coverage_hits / len(coverage_keys)) * 25
 
-    # Risk penalty
+    # Risk penalty (−10 per risk)
     risk_penalty = sum(10 for i in insights if i.get("level") == "RISK")
 
     score = round(
         max(0, min(100, evidence_score + coverage_score + 30 - risk_penalty))
     )
 
-    # Hard safety cap for weak data
-    if isinstance(kpis.get("data_completeness"), (int, float)) and kpis["data_completeness"] < 0.7:
-        score = min(score, 60)
+    # Hard governance cap under weak data
+    if isinstance(kpis.get("data_completeness"), (int, float)):
+        if kpis["data_completeness"] < 0.7:
+            score = min(score, 60)
+
+    band = (
+        "BOARD READY" if score >= 85 else
+        "REVIEW WITH CAUTION" if score >= 70 else
+        "MANAGEMENT ONLY" if score >= 50 else
+        "NOT BOARD SAFE"
+    )
 
     return {
         "score": score,
-        "band": (
-            "BOARD READY" if score >= 85 else
-            "REVIEW WITH CAUTION" if score >= 70 else
-            "MANAGEMENT ONLY" if score >= 50 else
-            "NOT BOARD SAFE"
-        ),
+        "band": band,
     }
 
 
