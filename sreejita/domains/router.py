@@ -15,6 +15,9 @@ from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
 
+# ✅ GENERIC FALLBACK (CRITICAL)
+from sreejita.domains.generic import GenericDomain, GenericDomainDetector
+
 from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
 from sreejita.core.fingerprint import dataframe_fingerprint
@@ -27,8 +30,11 @@ from sreejita.domains.intelligence.detector_v2 import (
 log = logging.getLogger("sreejita.router")
 
 # =====================================================
-# DOMAIN DETECTORS (RULE-BASED, DETERMINISTIC)
+# DOMAIN DETECTORS (ORDER MATTERS)
 # =====================================================
+# NOTE:
+# GenericDetector MUST be LAST.
+# It is a fallback, not a competitor.
 
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
@@ -39,6 +45,7 @@ DOMAIN_DETECTORS = [
     MarketingDomainDetector(),
     HRDomainDetector(),
     SupplyChainDomainDetector(),
+    GenericDomainDetector(),   # 🚑 LAST RESORT
 ]
 
 # =====================================================
@@ -54,6 +61,7 @@ DOMAIN_IMPLEMENTATIONS = {
     "marketing": MarketingDomain(),
     "hr": HRDomain(),
     "supply_chain": SupplyChainDomain(),
+    "generic": GenericDomain(),  # 🚑 GUARANTEED FALLBACK
 }
 
 # =====================================================
@@ -80,7 +88,7 @@ def decide_domain(df) -> DecisionExplanation:
 
     GUARANTEES:
     - Always returns a DecisionExplanation
-    - Always attaches a valid domain engine
+    - Always attaches a valid engine
     - Never raises for unknown datasets
     """
 
@@ -101,32 +109,31 @@ def decide_domain(df) -> DecisionExplanation:
             }
 
         except Exception as e:
-            log.debug(f"Detector {detector.__class__.__name__} failed: {e}")
+            log.debug(
+                f"Detector {detector.__class__.__name__} failed: {e}"
+            )
             continue
 
     # -------------------------------------------------
     # Phase 2: Weighted Scoring & Selection
     # -------------------------------------------------
     domain_scores = compute_domain_scores(df, rule_results)
-
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
     # -------------------------------------------------
-    # 🚑 HARD FALLBACK (CRITICAL)
+    # 🚑 ABSOLUTE FALLBACK (NEVER FAIL)
     # -------------------------------------------------
-    if not selected_domain or selected_domain not in DOMAIN_IMPLEMENTATIONS:
+    if (
+        not selected_domain
+        or selected_domain not in DOMAIN_IMPLEMENTATIONS
+        or (confidence or 0) < 0.25
+    ):
         log.warning(
-            "No strong domain detected — falling back to healthcare (generic-safe)"
+            "No confident domain detected — falling back to GENERIC domain"
         )
-        selected_domain = "healthcare"
-        confidence = round(
-            max(
-                rule_results.get("healthcare", {}).get("confidence", 0.3),
-                0.3,
-            ),
-            2,
-        )
-        meta = meta or {"signals": {}}
+        selected_domain = "generic"
+        confidence = 0.25
+        meta = meta or {"signals": {"fallback": True}}
 
     # -------------------------------------------------
     # Build Alternatives (Explainability)
@@ -145,7 +152,7 @@ def decide_domain(df) -> DecisionExplanation:
     ]
 
     # -------------------------------------------------
-    # Decision Object (AUTHORITATIVE CONTRACT)
+    # Decision Object (STRICT CONTRACT)
     # -------------------------------------------------
     decision = DecisionExplanation(
         decision_type="domain_detection",
@@ -157,7 +164,7 @@ def decide_domain(df) -> DecisionExplanation:
             "rule_based_domain_detection",
             "intent_weighted_scoring",
             "highest_confidence_selection",
-            "safe_domain_fallback",
+            "generic_domain_fallback",
         ],
         domain_scores=domain_scores,
     )
