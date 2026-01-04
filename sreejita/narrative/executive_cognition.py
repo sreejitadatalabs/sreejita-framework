@@ -262,3 +262,51 @@ def build_executive_payload(
         "board_readiness": board,
         "sub_domain": primary_sub,
     }
+
+
+# =====================================================
+# PER-SUB-DOMAIN EXECUTIVE COGNITION (CRITICAL ADDITION)
+# =====================================================
+
+def build_subdomain_executive_payloads(
+    kpis: Dict[str, Any],
+    insights: List[Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Builds executive cognition PER sub-domain.
+    This is mandatory for Healthcare & mixed datasets.
+
+    Output:
+    {
+        "hospital": {...},
+        "clinic": {...},
+        "diagnostics": {...}
+    }
+    """
+
+    sub_domains = kpis.get("sub_domains", {}) or {}
+    results: Dict[str, Dict[str, Any]] = {}
+
+    for sub in sub_domains:
+
+        sub_insights = [
+            i for i in insights
+            if i.get("sub_domain") == sub
+        ]
+
+        sub_recs = [
+            r for r in recommendations
+            if r.get("sub_domain") == sub
+        ]
+
+        sub_kpis = dict(kpis)
+        sub_kpis["primary_sub_domain"] = sub
+
+        results[sub] = build_executive_payload(
+            kpis=sub_kpis,
+            insights=sub_insights,
+            recommendations=sub_recs,
+        )
+
+    return results
