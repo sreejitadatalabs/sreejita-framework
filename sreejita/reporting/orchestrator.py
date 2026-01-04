@@ -98,7 +98,7 @@ def generate_report_payload(
         raise RuntimeError("Dataset is empty")
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE
+    # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(df)
@@ -106,7 +106,7 @@ def generate_report_payload(
         shape_info = {"shape": "unknown", "signals": {}}
 
     # -------------------------------------------------
-    # 3. DOMAIN DECISION
+    # 3. DOMAIN DECISION (NEVER NULL)
     # -------------------------------------------------
     decision = decide_domain(df)
     engine = decision.engine
@@ -116,26 +116,31 @@ def generate_report_payload(
         raise RuntimeError("Unsupported or unknown domain")
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION
+    # 4. DOMAIN EXECUTION (STRICT)
     # -------------------------------------------------
-    visuals: List[Dict[str, Any]] = []  # ✅ PRE-DECLARE (CRITICAL)
+    visuals: List[Dict[str, Any]] = []
 
     try:
+        # --- Preprocess
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
+        # --- KPIs
         kpis = engine.calculate_kpis(df)
 
+        # --- Visuals
         visuals = engine.generate_visuals(
             df=df,
             output_dir=run_dir / "visuals" / domain,
         ) or []
 
+        # --- Insights (shape-aware fallback)
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
         except TypeError:
             insights = engine.generate_insights(df, kpis)
 
+        # --- Recommendations (shape-aware fallback)
         try:
             raw_recs = engine.generate_recommendations(
                 df, kpis, insights, shape_info=shape_info
@@ -145,6 +150,7 @@ def generate_report_payload(
 
         recommendations = enrich_recommendations(raw_recs)
 
+        # --- Executive Cognition (GLOBAL + SUB-DOMAIN)
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -171,12 +177,12 @@ def generate_report_payload(
 
     valid_visuals = sorted(
         valid_visuals,
-        key=lambda x: x.get("importance", 0) * x.get("confidence", 1),
+        key=lambda x: float(x.get("importance", 0)) * float(x.get("confidence", 1)),
         reverse=True,
     )[:6]
 
     # -------------------------------------------------
-    # ✅ OPTIONAL HARDENING (ADD HERE — EXACTLY HERE)
+    # ✅ UNIVERSAL VISUAL HARDENING (BASE DOMAIN)
     # -------------------------------------------------
     if hasattr(engine, "ensure_minimum_visuals"):
         valid_visuals = engine.ensure_minimum_visuals(
@@ -205,7 +211,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 7. FINAL PAYLOAD
+    # 7. FINAL PAYLOAD (STRICT CONTRACT)
     # -------------------------------------------------
     return {
         domain: {
