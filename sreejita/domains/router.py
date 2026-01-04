@@ -6,6 +6,10 @@
 from typing import List, Dict, Any
 import logging
 
+# -----------------------------------------------------
+# DOMAIN IMPORTS
+# -----------------------------------------------------
+
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
@@ -15,8 +19,12 @@ from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
 
-# ✅ GENERIC FALLBACK (CRITICAL)
+# 🚑 GENERIC FALLBACK (ABSOLUTE LAST RESORT)
 from sreejita.domains.generic import GenericDomain, GenericDomainDetector
+
+# -----------------------------------------------------
+# CORE FRAMEWORK
+# -----------------------------------------------------
 
 from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
@@ -33,8 +41,9 @@ log = logging.getLogger("sreejita.router")
 # DOMAIN DETECTORS (ORDER MATTERS)
 # =====================================================
 # NOTE:
-# GenericDetector MUST be LAST.
-# It is a fallback, not a competitor.
+# - Deterministic
+# - GenericDetector MUST be LAST
+# - No dynamic discovery by design
 
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
@@ -61,7 +70,7 @@ DOMAIN_IMPLEMENTATIONS = {
     "marketing": MarketingDomain(),
     "hr": HRDomain(),
     "supply_chain": SupplyChainDomain(),
-    "generic": GenericDomain(),  # 🚑 GUARANTEED FALLBACK
+    "generic": GenericDomain(),  # 🚑 GUARANTEED SAFE
 }
 
 # =====================================================
@@ -74,8 +83,10 @@ _OBSERVERS: List[DecisionObserver] = []
 def register_observer(observer: DecisionObserver):
     """
     Register a non-blocking observer for domain-decision events.
+    Observers must NEVER raise.
     """
-    _OBSERVERS.append(observer)
+    if observer:
+        _OBSERVERS.append(observer)
 
 
 # =====================================================
@@ -87,7 +98,7 @@ def decide_domain(df) -> DecisionExplanation:
     Determine the most appropriate domain for a dataset.
 
     GUARANTEES:
-    - Always returns a DecisionExplanation
+    - Always returns DecisionExplanation
     - Always attaches a valid engine
     - Never raises for unknown datasets
     """
@@ -100,6 +111,7 @@ def decide_domain(df) -> DecisionExplanation:
     for detector in DOMAIN_DETECTORS:
         try:
             result = detector.detect(df)
+
             if not result or not result.domain:
                 continue
 
@@ -121,19 +133,20 @@ def decide_domain(df) -> DecisionExplanation:
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
     # -------------------------------------------------
-    # 🚑 ABSOLUTE FALLBACK (NEVER FAIL)
+    # 🚑 ABSOLUTE SAFETY FALLBACK
     # -------------------------------------------------
     if (
         not selected_domain
         or selected_domain not in DOMAIN_IMPLEMENTATIONS
-        or (confidence or 0) < 0.25
+        or not isinstance(confidence, (int, float))
+        or confidence < 0.25
     ):
         log.warning(
             "No confident domain detected — falling back to GENERIC domain"
         )
         selected_domain = "generic"
         confidence = 0.25
-        meta = meta or {"signals": {"fallback": True}}
+        meta = {"signals": {"fallback": True}}
 
     # -------------------------------------------------
     # Build Alternatives (Explainability)
@@ -145,7 +158,7 @@ def decide_domain(df) -> DecisionExplanation:
         }
         for d, info in sorted(
             domain_scores.items(),
-            key=lambda x: x[1].get("confidence", 0),
+            key=lambda x: x[1].get("confidence", 0.0),
             reverse=True,
         )
         if d != selected_domain
@@ -157,7 +170,7 @@ def decide_domain(df) -> DecisionExplanation:
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
-        confidence=round(confidence or 0.0, 2),
+        confidence=round(confidence, 2),
         alternatives=alternatives,
         signals=meta.get("signals", {}) if isinstance(meta, dict) else {},
         rules_applied=[
@@ -180,7 +193,7 @@ def decide_domain(df) -> DecisionExplanation:
     decision.fingerprint = dataframe_fingerprint(df)
 
     # -------------------------------------------------
-    # Observability Hooks (Non-Blocking)
+    # Observability Hooks (NON-BLOCKING)
     # -------------------------------------------------
     for observer in _OBSERVERS:
         try:
@@ -205,9 +218,10 @@ def apply_domain(df, domain_name: str):
     - generate recommendations
     """
     domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
-    if domain:
-        try:
-            return domain.preprocess(df)
-        except Exception:
-            return df
-    return df
+    if not domain:
+        return df
+
+    try:
+        return domain.preprocess(df)
+    except Exception:
+        return df
