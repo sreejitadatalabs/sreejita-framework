@@ -1,6 +1,6 @@
 # =====================================================
 # EXECUTIVE PDF RENDERER — UNIVERSAL (FINAL)
-# Sreejita Framework
+# Sreejita Framework v3.5.x
 # =====================================================
 
 from pathlib import Path
@@ -25,7 +25,7 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (EXECUTIVE-SAFE)
+# PAYLOAD NORMALIZER (EXECUTIVE-SAFE, HARDENED)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,9 +40,11 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "domain": payload.get("domain", "unknown"),
         "executive_brief": executive.get("executive_brief", ""),
         "board_readiness": executive.get("board_readiness", {}),
+        "board_trend": executive.get("board_readiness_trend", {}),
         "primary_kpis": executive.get("primary_kpis", []),
         "insights": executive.get("insights", {}),
         "recommendations": executive.get("recommendations", []),
+        "executive_by_sub_domain": executive.get("executive_by_sub_domain", {}),
         "visuals": payload.get("visuals", []),
     }
 
@@ -92,6 +94,15 @@ def confidence_color(conf: Optional[float]):
 # =====================================================
 
 class ExecutivePDFRenderer:
+    """
+    Executive PDF Renderer (Authoritative)
+
+    Responsibilities:
+    - Render board-ready executive PDF
+    - Enforce governance rules (min visuals, KPIs)
+    - Support per-sub-domain executive cognition
+    - NEVER compute intelligence
+    """
 
     BORDER = HexColor("#e5e7eb")
     HEADER_BG = HexColor("#f3f4f6")
@@ -109,6 +120,7 @@ class ExecutivePDFRenderer:
             and Path(v.get("path", "")).exists()
         ]
 
+        # HARD GOVERNANCE
         if len(visuals) < 2:
             raise RuntimeError(
                 "PDF rejected: minimum 2 visual evidences required."
@@ -159,6 +171,7 @@ class ExecutivePDFRenderer:
         # PAGE 1 — EXECUTIVE OVERVIEW
         # =================================================
         board = data["board_readiness"]
+        trend = data["board_trend"]
         domain = str(data["domain"]).replace("_", " ").title()
 
         story.append(
@@ -173,6 +186,7 @@ class ExecutivePDFRenderer:
                 f"<b>Domain:</b> {domain}<br/>"
                 f"<b>Board Readiness:</b> {board.get('score','—')} / 100 "
                 f"({board.get('band','—')})<br/>"
+                f"<b>Trend:</b> {trend.get('trend','→')}<br/>"
                 f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d}",
                 styles["SR_Body"],
             )
@@ -223,6 +237,32 @@ class ExecutivePDFRenderer:
         story.append(Spacer(1, 14))
         story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
         story.append(table)
+
+        # =================================================
+        # SUB-DOMAIN EXECUTIVE SECTIONS (NEW, CRITICAL)
+        # =================================================
+        sub_execs = data["executive_by_sub_domain"]
+        if isinstance(sub_execs, dict) and sub_execs:
+            story.append(PageBreak())
+            story.append(Paragraph("Executive Summary by Operating Area", styles["SR_Section"]))
+
+            for sub, payload in sub_execs.items():
+                story.append(
+                    Paragraph(sub.replace("_", " ").title(), styles["SR_Section"])
+                )
+                story.append(
+                    Paragraph(payload.get("executive_brief", ""), styles["SR_Body"])
+                )
+
+                board = payload.get("board_readiness", {})
+                story.append(
+                    Paragraph(
+                        f"<i>Board Readiness:</i> {board.get('score','—')} / 100 "
+                        f"({board.get('band','—')})",
+                        styles["SR_Body"],
+                    )
+                )
+                story.append(Spacer(1, 8))
 
         # =================================================
         # VISUAL EVIDENCE — 2 PER PAGE
