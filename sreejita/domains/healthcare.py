@@ -16,10 +16,6 @@ from sreejita.core.capabilities import Capability
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
-from sreejita.narrative.executive_cognition import (
-    build_executive_payload,
-    build_subdomain_executive_payloads,
-)
 
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
@@ -314,19 +310,18 @@ class HealthcareDomain(BaseDomain):
         # BOOLEAN / FLAG NORMALIZATION (YES / NO / TRUE)
         # ---------------------------------------------
         for key in ["readmitted", "flag"]:
-            col = self.cols.get(key)
-            if col and col in df.columns:
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .map({
-                        "yes": 1, "y": 1, "true": 1, "1": 1,
-                        "no": 0, "n": 0, "false": 0, "0": 0,
-                    })
-                )
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .map({
+                    "yes": 1, "y": 1, "true": 1, "1": 1,
+                    "no": 0, "n": 0, "false": 0, "0": 0,
+                })
+                .fillna(df[col])
+            )
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     
         # ---------------------------------------------
         # DERIVE LOS IF MISSING (CRITICAL FOR DATASET-2)
@@ -364,37 +359,41 @@ class HealthcareDomain(BaseDomain):
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
     
-        # -------------------------------------------------
-        # SUB-DOMAIN SIGNAL DETECTION (DETERMINISTIC)
-        # -------------------------------------------------
-        has_los = bool(self.cols.get("los"))
-        has_date = bool(self.cols.get("date"))
-        has_discharge = bool(self.cols.get("discharge_date"))
-        has_bed = bool(self.cols.get("bed_id"))
-        has_admit_type = bool(self.cols.get("admit_type"))
+        # =====================================================
+        # UNIVERSAL SUB-DOMAIN INFERENCE (TEMP LOCATION)
+        # =====================================================
+        
+        def infer_healthcare_subdomains(cols: Dict[str, Optional[str]]) -> Dict[str, float]:
+            has_los = bool(cols.get("los"))
+            has_date = bool(cols.get("date"))
+            has_discharge = bool(cols.get("discharge_date"))
+            has_bed = bool(cols.get("bed_id"))
+            has_admit_type = bool(cols.get("admit_type"))
+        
+            hospital_signal = any([
+                has_los,
+                has_date and has_discharge,
+                has_bed,
+                has_admit_type,
+            ])
+        
+            return {
+                HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
+                HealthcareSubDomain.CLINIC.value: (
+                    0.8 if cols.get("duration") and not cols.get("supply") else 0.0
+                ),
+                HealthcareSubDomain.DIAGNOSTICS.value: (
+                    0.8 if cols.get("duration") and cols.get("flag") else 0.0
+                ),
+                HealthcareSubDomain.PHARMACY.value: (
+                    0.7 if cols.get("cost") and cols.get("supply") else 0.0
+                ),
+                HealthcareSubDomain.PUBLIC_HEALTH.value: (
+                    0.9 if cols.get("population") else 0.0
+                ),
+            }
     
-        hospital_signal = any([
-            has_los,
-            has_date and has_discharge,
-            has_bed,
-            has_admit_type,
-        ])
-    
-        sub_scores: Dict[str, float] = {
-            HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
-            HealthcareSubDomain.CLINIC.value: (
-                0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0
-            ),
-            HealthcareSubDomain.DIAGNOSTICS.value: (
-                0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0
-            ),
-            HealthcareSubDomain.PHARMACY.value: (
-                0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0
-            ),
-            HealthcareSubDomain.PUBLIC_HEALTH.value: (
-                0.9 if self.cols.get("population") else 0.0
-            ),
-        }
+        sub_scores = infer_healthcare_subdomains(self.cols)
     
         active_subs = {
             k: v for k, v in sub_scores.items()
@@ -713,7 +712,7 @@ class HealthcareDomain(BaseDomain):
             reverse=True,
         )
         
-        return visuals
+        return visuals or []
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
@@ -862,7 +861,7 @@ class HealthcareDomain(BaseDomain):
                 if not (target_col and time_col):
                     raise ValueError
             
-                rate = df.groupby(pd.Grouper(key=time_col, freq="ME"))[target_col].mean()
+                rate = df.groupby(pd.Grouper(key=time_col, freq="M"))[target_col].mean()
                 fig, ax = plt.subplots(figsize=(8, 4))
                 rate.plot(ax=ax, marker="o")
                 ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
@@ -1803,7 +1802,7 @@ class HealthcareDomainDetector(BaseDomainDetector):
         }
 
         signals = {k: bool(v) for k, v in cols.items()}
-        confidence = sum(signals.values()) / 6
+        confidence = sum(signals.values()) / len(signals)
 
         if confidence < 0.3:
             return DomainDetectionResult(None, 0.0, signals)
