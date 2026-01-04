@@ -360,53 +360,63 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
+    # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
     
         # -------------------------------------------------
-        # SUB-DOMAIN SCORING (DETERMINISTIC & SAFE)
+        # SUB-DOMAIN SIGNAL DETECTION (DETERMINISTIC)
         # -------------------------------------------------
         has_los = bool(self.cols.get("los"))
         has_date = bool(self.cols.get("date"))
+        has_discharge = bool(self.cols.get("discharge_date"))
         has_bed = bool(self.cols.get("bed_id"))
         has_admit_type = bool(self.cols.get("admit_type"))
     
-        # Hospital lifecycle signal (CRITICAL FIX)
         hospital_signal = any([
             has_los,
-            has_date and bool(self.cols.get("discharge_date")),
+            has_date and has_discharge,
             has_bed,
             has_admit_type,
         ])
     
-        sub_scores = {
+        sub_scores: Dict[str, float] = {
             HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
-            HealthcareSubDomain.CLINIC.value: 0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0,
-            HealthcareSubDomain.DIAGNOSTICS.value: 0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0,
-            HealthcareSubDomain.PHARMACY.value: 0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0,
-            HealthcareSubDomain.PUBLIC_HEALTH.value: 0.9 if self.cols.get("population") else 0.0,
+            HealthcareSubDomain.CLINIC.value: (
+                0.8 if self.cols.get("duration") and not self.cols.get("supply") else 0.0
+            ),
+            HealthcareSubDomain.DIAGNOSTICS.value: (
+                0.8 if self.cols.get("duration") and self.cols.get("flag") else 0.0
+            ),
+            HealthcareSubDomain.PHARMACY.value: (
+                0.7 if self.cols.get("cost") and self.cols.get("supply") else 0.0
+            ),
+            HealthcareSubDomain.PUBLIC_HEALTH.value: (
+                0.9 if self.cols.get("population") else 0.0
+            ),
         }
-
+    
         active_subs = {
             k: v for k, v in sub_scores.items()
             if isinstance(v, (int, float)) and v >= 0.3
         }
-
+    
         if not active_subs:
-            primary_sub = "unknown"
+            primary_sub = HealthcareSubDomain.UNKNOWN.value
             is_mixed = False
         else:
             primary_sub = max(active_subs, key=active_subs.get)
             is_mixed = len(active_subs) > 1
     
         # -------------------------------------------------
-        # BASE KPI CONTEXT (UNIVERSAL, EXECUTIVE SAFE)
+        # BASE KPI CONTEXT (EXECUTIVE-SAFE)
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
             "primary_sub_domain": (
                 HealthcareSubDomain.MIXED.value if is_mixed else primary_sub
             ),
             "sub_domains": active_subs,
+            "sub_domain_signals": active_subs,  # 🔑 universal engine input
             "total_volume": volume,
             "record_count": volume,
             "data_completeness": round(1 - df.isna().mean().mean(), 3),
@@ -420,13 +430,13 @@ class HealthcareDomain(BaseDomain):
                 else None
             ),
         }
-        
+    
         # -------------------------------------------------
-        # DATA GOVERNANCE WARNING (NON-BLOCKING)
+        # DATA GOVERNANCE WARNING
         # -------------------------------------------------
         if volume < MIN_SAMPLE_SIZE:
             kpis["data_warning"] = "Sample size below recommended threshold"
-
+    
         # -------------------------------------------------
         # SAFE KPI HELPERS
         # -------------------------------------------------
@@ -434,13 +444,13 @@ class HealthcareDomain(BaseDomain):
             if not col or col not in df.columns:
                 return None
             s = pd.to_numeric(df[col], errors="coerce")
-            return s.mean() if s.notna().any() else None
+            return float(s.mean()) if s.notna().any() else None
     
         def safe_rate(col):
             if not col or col not in df.columns:
                 return None
             s = pd.to_numeric(df[col], errors="coerce")
-            return s.mean() if s.notna().any() else None
+            return float(s.mean()) if s.notna().any() else None
     
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
@@ -466,31 +476,29 @@ class HealthcareDomain(BaseDomain):
                     "labor_cost_per_day": total_cost,
                 })
     
-                # Bed utilization proxy
                 bed_col = self.cols.get("bed_id")
                 kpis["bed_occupancy_rate"] = (
                     df[bed_col].nunique() / volume
                     if bed_col and bed_col in df.columns and volume > 0
                     else None
                 )
-
-                # Emergency admissions
+    
                 admit_col = self.cols.get("admit_type")
                 kpis["emergency_admission_rate"] = (
-                    df[admit_col].astype(str).str.lower().str.contains("emergency").mean()
+                    df[admit_col]
+                    .astype(str)
+                    .str.lower()
+                    .str.contains("emergency")
+                    .mean()
                     if admit_col and admit_col in df.columns
                     else None
                 )
     
-                # Facility-Level LOS Variance (Governance-Safe)
-                # -------------------------------------------------
                 fac_col = self.cols.get("facility")
                 los_col = self.cols.get("los")
-                
+    
                 if volume < MIN_SAMPLE_SIZE:
-                    # Governance rule: do not compute variance on weak samples
                     kpis["facility_variance_score"] = None
-                
                 elif (
                     fac_col
                     and los_col
@@ -498,22 +506,15 @@ class HealthcareDomain(BaseDomain):
                     and los_col in df.columns
                 ):
                     grouped = df.groupby(fac_col)[los_col].mean()
-                
-                    # Need at least 2 facilities to compute variance
-                    if len(grouped) > 1 and grouped.mean() and grouped.mean() > 0:
-                        kpis["facility_variance_score"] = grouped.std() / grouped.mean()
-                    else:
-                        kpis["facility_variance_score"] = None
-                
+                    kpis["facility_variance_score"] = (
+                        grouped.std() / grouped.mean()
+                        if len(grouped) > 1 and grouped.mean() > 0
+                        else None
+                    )
                 else:
                     kpis["facility_variance_score"] = None
-                
-                
-                # -------------------------------------------------
-                # Emergency / Boarding Time Proxy
-                # -------------------------------------------------
+    
                 kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
-
     
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
@@ -560,7 +561,7 @@ class HealthcareDomain(BaseDomain):
     
                 kpis.update({
                     "incidence_per_100k": (
-                        cases / pop * 100000 if pop and cases else None
+                        (cases / pop) * 100000 if pop and cases else None
                     ),
                     "screening_coverage_rate": safe_rate(self.cols.get("flag")),
                     "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
@@ -589,34 +590,28 @@ class HealthcareDomain(BaseDomain):
         # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {
-            k: (
-                0.9 if isinstance(v, (int, float)) and not k.endswith("_placeholder_kpi")
-                else 0.4
-            )
+            k: 0.9 if isinstance(v, (int, float)) else 0.4
             for k, v in kpis.items()
             if not k.startswith("_")
         }
+    
         self._last_kpis = kpis
-        
+    
         # -------------------------------------------------
-        # HARD GUARANTEE: ≥5 KPIs PER ACTIVE SUB-DOMAIN
+        # HARD GUARANTEE: ≥5 KPIs PER SUB-DOMAIN
         # -------------------------------------------------
         MIN_KPIS_PER_SUB = 5
-        
+    
         for sub in active_subs:
-            expected_kpis = HEALTHCARE_KPI_MAP.get(sub, [])
+            expected = HEALTHCARE_KPI_MAP.get(sub, [])
             present = [
-                k for k in expected_kpis
+                k for k in expected
                 if isinstance(kpis.get(k), (int, float))
             ]
-        
-            missing_count = MIN_KPIS_PER_SUB - len(present)
-        
-            # Fill with neutral placeholders (governance-safe)
-            if missing_count > 0:
-                for i in range(missing_count):
-                    kpis[f"{sub}_placeholder_kpi_{i+1}"] = None
-
+    
+            for i in range(max(0, MIN_KPIS_PER_SUB - len(present))):
+                kpis[f"{sub}_placeholder_kpi_{i+1}"] = None
+    
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
