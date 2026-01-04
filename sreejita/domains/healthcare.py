@@ -918,9 +918,6 @@ class HealthcareDomain(BaseDomain):
                 )
                 return
     
-        # If visual key not handled
-        raise ValueError(f"Unhandled visual key: {visual_key}")
-    
         # =================================================
         # CLINIC / AMBULATORY VISUALS
         # =================================================
@@ -1582,7 +1579,8 @@ class HealthcareDomain(BaseDomain):
                     confidence=0.85,
                 )
                 return
-
+        # If visual key not handled
+        raise ValueError(f"Unhandled visual key: {visual_key}")
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
