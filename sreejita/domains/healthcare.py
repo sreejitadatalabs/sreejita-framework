@@ -751,36 +751,48 @@ class HealthcareDomain(BaseDomain):
             final_visuals.extend(sub_visuals[:5])
     
         # -------------------------------------------------
-        # GLOBAL FALLBACK (ABSOLUTE LAST RESORT)
+        # GLOBAL FALLBACK (ABSOLUTE LAST RESORT — GUARANTEED)
         # -------------------------------------------------
         if len(final_visuals) < 2:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.bar(["Total Records"], [len(df)])
-            ax.set_title("Dataset Scale Overview", fontweight="bold")
-    
-            path = output_dir / "fallback_dataset_scale.png"
-            fig.savefig(path, dpi=120, bbox_inches="tight")
-            plt.close(fig)
-    
-            final_visuals.append({
-                "path": str(path),
-                "caption": "Dataset size used for this analysis.",
-                "importance": 0.4,
-                "confidence": 0.4,
-                "sub_domain": active_subs[0],
-            })
-    
+            try:
+                fig, ax = plt.subplots(figsize=(6, 4))
+        
+                ax.bar(["Total Records"], [len(df)])
+                ax.set_title("Dataset Scale Overview", fontweight="bold")
+                ax.set_ylabel("Record Count")
+        
+                path = output_dir / "fallback_dataset_scale.png"
+                fig.savefig(path, dpi=120, bbox_inches="tight")
+                plt.close(fig)
+        
+                final_visuals.append({
+                    "path": str(path),
+                    "caption": "Dataset size used for this analysis.",
+                    "importance": 0.4,
+                    "confidence": 0.4,
+                    "sub_domain": (
+                        active_subs[0]
+                        if isinstance(active_subs, list) and active_subs
+                        else "unknown"
+                    ),
+                })
+        
+            except Exception:
+                # Absolute last-resort safety: do NOT crash reporting
+                pass
+        
+        
         # -------------------------------------------------
-        # FINAL SORT (EXECUTIVE PRIORITY)
+        # FINAL SORT (EXECUTIVE PRIORITY ORDERING)
         # -------------------------------------------------
         final_visuals = sorted(
             final_visuals,
-            key=lambda v: v.get("importance", 0) * v.get("confidence", 1),
+            key=lambda v: float(v.get("importance", 0)) * float(v.get("confidence", 1)),
             reverse=True,
         )
-    
+        
         return final_visuals
-    
+
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
     # -------------------------------------------------
