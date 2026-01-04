@@ -236,10 +236,6 @@ HEALTHCARE_RECOMMENDATION_MAP = {
 # =====================================================
 # UNIVERSAL SUB-DOMAIN INFERENCE (HEALTHCARE)
 # =====================================================
-
-def _has_signal(df, col):
-    return bool(col and col in df.columns and df[col].notna().any())
-
 signals = {
     "patient": _has_signal(df, cols.get("patient")),
     "admit": _has_signal(df, cols.get("admit")),
@@ -1815,21 +1811,24 @@ class HealthcareDomainDetector(BaseDomainDetector):
             "diagnosis": resolve_column(df, "diagnosis"),
             "facility": resolve_column(df, "facility"),
         }
-
-        signals = {k: bool(v) for k, v in cols.items()}
-        confidence = sum(signals.values()) / len(signals)
-
+    
+        def _has_signal(col):
+            return bool(col and col in df.columns and df[col].notna().any())
+    
+        signals = {k: _has_signal(v) for k, v in cols.items()}
+        confidence = round(sum(signals.values()) / len(signals), 2)
+    
         if confidence < 0.3:
             return DomainDetectionResult(None, 0.0, signals)
-
+    
         return DomainDetectionResult(
             domain="healthcare",
-            confidence=round(confidence, 2),
+            confidence=confidence,
             signals={
                 **signals,
-                "likely_subdomains": infer_healthcare_subdomains(df, cols)
+                "likely_subdomains": infer_healthcare_subdomains(df, cols),
             },
         )
-
+        
 def register(registry):
     registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
