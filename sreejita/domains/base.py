@@ -1,6 +1,6 @@
 # =====================================================
-# BASE DOMAIN — UNIVERSAL (FINAL, ENFORCED)
-# Sreejita Framework v3.6
+# BASE DOMAIN — UNIVERSAL (FINAL)
+# Sreejita Framework v3.5.x
 # =====================================================
 
 from abc import ABC, abstractmethod
@@ -12,32 +12,30 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from sreejita.narrative.executive_cognition import build_executive_payload
+from sreejita.narrative.executive_cognition import (
+    build_executive_payload,
+    build_subdomain_executive_payloads,
+)
 
 
 class BaseDomain(ABC):
     """
-    Universal BaseDomain for all Sreejita domains.
+    Universal BaseDomain contract.
 
-    GUARANTEES:
-    - Deterministic execution
-    - Universal executive cognition
-    - Universal sub-domain handling
-    - Visual safety (never < 2 visuals)
-    - Never crashes orchestrator
+    Responsibilities:
+    - Domain-specific KPI computation
+    - Insights & recommendations
+    - Visual intelligence
+    - Executive cognition hook
 
-    NON-RESPONSIBILITIES:
-    - Report rendering
-    - Orchestration
-    - I/O management
+    MUST NOT:
+    - Perform routing
+    - Perform orchestration
+    - Perform file I/O outside visuals
     """
 
-    # --------------------------------------------------
-    # DOMAIN METADATA
-    # --------------------------------------------------
     name: str = "generic"
     description: str = "Generic domain"
-    required_columns: List[str] = []
 
     def __init__(self):
         self._last_kpis: Optional[Dict[str, Any]] = None
@@ -47,17 +45,17 @@ class BaseDomain(ABC):
     # --------------------------------------------------
     def validate_data(self, df: pd.DataFrame) -> bool:
         """
-        Optional strict validation.
+        Optional domain-level validation.
         Default = always valid.
         """
         return True
 
     # --------------------------------------------------
-    # OPTIONAL PREPROCESSING
+    # OPTIONAL PREPROCESS
     # --------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Domain-specific preprocessing hook.
+        Optional preprocessing hook.
         Default = passthrough.
         """
         return df
@@ -68,8 +66,8 @@ class BaseDomain(ABC):
     @abstractmethod
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Compute KPIs.
-        Must return a dict.
+        Core KPI computation.
+        Must return a dictionary.
         """
         raise NotImplementedError
 
@@ -82,7 +80,7 @@ class BaseDomain(ABC):
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
-        Generate insights.
+        Generate insights from KPIs.
         """
         raise NotImplementedError
 
@@ -121,8 +119,8 @@ class BaseDomain(ABC):
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
+        Guarantees at least 2 visuals exist.
         Absolute last-resort fallback.
-        Guarantees >= 2 visuals.
         NEVER raises.
         """
 
@@ -140,7 +138,7 @@ class BaseDomain(ABC):
             ax.set_title("Dataset Scale Overview", fontweight="bold")
             ax.set_ylabel("Record Count")
 
-            path = output_dir / f"{self.name}_global_fallback.png"
+            path = output_dir / f"{self.name}_fallback_visual.png"
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
 
@@ -153,31 +151,26 @@ class BaseDomain(ABC):
             })
 
         except Exception:
-            # Absolute safety: never crash reporting
+            # Absolute safety: reporting must never crash
             pass
 
         return visuals
 
     # --------------------------------------------------
-    # 🧠 UNIVERSAL EXECUTIVE COGNITION (AUTHORITATIVE)
+    # 🧠 EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
     # --------------------------------------------------
     def build_executive(
         self,
-        *,
         kpis: Dict[str, Any],
         insights: List[Dict[str, Any]],
         recommendations: List[Dict[str, Any]],
-        subdomain_signals: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
         Universal executive cognition builder.
 
-        OUTPUT GUARANTEES:
-        - executive_brief
-        - board_readiness
-        - primary_sub_domain
-        - sub_domains
-        - executive_by_sub_domain
+        Guarantees:
+        - Global executive payload
+        - Per-sub-domain executive payloads (if present)
         """
 
         # -------------------------------
@@ -190,36 +183,37 @@ class BaseDomain(ABC):
         )
 
         # -------------------------------
-        # UNIVERSAL SUB-DOMAIN ENGINE
+        # SUB-DOMAIN EXECUTIVES
         # -------------------------------
-        sub_payload = UniversalSubDomainEngine.resolve(
-            domain=self.name,
-            signals=subdomain_signals or {},
-            kpis=kpis,
-            insights=insights or [],
-            recommendations=recommendations or [],
-        )
+        sub_domains = kpis.get("sub_domains")
 
-        executive.update(sub_payload)
+        if isinstance(sub_domains, dict) and sub_domains:
+            executive["executive_by_sub_domain"] = (
+                build_subdomain_executive_payloads(
+                    kpis=kpis,
+                    insights=insights or [],
+                    recommendations=recommendations or [],
+                )
+            )
+        else:
+            executive["executive_by_sub_domain"] = {}
+
         return executive
 
     # --------------------------------------------------
-    # LEGACY PIPELINE (OPTIONAL / SAFE)
+    # LEGACY PIPELINE (OPTIONAL)
     # --------------------------------------------------
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Optional legacy execution path.
+        Optional legacy execution pipeline.
         Orchestrator may bypass this.
         """
 
         if not self.validate_data(df):
-            raise ValueError(f"Validation failed for domain: {self.name}")
+            raise ValueError(f"Data validation failed for {self.name}")
 
         df = self.preprocess(df)
-
         kpis = self.calculate_kpis(df)
-        self._last_kpis = kpis
-
         insights = self.generate_insights(df, kpis)
         recommendations = self.generate_recommendations(df, kpis, insights)
 
@@ -227,7 +221,6 @@ class BaseDomain(ABC):
             kpis=kpis,
             insights=insights,
             recommendations=recommendations,
-            subdomain_signals=kpis.get("sub_domain_signals", {}),
         )
 
         return {
