@@ -706,92 +706,19 @@ class HealthcareDomain(BaseDomain):
             v for v in visuals
             if isinstance(v, dict)
             and Path(v.get("path", "")).exists()
-            and v.get("confidence", 0) >= 0.3
+            and float(v.get("confidence", 0)) >= 0.3
         ]
-    
-        # -------------------------------------------------
-        # HARD GUARANTEE: ≥2 VISUALS PER SUB-DOMAIN
-        # -------------------------------------------------
-        final_visuals: List[Dict[str, Any]] = []
-    
-        for sub in active_subs:
-            sub_visuals = [
-                v for v in visuals
-                if v.get("sub_domain") == sub
-            ]
-    
-            while len(sub_visuals) < 2:
-                sub_visuals.append(fallback_visual)
-                try:
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    ax.text(
-                        0.5, 0.5,
-                        f"{sub.upper()} — Data Coverage Overview",
-                        ha="center",
-                        va="center",
-                        fontsize=11,
-                        fontweight="bold",
-                    )
-                    ax.axis("off")
-    
-                    fallback_path = output_dir / f"{sub}_fallback_confidence.png"
-                    fig.savefig(fallback_path, dpi=120, bbox_inches="tight")
-                    plt.close(fig)
-    
-                    sub_visuals.append({
-                        "path": str(fallback_path),
-                        "caption": "Fallback evidence due to limited structured data.",
-                        "importance": 0.5,
-                        "confidence": round(0.6 * sub_domain_weight(sub), 2),
-                        "sub_domain": sub,
-                    })
-                except Exception:
-                    pass
-    
-            final_visuals.extend(sub_visuals[:5])
-    
-        # -------------------------------------------------
-        # GLOBAL FALLBACK (ABSOLUTE LAST RESORT — GUARANTEED)
-        # -------------------------------------------------
-        if len(final_visuals) < 2:
-            try:
-                fig, ax = plt.subplots(figsize=(6, 4))
-        
-                ax.bar(["Total Records"], [len(df)])
-                ax.set_title("Dataset Scale Overview", fontweight="bold")
-                ax.set_ylabel("Record Count")
-        
-                path = output_dir / "fallback_dataset_scale.png"
-                fig.savefig(path, dpi=120, bbox_inches="tight")
-                plt.close(fig)
-        
-                final_visuals.append({
-                    "path": str(path),
-                    "caption": "Dataset size used for this analysis.",
-                    "importance": 0.4,
-                    "confidence": 0.4,
-                    "sub_domain": (
-                        active_subs[0]
-                        if isinstance(active_subs, list) and active_subs
-                        else "unknown"
-                    ),
-                })
-        
-            except Exception:
-                # Absolute last-resort safety: do NOT crash reporting
-                pass
-        
         
         # -------------------------------------------------
-        # FINAL SORT (EXECUTIVE PRIORITY ORDERING)
+        # FINAL SORT (EXECUTIVE PRIORITY)
         # -------------------------------------------------
-        final_visuals = sorted(
-            final_visuals,
+        visuals = sorted(
+            visuals,
             key=lambda v: float(v.get("importance", 0)) * float(v.get("confidence", 1)),
             reverse=True,
         )
         
-        return final_visuals
+        return visuals
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
