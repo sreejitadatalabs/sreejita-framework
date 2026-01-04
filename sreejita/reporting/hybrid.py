@@ -51,25 +51,26 @@ class HybridReport(BaseReport):
             if not domains:
                 raise RuntimeError("No domains returned by orchestrator")
 
-            primary_domain = self._sort_domains(domains)[0]
-            primary = domain_results.get(primary_domain, {}) or {}
+            sorted_domains = self._sort_domains(domains)
+            primary_domain = sorted_domains[0]
+            primary = domain_results.get(primary_domain) or {}
 
             # =================================================
             # GLOBAL EXECUTIVE SUMMARY (PRIMARY DOMAIN)
             # =================================================
-            executive = primary.get("executive", {})
+            executive = primary.get("executive") or {}
             if isinstance(executive, dict):
                 self._write_global_executive(f, executive)
 
             # =================================================
-            # PER-SUB-DOMAIN EXECUTIVE SECTIONS (CRITICAL)
+            # PER-SUB-DOMAIN EXECUTIVE SECTIONS
             # =================================================
             self._write_sub_domain_executives(f, executive)
 
             # =================================================
             # DOMAIN DEEP DIVES
             # =================================================
-            for domain in self._sort_domains(domains):
+            for domain in sorted_domains:
                 payload = domain_results.get(domain)
                 if isinstance(payload, dict):
                     self._write_domain_section(f, domain, payload)
@@ -83,7 +84,7 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _write_global_executive(self, f, executive: Dict[str, Any]):
         brief = executive.get("executive_brief")
-        board = executive.get("board_readiness", {})
+        board = executive.get("board_readiness") or {}
 
         if isinstance(brief, str) and brief.strip():
             f.write("## Executive Summary\n\n")
@@ -92,20 +93,20 @@ class HybridReport(BaseReport):
         if isinstance(board, dict) and board:
             f.write("### Board Readiness\n")
             f.write(f"- **Score:** {board.get('score', '-')} / 100\n")
-            f.write(f"- **Status:** {board.get('band', '-')}\n\n")
+            f.write(f"- **Status:** {board.get('band', '-')}\n")
 
         trend = executive.get("board_readiness_trend")
         if isinstance(trend, dict):
             f.write(
                 f"- **Trend:** {trend.get('trend','→')} "
                 f"(Prev: {trend.get('previous_score','—')}, "
-                f"Current: {trend.get('current_score','—')})\n\n"
+                f"Current: {trend.get('current_score','—')})\n"
             )
 
-        f.write("---\n\n")
+        f.write("\n---\n\n")
 
     # -------------------------------------------------
-    # SUB-DOMAIN EXECUTIVE SECTIONS (AUTHORITATIVE)
+    # SUB-DOMAIN EXECUTIVE SECTIONS
     # -------------------------------------------------
     def _write_sub_domain_executives(self, f, executive: Dict[str, Any]):
         exec_by_sub = executive.get("executive_by_sub_domain")
@@ -120,7 +121,7 @@ class HybridReport(BaseReport):
                 continue
 
             brief = payload.get("executive_brief")
-            board = payload.get("board_readiness", {})
+            board = payload.get("board_readiness") or {}
 
             f.write(f"### {sub.replace('_',' ').title()}\n\n")
 
@@ -142,15 +143,11 @@ class HybridReport(BaseReport):
         f.write(f"## Domain Deep Dive — {domain.replace('_',' ').title()}\n\n")
 
         # ---------------- KPIs ----------------
-        raw_kpis = result.get("kpis")
-        kpis = (
-            {
-                k: v for k, v in raw_kpis.items()
-                if isinstance(k, str) and not k.startswith("_")
-            }
-            if isinstance(raw_kpis, dict)
-            else {}
-        )
+        raw_kpis = result.get("kpis") or {}
+        kpis = {
+            k: v for k, v in raw_kpis.items()
+            if isinstance(k, str) and not k.startswith("_")
+        }
 
         if kpis:
             f.write("### Key Metrics\n")
@@ -173,7 +170,7 @@ class HybridReport(BaseReport):
             f.write("\n")
 
         # ---------------- VISUALS ----------------
-        visuals = result.get("visuals", [])
+        visuals = result.get("visuals") or []
         if isinstance(visuals, list) and visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals[:6]:
@@ -182,6 +179,7 @@ class HybridReport(BaseReport):
                 path = vis.get("path")
                 if not path:
                     continue
+
                 caption = vis.get("caption", "Visual evidence")
                 confidence = int(float(vis.get("confidence", 0)) * 100)
 
@@ -189,7 +187,7 @@ class HybridReport(BaseReport):
                 f.write(f"> {caption} (Confidence: {confidence}%)\n\n")
 
         # ---------------- INSIGHTS ----------------
-        insights = result.get("insights", [])
+        insights = result.get("insights") or []
         if isinstance(insights, list) and insights:
             f.write("### Key Insights\n")
             for ins in insights[:5]:
@@ -202,7 +200,7 @@ class HybridReport(BaseReport):
             f.write("\n")
 
         # ---------------- RECOMMENDATIONS ----------------
-        recs = result.get("recommendations", [])
+        recs = result.get("recommendations") or []
         if isinstance(recs, list) and recs:
             f.write("### Recommendations\n")
             for r in recs[:5]:
@@ -242,16 +240,19 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _sort_domains(self, domains):
         priority = ["healthcare", "finance", "retail", "marketing"]
-        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
+        return sorted(
+            domains,
+            key=lambda d: priority.index(d) if d in priority else 99
+        )
 
     def _format_value(self, key: str, v: Any):
         if isinstance(v, (int, float)):
             if "rate" in key:
                 return f"{v:.1%}"
             if abs(v) >= 1_000_000:
-                return f"{v/1_000_000:.1f}M"
+                return f"{v / 1_000_000:.1f}M"
             if abs(v) >= 1_000:
-                return f"{v/1_000:.1f}K"
+                return f"{v / 1_000:.1f}K"
             return f"{v:.2f}"
         return str(v)
 
@@ -266,7 +267,6 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     - CLI
     - Batch runner
     - Scheduler
-    - File watcher
     - Tests
     """
 
@@ -286,7 +286,7 @@ def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
     domains = list(domain_results.keys())
     primary_domain = engine._sort_domains(domains)[0]
-    primary = domain_results.get(primary_domain, {}) or {}
+    primary = domain_results.get(primary_domain) or {}
 
     return {
         "markdown": str(md_path),
