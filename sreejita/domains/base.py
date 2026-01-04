@@ -1,6 +1,6 @@
 # =====================================================
-# BASE DOMAIN — UNIVERSAL (FINAL)
-# Sreejita Framework v3.5+
+# BASE DOMAIN — UNIVERSAL (FINAL, ENFORCED)
+# Sreejita Framework v3.6
 # =====================================================
 
 from abc import ABC, abstractmethod
@@ -8,77 +8,82 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from sreejita.narrative.executive_cognition import (
-    build_executive_payload,
-    build_subdomain_executive_payloads,
-)
+from sreejita.narrative.executive_cognition import build_executive_payload
+from sreejita.domains.subdomain.engine import UniversalSubDomainEngine
 
 
 class BaseDomain(ABC):
     """
-    Abstract base class for all domain modules.
+    Universal BaseDomain for all Sreejita domains.
 
-    Architecture:
-    - Strategy Pattern
-    - Plugin-based domain registry
-    - Universal executive cognition hook
-    - Universal visual safety guarantees
+    GUARANTEES:
+    - Deterministic execution
+    - Universal executive cognition
+    - Universal sub-domain handling
+    - Visual safety (never < 2 visuals)
+    - Never crashes orchestrator
 
-    Domains:
-    - Compute intelligence
-    - NEVER render reports
-    - NEVER manage orchestration
+    NON-RESPONSIBILITIES:
+    - Report rendering
+    - Orchestration
+    - I/O management
     """
 
+    # --------------------------------------------------
+    # DOMAIN METADATA
+    # --------------------------------------------------
     name: str = "generic"
     description: str = "Generic domain"
     required_columns: List[str] = []
 
     def __init__(self):
-        self.kpis: Dict[str, Any] = {}
-        self.insights: List[Any] = []
         self._last_kpis: Optional[Dict[str, Any]] = None
 
     # --------------------------------------------------
-    # OPTIONAL VALIDATION (DEFAULT SAFE)
+    # OPTIONAL VALIDATION (SAFE DEFAULT)
     # --------------------------------------------------
-
     def validate_data(self, df: pd.DataFrame) -> bool:
         """
-        Optional domain-level validation.
+        Optional strict validation.
         Default = always valid.
-
-        Domains may override for strict schemas.
         """
         return True
 
     # --------------------------------------------------
-    # REQUIRED DOMAIN CONTRACTS
+    # OPTIONAL PREPROCESSING
     # --------------------------------------------------
-
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Optional preprocessing hook.
+        Domain-specific preprocessing hook.
         Default = passthrough.
         """
         return df
 
+    # --------------------------------------------------
+    # REQUIRED DOMAIN CONTRACTS
+    # --------------------------------------------------
     @abstractmethod
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Core KPI computation.
+        Compute KPIs.
         Must return a dict.
         """
         raise NotImplementedError
 
     @abstractmethod
     def generate_insights(
-        self, df: pd.DataFrame, kpis: Dict[str, Any], *args, **kwargs
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+        *args,
+        **kwargs,
     ) -> List[Dict[str, Any]]:
         """
-        Insight generation.
+        Generate insights.
         """
         raise NotImplementedError
 
@@ -92,23 +97,24 @@ class BaseDomain(ABC):
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
-        Recommendation generation.
+        Generate recommendations.
         """
         raise NotImplementedError
 
     @abstractmethod
     def generate_visuals(
-        self, df: pd.DataFrame, output_dir: Path
+        self,
+        df: pd.DataFrame,
+        output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
-        Visual intelligence generation.
+        Generate visual intelligence.
         """
         raise NotImplementedError
 
     # --------------------------------------------------
     # 🔒 UNIVERSAL VISUAL SAFETY NET (CRITICAL)
     # --------------------------------------------------
-
     def ensure_minimum_visuals(
         self,
         visuals: List[Dict[str, Any]],
@@ -116,8 +122,8 @@ class BaseDomain(ABC):
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
-        Guarantees at least 2 visuals exist.
         Absolute last-resort fallback.
+        Guarantees >= 2 visuals.
         NEVER raises.
         """
 
@@ -154,22 +160,25 @@ class BaseDomain(ABC):
         return visuals
 
     # --------------------------------------------------
-    # 🧠 UNIVERSAL EXECUTIVE COGNITION HOOK (CRITICAL)
+    # 🧠 UNIVERSAL EXECUTIVE COGNITION (AUTHORITATIVE)
     # --------------------------------------------------
-
     def build_executive(
         self,
+        *,
         kpis: Dict[str, Any],
         insights: List[Dict[str, Any]],
         recommendations: List[Dict[str, Any]],
+        subdomain_signals: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
         Universal executive cognition builder.
 
-        Guarantees:
-        - Global executive payload
-        - Per-sub-domain executive payloads (if present)
-        - Safe fallback for single-domain datasets
+        OUTPUT GUARANTEES:
+        - executive_brief
+        - board_readiness
+        - primary_sub_domain
+        - sub_domains
+        - executive_by_sub_domain
         """
 
         # -------------------------------
@@ -182,38 +191,36 @@ class BaseDomain(ABC):
         )
 
         # -------------------------------
-        # SUB-DOMAIN EXECUTIVES (OPTIONAL)
+        # UNIVERSAL SUB-DOMAIN ENGINE
         # -------------------------------
-        sub_domains = kpis.get("sub_domains")
+        sub_payload = UniversalSubDomainEngine.resolve(
+            domain=self.name,
+            signals=subdomain_signals or {},
+            kpis=kpis,
+            insights=insights or [],
+            recommendations=recommendations or [],
+        )
 
-        if isinstance(sub_domains, dict) and sub_domains:
-            executive_by_sub = build_subdomain_executive_payloads(
-                kpis=kpis,
-                insights=insights or [],
-                recommendations=recommendations or [],
-            )
-        else:
-            executive_by_sub = {}
-
-        executive["executive_by_sub_domain"] = executive_by_sub
-
+        executive.update(sub_payload)
         return executive
 
     # --------------------------------------------------
-    # LEGACY PIPELINE (OPTIONAL USE)
+    # LEGACY PIPELINE (OPTIONAL / SAFE)
     # --------------------------------------------------
-
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Optional legacy pipeline.
+        Optional legacy execution path.
         Orchestrator may bypass this.
         """
 
         if not self.validate_data(df):
-            raise ValueError(f"Data validation failed for {self.name}")
+            raise ValueError(f"Validation failed for domain: {self.name}")
 
         df = self.preprocess(df)
+
         kpis = self.calculate_kpis(df)
+        self._last_kpis = kpis
+
         insights = self.generate_insights(df, kpis)
         recommendations = self.generate_recommendations(df, kpis, insights)
 
@@ -221,6 +228,7 @@ class BaseDomain(ABC):
             kpis=kpis,
             insights=insights,
             recommendations=recommendations,
+            subdomain_signals=kpis.get("sub_domain_signals", {}),
         )
 
         return {
