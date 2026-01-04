@@ -25,7 +25,7 @@ from reportlab.lib import utils
 
 
 # =====================================================
-# PAYLOAD NORMALIZER (STRICT & SAFE)
+# PAYLOAD NORMALIZER (EXECUTIVE-SAFE)
 # =====================================================
 
 def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,13 +37,13 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         executive = {}
 
     return {
-        "executive_brief": executive.get("executive_brief", ""),
-        "primary_kpis": payload.get("kpis", []),
-        "board_readiness": executive.get("board_readiness", {}),
-        "insights": payload.get("insights", {}),
-        "recommendations": payload.get("recommendations", []),
-        "visuals": payload.get("visuals", []),
         "domain": payload.get("domain", "unknown"),
+        "executive_brief": executive.get("executive_brief", ""),
+        "board_readiness": executive.get("board_readiness", {}),
+        "primary_kpis": executive.get("primary_kpis", []),
+        "insights": executive.get("insights", {}),
+        "recommendations": executive.get("recommendations", []),
+        "visuals": payload.get("visuals", []),
     }
 
 
@@ -130,33 +130,31 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # STYLES (HARDENED FOR STREAMLIT)
+        # STYLES
         # -------------------------------------------------
-        if "SR_Title" not in styles:
-            styles.add(ParagraphStyle(
-                "SR_Title",
-                fontSize=22,
-                alignment=TA_CENTER,
-                spaceAfter=18,
-                fontName="Helvetica-Bold",
-            ))
+        styles.add(ParagraphStyle(
+            "SR_Title",
+            fontSize=22,
+            alignment=TA_CENTER,
+            spaceAfter=18,
+            fontName="Helvetica-Bold",
+        ))
 
-        if "SR_Section" not in styles:
-            styles.add(ParagraphStyle(
-                "SR_Section",
-                fontSize=15,
-                spaceBefore=18,
-                spaceAfter=10,
-                fontName="Helvetica-Bold",
-            ))
+        styles.add(ParagraphStyle(
+            "SR_Section",
+            fontSize=15,
+            spaceBefore=18,
+            spaceAfter=10,
+            fontName="Helvetica-Bold",
+        ))
 
-        if "SR_Body" not in styles:
-            styles.add(ParagraphStyle(
-                "SR_Body",
-                fontSize=11,
-                leading=15,
-                spaceAfter=6,
-            ))
+        styles.add(ParagraphStyle(
+            "SR_Body",
+            fontSize=11,
+            leading=15,
+            spaceAfter=6,
+        ))
+
         # =================================================
         # PAGE 1 — EXECUTIVE OVERVIEW
         # =================================================
@@ -188,36 +186,43 @@ class ExecutivePDFRenderer:
             )
 
         # =================================================
-        # KPI TABLE (MAX 9)
+        # KPI TABLE (MIN 5, MAX 9)
         # =================================================
-        kpis = data["primary_kpis"][:9]
-        if kpis:
-            rows = [["Metric", "Value", "Confidence"]]
-            bg_styles = []
+        kpis = list(data["primary_kpis"][:9])
 
-            for idx, k in enumerate(kpis, start=1):
-                conf = float(k.get("confidence", 0.7))
-                rows.append([
-                    k.get("name", "—"),
-                    format_value(k.get("value")),
-                    f"{confidence_badge(conf)} ({int(conf*100)}%)",
-                ])
-                bg_styles.append(
-                    ("BACKGROUND", (0, idx), (-1, idx), confidence_color(conf))
-                )
+        while len(kpis) < 5:
+            kpis.append({
+                "name": "Data Coverage",
+                "value": None,
+                "confidence": 0.4,
+            })
 
-            table = Table(rows, colWidths=[3.5*inch, 2*inch, 1.5*inch])
-            table.setStyle(TableStyle([
-                ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
-                ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
-                ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-                ("PADDING", (0,0), (-1,-1), 8),
-                *bg_styles,
-            ]))
+        rows = [["Metric", "Value", "Confidence"]]
+        bg_styles = []
 
-            story.append(Spacer(1, 14))
-            story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
-            story.append(table)
+        for idx, k in enumerate(kpis, start=1):
+            conf = float(k.get("confidence", 0.7))
+            rows.append([
+                k.get("name", "—"),
+                format_value(k.get("value")),
+                f"{confidence_badge(conf)} ({int(conf*100)}%)",
+            ])
+            bg_styles.append(
+                ("BACKGROUND", (0, idx), (-1, idx), confidence_color(conf))
+            )
+
+        table = Table(rows, colWidths=[3.5*inch, 2*inch, 1.5*inch])
+        table.setStyle(TableStyle([
+            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
+            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("PADDING", (0,0), (-1,-1), 8),
+            *bg_styles,
+        ]))
+
+        story.append(Spacer(1, 14))
+        story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
+        story.append(table)
 
         # =================================================
         # VISUAL EVIDENCE — 2 PER PAGE
@@ -248,22 +253,17 @@ class ExecutivePDFRenderer:
         # INSIGHTS
         # =================================================
         insight_block = data["insights"]
-        if isinstance(insight_block, dict):
-            ordered = (
-                insight_block.get("strengths", []) +
-                insight_block.get("warnings", []) +
-                insight_block.get("risks", [])
-            )
-        else:
-            ordered = []
+        ordered = (
+            insight_block.get("strengths", []) +
+            insight_block.get("warnings", []) +
+            insight_block.get("risks", [])
+        ) if isinstance(insight_block, dict) else []
 
         if ordered:
             story.append(PageBreak())
             story.append(Paragraph("Key Insights", styles["SR_Section"]))
 
             for ins in ordered[:5]:
-                if not isinstance(ins, dict):
-                    continue
                 story.append(
                     Paragraph(
                         f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
@@ -284,8 +284,6 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Recommendations", styles["SR_Section"]))
 
             for rec in recs:
-                if not isinstance(rec, dict):
-                    continue
                 story.append(
                     Paragraph(
                         f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
