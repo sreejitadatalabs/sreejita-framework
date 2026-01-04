@@ -16,6 +16,11 @@ from sreejita.core.capabilities import Capability
 from sreejita.core.column_resolver import resolve_column
 from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
+from sreejita.narrative.executive_cognition import (
+    build_executive_payload,
+    build_subdomain_executive_payloads,
+)
+
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 # =====================================================
 # CONSTANTS
