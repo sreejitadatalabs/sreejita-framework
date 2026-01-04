@@ -128,7 +128,8 @@ def generate_report_payload(
 
         kpis = engine.calculate_kpis(df)
 
-        visuals = engine.generate_visuals(
+        visuals = engine.ensure_minimum_visuals(
+            visuals=visuals,
             df=df,
             output_dir=run_dir / "visuals" / domain,
         )
