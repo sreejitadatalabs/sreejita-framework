@@ -1,3 +1,11 @@
+# =====================================================
+# DOMAIN ROUTER — UNIVERSAL (FINAL, ENFORCED)
+# Sreejita Framework v3.6
+# =====================================================
+
+from typing import List, Dict, Any
+import logging
+
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
@@ -16,12 +24,11 @@ from sreejita.domains.intelligence.detector_v2 import (
     select_best_domain,
 )
 
+log = logging.getLogger("sreejita.router")
+
 # =====================================================
-# DOMAIN DETECTORS (RULE-BASED)
+# DOMAIN DETECTORS (RULE-BASED, DETERMINISTIC)
 # =====================================================
-# NOTE:
-# Domains are explicitly registered here for clarity and auditability.
-# Dynamic discovery is intentionally avoided in v3.6 for determinism.
 
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
@@ -35,7 +42,7 @@ DOMAIN_DETECTORS = [
 ]
 
 # =====================================================
-# DOMAIN IMPLEMENTATIONS
+# DOMAIN IMPLEMENTATIONS (SINGLETONS)
 # =====================================================
 
 DOMAIN_IMPLEMENTATIONS = {
@@ -53,37 +60,35 @@ DOMAIN_IMPLEMENTATIONS = {
 # OBSERVABILITY
 # =====================================================
 
-_OBSERVERS: list[DecisionObserver] = []
+_OBSERVERS: List[DecisionObserver] = []
 
 
 def register_observer(observer: DecisionObserver):
     """
-    Register an observer for domain-decision events.
-    Observers must be non-blocking and side-effect safe.
+    Register a non-blocking observer for domain-decision events.
     """
     _OBSERVERS.append(observer)
 
 
 # =====================================================
-# DOMAIN DECISION ENGINE
+# DOMAIN DECISION ENGINE (AUTHORITATIVE)
 # =====================================================
 
 def decide_domain(df) -> DecisionExplanation:
     """
     Determine the most appropriate domain for a dataset.
 
-    This function:
-    1. Runs rule-based detectors
-    2. Computes weighted domain scores
-    3. Selects the highest-confidence domain
-    4. Produces a fully explainable decision object
+    GUARANTEES:
+    - Always returns a DecisionExplanation
+    - Always attaches a valid domain engine
+    - Never raises for unknown datasets
     """
 
-    rule_results = {}
+    rule_results: Dict[str, Dict[str, Any]] = {}
 
-    # ------------------------
-    # Phase 1: Rule Detection
-    # ------------------------
+    # -------------------------------------------------
+    # Phase 1: Rule-Based Detection
+    # -------------------------------------------------
     for detector in DOMAIN_DETECTORS:
         try:
             result = detector.detect(df)
@@ -91,81 +96,111 @@ def decide_domain(df) -> DecisionExplanation:
                 continue
 
             rule_results[result.domain] = {
-                "confidence": result.confidence,
-                "signals": result.signals,
+                "confidence": float(result.confidence or 0.0),
+                "signals": result.signals or {},
             }
-        except Exception:
-            # Detector failure should not break domain resolution
+
+        except Exception as e:
+            log.debug(f"Detector {detector.__class__.__name__} failed: {e}")
             continue
 
-    # ------------------------
-    # Phase 2: Score & Select
-    # ------------------------
+    # -------------------------------------------------
+    # Phase 2: Weighted Scoring & Selection
+    # -------------------------------------------------
     domain_scores = compute_domain_scores(df, rule_results)
+
     selected_domain, confidence, meta = select_best_domain(domain_scores)
 
+    # -------------------------------------------------
+    # 🚑 HARD FALLBACK (CRITICAL)
+    # -------------------------------------------------
+    if not selected_domain or selected_domain not in DOMAIN_IMPLEMENTATIONS:
+        log.warning(
+            "No strong domain detected — falling back to healthcare (generic-safe)"
+        )
+        selected_domain = "healthcare"
+        confidence = round(
+            max(
+                rule_results.get("healthcare", {}).get("confidence", 0.3),
+                0.3,
+            ),
+            2,
+        )
+        meta = meta or {"signals": {}}
+
+    # -------------------------------------------------
+    # Build Alternatives (Explainability)
+    # -------------------------------------------------
     alternatives = [
         {
             "domain": d,
-            "confidence": info["confidence"],
+            "confidence": round(info.get("confidence", 0.0), 2),
         }
         for d, info in sorted(
             domain_scores.items(),
-            key=lambda x: x[1]["confidence"],
-            reverse=True
+            key=lambda x: x[1].get("confidence", 0),
+            reverse=True,
         )
         if d != selected_domain
     ]
 
+    # -------------------------------------------------
+    # Decision Object (AUTHORITATIVE CONTRACT)
+    # -------------------------------------------------
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
-        confidence=confidence,
+        confidence=round(confidence or 0.0, 2),
         alternatives=alternatives,
-        signals=meta.get("signals", {}) if meta else {},
+        signals=meta.get("signals", {}) if isinstance(meta, dict) else {},
         rules_applied=[
             "rule_based_domain_detection",
             "intent_weighted_scoring",
             "highest_confidence_selection",
+            "safe_domain_fallback",
         ],
         domain_scores=domain_scores,
     )
 
-    # Attach executable domain engine (critical for orchestration)
-    decision.engine = DOMAIN_IMPLEMENTATIONS.get(selected_domain)
+    # -------------------------------------------------
+    # Attach Engine (🚨 NEVER NULL)
+    # -------------------------------------------------
+    decision.engine = DOMAIN_IMPLEMENTATIONS[selected_domain]
 
-    # Attach dataset fingerprint for traceability
+    # -------------------------------------------------
+    # Dataset Fingerprint (Traceability)
+    # -------------------------------------------------
     decision.fingerprint = dataframe_fingerprint(df)
 
-    # ------------------------
-    # Observability (Non-Blocking)
-    # ------------------------
+    # -------------------------------------------------
+    # Observability Hooks (Non-Blocking)
+    # -------------------------------------------------
     for observer in _OBSERVERS:
         try:
             observer.record(decision)
         except Exception:
-            # Observers must never break core execution
             pass
 
     return decision
 
 
 # =====================================================
-# DOMAIN PREPROCESSING
+# DOMAIN PREPROCESSING (OPTIONAL UTILITY)
 # =====================================================
 
 def apply_domain(df, domain_name: str):
     """
-    Apply domain-specific preprocessing ONLY.
+    Apply ONLY domain-specific preprocessing.
 
     This does NOT:
     - calculate KPIs
     - generate insights
-    - run recommendations
-
-    It exists as a convenience hook for pipelines.
+    - generate recommendations
     """
     domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
     if domain:
-        return domain.preprocess(df)
+        try:
+            return domain.preprocess(df)
+        except Exception:
+            return df
     return df
