@@ -30,6 +30,17 @@ class DomainRegistry:
         self._detectors: Dict[str, Type] = {}
 
     # -------------------------------------------------
+    # INTERNAL HELPERS
+    # -------------------------------------------------
+
+    @staticmethod
+    def _normalize(name: str) -> str:
+        """
+        Canonical domain key normalization.
+        """
+        return name.strip().lower()
+
+    # -------------------------------------------------
     # REGISTRATION
     # -------------------------------------------------
 
@@ -38,6 +49,8 @@ class DomainRegistry:
         name: str,
         domain_cls: Type,
         detector_cls: Optional[Type] = None,
+        *,
+        overwrite: bool = False,
     ) -> None:
         """
         Register a domain implementation (and optional detector).
@@ -46,15 +59,24 @@ class DomainRegistry:
         - name: canonical domain name (e.g. "healthcare")
         - domain_cls: BaseDomain subclass
         - detector_cls: BaseDomainDetector subclass (optional)
+        - overwrite: allow replacing existing registration (default False)
         """
 
-        if not isinstance(name, str) or not name:
+        if not isinstance(name, str) or not name.strip():
             raise ValueError("Domain name must be a non-empty string")
 
-        self._domains[name] = domain_cls
+        key = self._normalize(name)
+
+        if not overwrite and key in self._domains:
+            raise RuntimeError(
+                f"Domain '{key}' already registered. "
+                "Use overwrite=True only if intentional."
+            )
+
+        self._domains[key] = domain_cls
 
         if detector_cls is not None:
-            self._detectors[name] = detector_cls
+            self._detectors[key] = detector_cls
 
     # -------------------------------------------------
     # ACCESSORS
@@ -66,9 +88,10 @@ class DomainRegistry:
 
         Returns:
         - Domain instance
-        - None if domain not registered
+        - None if domain not registered or instantiation fails
         """
-        domain_cls = self._domains.get(name)
+        key = self._normalize(name)
+        domain_cls = self._domains.get(key)
         if not domain_cls:
             return None
 
@@ -84,9 +107,10 @@ class DomainRegistry:
 
         Returns:
         - Detector instance
-        - None if detector not registered
+        - None if detector not registered or instantiation fails
         """
-        detector_cls = self._detectors.get(name)
+        key = self._normalize(name)
+        detector_cls = self._detectors.get(key)
         if not detector_cls:
             return None
 
@@ -112,10 +136,10 @@ class DomainRegistry:
         return sorted(self._detectors.keys())
 
     def has_domain(self, name: str) -> bool:
-        return name in self._domains
+        return self._normalize(name) in self._domains
 
     def has_detector(self, name: str) -> bool:
-        return name in self._detectors
+        return self._normalize(name) in self._detectors
 
 
 # =====================================================
