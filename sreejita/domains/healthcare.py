@@ -240,6 +240,15 @@ HEALTHCARE_RECOMMENDATION_MAP = {
 def _has_signal(df, col):
     return bool(col and col in df.columns and df[col].notna().any())
 
+signals = {
+    "patient": _has_signal(df, cols.get("patient")),
+    "admit": _has_signal(df, cols.get("admit")),
+    "discharge": _has_signal(df, cols.get("discharge")),
+    "los": _has_signal(df, cols.get("los")),
+    "diagnosis": _has_signal(df, cols.get("diagnosis")),
+    "facility": _has_signal(df, cols.get("facility")),
+}
+
 def infer_healthcare_subdomains(df, cols):
     hospital_signal = any([
         _has_signal(df, cols.get("los")),
@@ -604,7 +613,7 @@ class HealthcareDomain(BaseDomain):
             expected = HEALTHCARE_KPI_MAP.get(sub, [])
             present = [
                 k for k in expected
-                if isinstance(kpis.get(k), (int, float))
+                if isinstance(kpis.get(k), (int, float)) and not pd.isna(kpis.get(k)) and kpis.get(k) != 0
             ]
     
             for i in range(max(0, MIN_KPIS_PER_SUB - len(present))):
@@ -636,7 +645,11 @@ class HealthcareDomain(BaseDomain):
         active_subs = [
             s for s, score in sub_scores.items()
             if isinstance(score, (int, float)) and score > 0.15
-        ] or [kpis.get("primary_sub_domain", "unknown")]
+        ]
+        
+        if not active_subs:
+            primary = kpis.get("primary_sub_domain")
+            active_subs = [primary] if primary in HEALTHCARE_VISUAL_MAP else []
     
         # -------------------------------------------------
         # SUB-DOMAIN CONFIDENCE WEIGHTING
@@ -1175,7 +1188,11 @@ class HealthcareDomain(BaseDomain):
                     raise ValueError
     
                 repeats = df[c["encounter"]].value_counts()
-                repeat_rate = (repeats > 1).sum() / len(repeats)
+                repeat_rate = (
+                    (repeats > 1).sum() / len(repeats)
+                    if len(repeats) > 0
+                    else 0
+                )
     
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Repeat Scan Rate"], [repeat_rate])
