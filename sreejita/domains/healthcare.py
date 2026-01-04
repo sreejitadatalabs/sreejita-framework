@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
-from matplotlib.ticker import FuncFormatter
 
 from sreejita.core.capabilities import Capability
 from sreejita.core.column_resolver import resolve_column
@@ -236,7 +235,7 @@ HEALTHCARE_RECOMMENDATION_MAP = {
 # =====================================================
 # UNIVERSAL SUB-DOMAIN INFERENCE (HEALTHCARE)
 # =====================================================
-def _has_signal(col):
+def _has_signal(df: pd.DataFrame, col: Optional[str]) -> bool:
     return bool(col and col in df.columns and df[col].notna().any())
 
 def infer_healthcare_subdomains(df, cols):
@@ -380,8 +379,11 @@ class HealthcareDomain(BaseDomain):
         # ---------------------------------------------
         # CANONICAL TIME COLUMN
         # ---------------------------------------------
-        self.time_col = self.cols.get("date")
-    
+        self.time_col = (
+            self.cols.get("date")
+            or self.cols.get("fill_date")
+            or self.cols.get("discharge_date")
+        )
         return df
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
@@ -475,6 +477,7 @@ class HealthcareDomain(BaseDomain):
                 bed_col = self.cols.get("bed_id")
                 kpis["bed_occupancy_rate"] = (
                     df[bed_col].nunique() / volume
+                    # NOTE: Proxy metric (unique beds per record volume), not true occupancy
                     if bed_col and bed_col in df.columns and volume > 0
                     else None
                 )
@@ -587,7 +590,7 @@ class HealthcareDomain(BaseDomain):
         # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {
-            k: 0.9 if isinstance(v, (int, float)) and not pd.isna(v) and v != 0 else 0.4
+            k: 0.9 if isinstance(v, (int, float)) and not pd.isna(v) else 0.4
             for k, v in kpis.items()
             if not k.startswith("_")
         }
@@ -1806,7 +1809,7 @@ class HealthcareDomainDetector(BaseDomainDetector):
             "facility": resolve_column(df, "facility"),
         }
     
-        signals = {k: _has_signal(v) for k, v in cols.items()}
+        signals = {k: _has_signal(df, v) for k, v in cols.items()}
         confidence = round(sum(signals.values()) / len(signals), 2)
     
         if confidence < 0.3:
