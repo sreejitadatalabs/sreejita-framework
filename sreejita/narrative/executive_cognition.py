@@ -267,7 +267,6 @@ def build_executive_payload(
 # =====================================================
 # PER-SUB-DOMAIN EXECUTIVE COGNITION (CRITICAL ADDITION)
 # =====================================================
-
 def build_subdomain_executive_payloads(
     kpis: Dict[str, Any],
     insights: List[Dict[str, Any]],
@@ -275,9 +274,13 @@ def build_subdomain_executive_payloads(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Builds executive cognition PER sub-domain.
-    This is mandatory for Healthcare & mixed datasets.
 
-    Output:
+    Mandatory for:
+    - Healthcare
+    - Mixed datasets
+    - Any domain with multiple operating models
+
+    Output example:
     {
         "hospital": {...},
         "clinic": {...},
@@ -288,21 +291,24 @@ def build_subdomain_executive_payloads(
     sub_domains = kpis.get("sub_domains", {}) or {}
     results: Dict[str, Dict[str, Any]] = {}
 
-    for sub in sub_domains:
+    for sub in sub_domains.keys():
 
+        # ---------------- Filter domain-specific intelligence ----------------
         sub_insights = [
             i for i in insights
-            if i.get("sub_domain") == sub
+            if isinstance(i, dict) and i.get("sub_domain") == sub
         ]
 
         sub_recs = [
             r for r in recommendations
-            if r.get("sub_domain") == sub
+            if isinstance(r, dict) and r.get("sub_domain") == sub
         ]
 
+        # ---------------- Isolated KPI context ----------------
         sub_kpis = dict(kpis)
         sub_kpis["primary_sub_domain"] = sub
 
+        # ---------------- Build executive cognition ----------------
         results[sub] = build_executive_payload(
             kpis=sub_kpis,
             insights=sub_insights,
