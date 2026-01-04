@@ -14,11 +14,6 @@ from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 
-from sreejita.narrative.executive_cognition import (
-    build_executive_payload,
-    build_subdomain_executive_payloads,
-)
-
 log = logging.getLogger("sreejita.orchestrator")
 
 # =====================================================
@@ -44,7 +39,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# BOARD HISTORY (DATASET-AWARE)
+# BOARD READINESS HISTORY (DATASET-AWARE)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -90,7 +85,7 @@ def generate_report_payload(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
-    # Dataset-unique identity (prevents collisions)
+    # Dataset-unique identity (prevents filename collisions)
     dataset_key = str(input_path.absolute())
 
     run_dir = Path(config.get("run_dir", "runs/current"))
@@ -125,7 +120,7 @@ def generate_report_payload(
         )
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT)
+    # 4. DOMAIN EXECUTION (STRICT, NO INTELLIGENCE HERE)
     # -------------------------------------------------
     try:
         if hasattr(engine, "preprocess"):
@@ -135,7 +130,7 @@ def generate_report_payload(
 
         visuals = engine.generate_visuals(
             df=df,
-            output_dir=run_dir / "visuals" / domain
+            output_dir=run_dir / "visuals" / domain,
         )
 
         try:
@@ -152,12 +147,19 @@ def generate_report_payload(
 
         recommendations = enrich_recommendations(raw_recs)
 
+        # 🧠 EXECUTIVE COGNITION (UNIVERSAL HOOK)
+        executive = engine.build_executive(
+            kpis=kpis,
+            insights=insights,
+            recommendations=recommendations,
+        )
+
     except Exception as e:
         log.exception("Domain execution failed")
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY FILTER
+    # 5. VISUAL SAFETY FILTER (NON-CRASHING)
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
@@ -177,24 +179,7 @@ def generate_report_payload(
     )[:6]
 
     # -------------------------------------------------
-    # 6. EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
-    # -------------------------------------------------
-    executive = build_executive_payload(
-        kpis=kpis,
-        insights=insights if isinstance(insights, list) else [],
-        recommendations=recommendations if isinstance(recommendations, list) else [],
-    )
-
-    executive_by_sub_domain = build_subdomain_executive_payloads(
-        kpis=kpis,
-        insights=insights if isinstance(insights, list) else [],
-        recommendations=recommendations if isinstance(recommendations, list) else [],
-    )
-
-    executive["executive_by_sub_domain"] = executive_by_sub_domain
-
-    # -------------------------------------------------
-    # 7. BOARD READINESS HISTORY
+    # 6. BOARD READINESS HISTORY
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -213,17 +198,16 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 8. FINAL PAYLOAD (STRICT, NO LEAKS)
+    # 7. FINAL PAYLOAD (STRICT CONTRACT)
     # -------------------------------------------------
     return {
         domain: {
             "domain": domain,
-            "kpis": kpis,                     # ✅ FULL KPI SET (NOT executive KPIs)
+            "kpis": kpis,                     # FULL KPI SET
             "visuals": valid_visuals,
             "insights": insights,
             "recommendations": recommendations,
-            "executive": executive,
-            "executive_by_sub_domain": executive_by_sub_domain,
+            "executive": executive,           # GLOBAL + SUB-DOMAIN EXECUTIVES
             "shape": shape_info,
         }
     }
