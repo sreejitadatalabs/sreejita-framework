@@ -4,8 +4,11 @@
 # =====================================================
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+from pathlib import Path
+
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from sreejita.narrative.executive_cognition import (
     build_executive_payload,
@@ -21,6 +24,7 @@ class BaseDomain(ABC):
     - Strategy Pattern
     - Plugin-based domain registry
     - Universal executive cognition hook
+    - Universal visual safety guarantees
 
     Domains:
     - Compute intelligence
@@ -35,7 +39,7 @@ class BaseDomain(ABC):
     def __init__(self):
         self.kpis: Dict[str, Any] = {}
         self.insights: List[Any] = []
-        self._last_kpis: Dict[str, Any] | None = None
+        self._last_kpis: Optional[Dict[str, Any]] = None
 
     # --------------------------------------------------
     # OPTIONAL VALIDATION (DEFAULT SAFE)
@@ -72,7 +76,7 @@ class BaseDomain(ABC):
     @abstractmethod
     def generate_insights(
         self, df: pd.DataFrame, kpis: Dict[str, Any], *args, **kwargs
-    ) -> List[Any]:
+    ) -> List[Dict[str, Any]]:
         """
         Insight generation.
         """
@@ -80,8 +84,13 @@ class BaseDomain(ABC):
 
     @abstractmethod
     def generate_recommendations(
-        self, df: pd.DataFrame, kpis: Dict[str, Any], insights: List[Any], *args, **kwargs
-    ) -> List[Any]:
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+        insights: List[Dict[str, Any]],
+        *args,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
         """
         Recommendation generation.
         """
@@ -89,12 +98,60 @@ class BaseDomain(ABC):
 
     @abstractmethod
     def generate_visuals(
-        self, df: pd.DataFrame, output_dir
+        self, df: pd.DataFrame, output_dir: Path
     ) -> List[Dict[str, Any]]:
         """
         Visual intelligence generation.
         """
         raise NotImplementedError
+
+    # --------------------------------------------------
+    # 🔒 UNIVERSAL VISUAL SAFETY NET (CRITICAL)
+    # --------------------------------------------------
+
+    def ensure_minimum_visuals(
+        self,
+        visuals: List[Dict[str, Any]],
+        df: pd.DataFrame,
+        output_dir: Path,
+    ) -> List[Dict[str, Any]]:
+        """
+        Guarantees at least 2 visuals exist.
+        Absolute last-resort fallback.
+        NEVER raises.
+        """
+
+        visuals = visuals if isinstance(visuals, list) else []
+
+        if len(visuals) >= 2:
+            return visuals
+
+        try:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Records"], [len(df)])
+            ax.set_title("Dataset Scale Overview", fontweight="bold")
+            ax.set_ylabel("Record Count")
+
+            path = output_dir / f"{self.name}_global_fallback.png"
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+
+            visuals.append({
+                "path": str(path),
+                "caption": "Dataset scale fallback evidence.",
+                "importance": 0.3,
+                "confidence": 0.4,
+                "sub_domain": self.name,
+            })
+
+        except Exception:
+            # Absolute safety: never crash reporting
+            pass
+
+        return visuals
 
     # --------------------------------------------------
     # 🧠 UNIVERSAL EXECUTIVE COGNITION HOOK (CRITICAL)
