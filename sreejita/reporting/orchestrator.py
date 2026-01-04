@@ -1,6 +1,6 @@
 # =====================================================
 # ORCHESTRATOR — UNIVERSAL (FINAL, ENFORCED)
-# Sreejita Framework v3.5.1
+# Sreejita Framework v3.5.x
 # =====================================================
 
 import logging
@@ -13,7 +13,11 @@ import pandas as pd
 from sreejita.domains.router import decide_domain
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
-from sreejita.narrative.executive_cognition import build_executive_payload
+
+from sreejita.narrative.executive_cognition import (
+    build_executive_payload,
+    build_subdomain_executive_payloads,
+)
 
 log = logging.getLogger("sreejita.orchestrator")
 
@@ -40,7 +44,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# BOARD HISTORY
+# BOARD HISTORY (DATASET-AWARE)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -72,6 +76,7 @@ def _trend(prev: int | None, curr: int | None) -> str:
         return "↓"
     return "→"
 
+
 # =====================================================
 # CANONICAL ENTRY POINT
 # =====================================================
@@ -85,8 +90,8 @@ def generate_report_payload(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
-    # 🎯 FIX A5: Absolute path prevents two files named 'data.csv' from colliding
-    dataset_key = str(input_path.absolute()) 
+    # Dataset-unique identity (prevents collisions)
+    dataset_key = str(input_path.absolute())
 
     run_dir = Path(config.get("run_dir", "runs/current"))
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +157,7 @@ def generate_report_payload(
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY ENFORCEMENT (NON-CRASHING)
+    # 5. VISUAL SAFETY FILTER
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
@@ -172,13 +177,21 @@ def generate_report_payload(
     )[:6]
 
     # -------------------------------------------------
-    # 6. EXECUTIVE COGNITION (AUTHORITATIVE)
+    # 6. EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
     # -------------------------------------------------
     executive = build_executive_payload(
         kpis=kpis,
         insights=insights if isinstance(insights, list) else [],
         recommendations=recommendations if isinstance(recommendations, list) else [],
     )
+
+    executive_by_sub_domain = build_subdomain_executive_payloads(
+        kpis=kpis,
+        insights=insights if isinstance(insights, list) else [],
+        recommendations=recommendations if isinstance(recommendations, list) else [],
+    )
+
+    executive["executive_by_sub_domain"] = executive_by_sub_domain
 
     # -------------------------------------------------
     # 7. BOARD READINESS HISTORY
@@ -200,16 +213,17 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 8. FINAL PAYLOAD (STRICT CONTRACT — NO LEAKS)
+    # 8. FINAL PAYLOAD (STRICT, NO LEAKS)
     # -------------------------------------------------
     return {
         domain: {
-            "domain": domain, # 🎯 ADD: Required for PDF titles
-            "kpis": executive.get("primary_kpis", []), 
+            "domain": domain,
+            "kpis": kpis,                     # ✅ FULL KPI SET (NOT executive KPIs)
             "visuals": valid_visuals,
             "insights": insights,
             "recommendations": recommendations,
             "executive": executive,
+            "executive_by_sub_domain": executive_by_sub_domain,
             "shape": shape_info,
         }
     }
