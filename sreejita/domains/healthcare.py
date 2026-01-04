@@ -233,34 +233,94 @@ HEALTHCARE_RECOMMENDATION_MAP = {
 }
 
 # =====================================================
-# UNIVERSAL SUB-DOMAIN INFERENCE (HEALTHCARE)
+# SAFE SIGNAL DETECTION (UNIVERSAL)
 # =====================================================
 def _has_signal(df: pd.DataFrame, col: Optional[str]) -> bool:
-    return bool(col and col in df.columns and df[col].notna().any())
+    """
+    Returns True if a resolved column exists and has at least one non-null value.
+    This function is intentionally strict and deterministic.
+    """
+    return bool(
+        col
+        and isinstance(col, str)
+        and col in df.columns
+        and df[col].notna().any()
+    )
 
-def infer_healthcare_subdomains(df, cols):
+# =====================================================
+# UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE
+# =====================================================
+def infer_healthcare_subdomains(
+    df: pd.DataFrame,
+    cols: Dict[str, Optional[str]],
+) -> Dict[str, float]:
+    """
+    Determines healthcare sub-domain confidence scores based on
+    presence of strong semantic signals.
+
+    Returns:
+        Dict[sub_domain: confidence_score]
+    """
+
+    # -------------------------------
+    # HOSPITAL SIGNAL
+    # -------------------------------
     hospital_signal = any([
         _has_signal(df, cols.get("los")),
-        _has_signal(df, cols.get("date")) and _has_signal(df, cols.get("discharge_date")),
+        (
+            _has_signal(df, cols.get("date"))
+            and _has_signal(df, cols.get("discharge_date"))
+        ),
         _has_signal(df, cols.get("bed_id")),
         _has_signal(df, cols.get("admit_type")),
     ])
 
-    return {
-        HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
+    # -------------------------------
+    # RAW SUB-DOMAIN SCORES
+    # -------------------------------
+    scores: Dict[str, float] = {
+        HealthcareSubDomain.HOSPITAL.value: (
+            0.9 if hospital_signal else 0.0
+        ),
+
         HealthcareSubDomain.CLINIC.value: (
-            0.8 if _has_signal(df, cols.get("duration")) and not _has_signal(df, cols.get("supply")) else 0.0
+            0.8
+            if _has_signal(df, cols.get("duration"))
+            and not _has_signal(df, cols.get("supply"))
+            else 0.0
         ),
+
         HealthcareSubDomain.DIAGNOSTICS.value: (
-            0.8 if _has_signal(df, cols.get("duration")) and _has_signal(df, cols.get("flag")) else 0.0
+            0.8
+            if _has_signal(df, cols.get("duration"))
+            and _has_signal(df, cols.get("flag"))
+            else 0.0
         ),
+
         HealthcareSubDomain.PHARMACY.value: (
-            0.7 if _has_signal(df, cols.get("cost")) and _has_signal(df, cols.get("supply")) else 0.0
+            0.7
+            if _has_signal(df, cols.get("cost"))
+            and _has_signal(df, cols.get("supply"))
+            else 0.0
         ),
+
         HealthcareSubDomain.PUBLIC_HEALTH.value: (
-            0.9 if _has_signal(df, cols.get("population")) else 0.0
+            0.9
+            if _has_signal(df, cols.get("population"))
+            else 0.0
         ),
     }
+
+    # -------------------------------
+    # HARD SAFETY FALLBACK
+    # -------------------------------
+    # If no sub-domain has meaningful signal, mark as UNKNOWN
+    if not any(v > 0 for v in scores.values()):
+        return {
+            HealthcareSubDomain.UNKNOWN.value: 1.0
+        }
+
+    return scores
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
