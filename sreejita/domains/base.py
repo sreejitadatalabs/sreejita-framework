@@ -13,7 +13,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from sreejita.narrative.executive_cognition import build_executive_payload
-from sreejita.domains.subdomain.engine import UniversalSubDomainEngine
 
 
 class BaseDomain(ABC):
