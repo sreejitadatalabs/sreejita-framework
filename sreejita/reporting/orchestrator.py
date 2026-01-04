@@ -39,7 +39,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
 
 # =====================================================
-# BOARD READINESS HISTORY (DATASET-AWARE)
+# BOARD READINESS HISTORY
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -85,7 +85,6 @@ def generate_report_payload(
     if not input_path.exists():
         raise FileNotFoundError(input_path)
 
-    # Dataset-unique identity (prevents filename collisions)
     dataset_key = str(input_path.absolute())
 
     run_dir = Path(config.get("run_dir", "runs/current"))
@@ -99,7 +98,7 @@ def generate_report_payload(
         raise RuntimeError("Dataset is empty")
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY)
+    # 2. DATASET SHAPE
     # -------------------------------------------------
     try:
         shape_info = detect_dataset_shape(df)
@@ -114,25 +113,23 @@ def generate_report_payload(
     domain = decision.selected_domain
 
     if engine is None or not domain:
-        raise RuntimeError(
-            "Unsupported or unknown domain. "
-            "Executive report cannot be generated safely."
-        )
+        raise RuntimeError("Unsupported or unknown domain")
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT, NO INTELLIGENCE HERE)
+    # 4. DOMAIN EXECUTION
     # -------------------------------------------------
+    visuals: List[Dict[str, Any]] = []  # ✅ PRE-DECLARE (CRITICAL)
+
     try:
         if hasattr(engine, "preprocess"):
             df = engine.preprocess(df)
 
         kpis = engine.calculate_kpis(df)
 
-        visuals = engine.ensure_minimum_visuals(
-            visuals=visuals,
+        visuals = engine.generate_visuals(
             df=df,
             output_dir=run_dir / "visuals" / domain,
-        )
+        ) or []
 
         try:
             insights = engine.generate_insights(df, kpis, shape_info=shape_info)
@@ -148,7 +145,6 @@ def generate_report_payload(
 
         recommendations = enrich_recommendations(raw_recs)
 
-        # 🧠 EXECUTIVE COGNITION (UNIVERSAL HOOK)
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -160,11 +156,11 @@ def generate_report_payload(
         raise RuntimeError(str(e))
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY FILTER (NON-CRASHING)
+    # 5. VISUAL SAFETY FILTER
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
-    for v in visuals or []:
+    for v in visuals:
         try:
             path = Path(v.get("path", ""))
             conf = float(v.get("confidence", 0))
@@ -178,6 +174,16 @@ def generate_report_payload(
         key=lambda x: x.get("importance", 0) * x.get("confidence", 1),
         reverse=True,
     )[:6]
+
+    # -------------------------------------------------
+    # ✅ OPTIONAL HARDENING (ADD HERE — EXACTLY HERE)
+    # -------------------------------------------------
+    if hasattr(engine, "ensure_minimum_visuals"):
+        valid_visuals = engine.ensure_minimum_visuals(
+            valid_visuals,
+            df,
+            run_dir / "visuals" / domain,
+        )
 
     # -------------------------------------------------
     # 6. BOARD READINESS HISTORY
@@ -199,16 +205,16 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 7. FINAL PAYLOAD (STRICT CONTRACT)
+    # 7. FINAL PAYLOAD
     # -------------------------------------------------
     return {
         domain: {
             "domain": domain,
-            "kpis": kpis,                     # FULL KPI SET
+            "kpis": kpis,
             "visuals": valid_visuals,
             "insights": insights,
             "recommendations": recommendations,
-            "executive": executive,           # GLOBAL + SUB-DOMAIN EXECUTIVES
+            "executive": executive,
             "shape": shape_info,
         }
     }
