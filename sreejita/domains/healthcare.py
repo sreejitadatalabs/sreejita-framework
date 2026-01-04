@@ -477,23 +477,38 @@ class HealthcareDomain(BaseDomain):
                     else None
                 )
     
-                # Facility variance (GOVERNANCE SAFE)
+                # Facility-Level LOS Variance (Governance-Safe)
+                # -------------------------------------------------
                 fac_col = self.cols.get("facility")
                 los_col = self.cols.get("los")
                 
                 if volume < MIN_SAMPLE_SIZE:
+                    # Governance rule: do not compute variance on weak samples
                     kpis["facility_variance_score"] = None
-                elif fac_col and los_col and fac_col in df.columns and los_col in df.columns:
-                    means = df.groupby(fac_col)[los_col].mean()
-                    kpis["facility_variance_score"] = (
-                        means.std() / means.mean()
-                        if means.mean() and means.mean() > 0
-                        else None
-                    )
+                
+                elif (
+                    fac_col
+                    and los_col
+                    and fac_col in df.columns
+                    and los_col in df.columns
+                ):
+                    grouped = df.groupby(fac_col)[los_col].mean()
+                
+                    # Need at least 2 facilities to compute variance
+                    if len(grouped) > 1 and grouped.mean() and grouped.mean() > 0:
+                        kpis["facility_variance_score"] = grouped.std() / grouped.mean()
+                    else:
+                        kpis["facility_variance_score"] = None
+                
                 else:
                     kpis["facility_variance_score"] = None
-
+                
+                
+                # -------------------------------------------------
+                # Emergency / Boarding Time Proxy
+                # -------------------------------------------------
                 kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
+
     
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
@@ -569,7 +584,10 @@ class HealthcareDomain(BaseDomain):
         # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {
-            k: 0.9 if isinstance(v, (int, float)) else 0.4
+            k: (
+                0.9 if isinstance(v, (int, float)) and not k.endswith("_placeholder_kpi")
+                else 0.4
+            )
             for k, v in kpis.items()
             if not k.startswith("_")
         }
@@ -697,7 +715,8 @@ class HealthcareDomain(BaseDomain):
                 if v.get("sub_domain") == sub
             ]
     
-            if len(sub_visuals) < 2:
+            while len(sub_visuals) < 2:
+                sub_visuals.append(fallback_visual)
                 try:
                     fig, ax = plt.subplots(figsize=(6, 4))
                     ax.text(
