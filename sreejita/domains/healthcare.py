@@ -232,6 +232,40 @@ HEALTHCARE_RECOMMENDATION_MAP = {
         "whole_person_platform",
     ],
 }
+
+# =====================================================
+# UNIVERSAL SUB-DOMAIN INFERENCE (HEALTHCARE)
+# =====================================================
+
+def infer_healthcare_subdomains(cols: Dict[str, Optional[str]]) -> Dict[str, float]:
+    has_los = bool(cols.get("los"))
+    has_date = bool(cols.get("date"))
+    has_discharge = bool(cols.get("discharge_date"))
+    has_bed = bool(cols.get("bed_id"))
+    has_admit_type = bool(cols.get("admit_type"))
+
+    hospital_signal = any([
+        has_los,
+        has_date and has_discharge,
+        has_bed,
+        has_admit_type,
+    ])
+
+    return {
+        HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
+        HealthcareSubDomain.CLINIC.value: (
+            0.8 if cols.get("duration") and not cols.get("supply") else 0.0
+        ),
+        HealthcareSubDomain.DIAGNOSTICS.value: (
+            0.8 if cols.get("duration") and cols.get("flag") else 0.0
+        ),
+        HealthcareSubDomain.PHARMACY.value: (
+            0.7 if cols.get("cost") and cols.get("supply") else 0.0
+        ),
+        HealthcareSubDomain.PUBLIC_HEALTH.value: (
+            0.9 if cols.get("population") else 0.0
+        ),
+    }
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -310,18 +344,19 @@ class HealthcareDomain(BaseDomain):
         # BOOLEAN / FLAG NORMALIZATION (YES / NO / TRUE)
         # ---------------------------------------------
         for key in ["readmitted", "flag"]:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .map({
-                    "yes": 1, "y": 1, "true": 1, "1": 1,
-                    "no": 0, "n": 0, "false": 0, "0": 0,
-                })
-                .fillna(df[col])
-            )
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                mapped = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .map({
+                        "yes": 1, "y": 1, "true": 1, "1": 1,
+                        "no": 0, "n": 0, "false": 0, "0": 0,
+                    })
+                )
+                df[col] = pd.to_numeric(mapped.fillna(df[col]), errors="coerce")
     
         # ---------------------------------------------
         # DERIVE LOS IF MISSING (CRITICAL FOR DATASET-2)
@@ -358,40 +393,6 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
-    
-        # =====================================================
-        # UNIVERSAL SUB-DOMAIN INFERENCE (TEMP LOCATION)
-        # =====================================================
-        
-        def infer_healthcare_subdomains(cols: Dict[str, Optional[str]]) -> Dict[str, float]:
-            has_los = bool(cols.get("los"))
-            has_date = bool(cols.get("date"))
-            has_discharge = bool(cols.get("discharge_date"))
-            has_bed = bool(cols.get("bed_id"))
-            has_admit_type = bool(cols.get("admit_type"))
-        
-            hospital_signal = any([
-                has_los,
-                has_date and has_discharge,
-                has_bed,
-                has_admit_type,
-            ])
-        
-            return {
-                HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
-                HealthcareSubDomain.CLINIC.value: (
-                    0.8 if cols.get("duration") and not cols.get("supply") else 0.0
-                ),
-                HealthcareSubDomain.DIAGNOSTICS.value: (
-                    0.8 if cols.get("duration") and cols.get("flag") else 0.0
-                ),
-                HealthcareSubDomain.PHARMACY.value: (
-                    0.7 if cols.get("cost") and cols.get("supply") else 0.0
-                ),
-                HealthcareSubDomain.PUBLIC_HEALTH.value: (
-                    0.9 if cols.get("population") else 0.0
-                ),
-            }
     
         sub_scores = infer_healthcare_subdomains(self.cols)
     
@@ -886,7 +887,6 @@ class HealthcareDomain(BaseDomain):
                     raise ValueError
     
                 dow = df[time_col].dt.day_name()
-                no_show = df[c["readmitted"]]  # proxy: missed / flag
                 rate = df.groupby(dow)[c["readmitted"]].mean()
     
                 fig, ax = plt.subplots(figsize=(6, 4))
