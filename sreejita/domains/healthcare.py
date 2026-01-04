@@ -237,33 +237,30 @@ HEALTHCARE_RECOMMENDATION_MAP = {
 # UNIVERSAL SUB-DOMAIN INFERENCE (HEALTHCARE)
 # =====================================================
 
-def infer_healthcare_subdomains(cols: Dict[str, Optional[str]]) -> Dict[str, float]:
-    has_los = bool(cols.get("los"))
-    has_date = bool(cols.get("date"))
-    has_discharge = bool(cols.get("discharge_date"))
-    has_bed = bool(cols.get("bed_id"))
-    has_admit_type = bool(cols.get("admit_type"))
+def _has_signal(df, col):
+    return bool(col and col in df.columns and df[col].notna().any())
 
+def infer_healthcare_subdomains(df, cols):
     hospital_signal = any([
-        has_los,
-        has_date and has_discharge,
-        has_bed,
-        has_admit_type,
+        _has_signal(df, cols.get("los")),
+        _has_signal(df, cols.get("date")) and _has_signal(df, cols.get("discharge_date")),
+        _has_signal(df, cols.get("bed_id")),
+        _has_signal(df, cols.get("admit_type")),
     ])
 
     return {
         HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
         HealthcareSubDomain.CLINIC.value: (
-            0.8 if cols.get("duration") and not cols.get("supply") else 0.0
+            0.8 if _has_signal(df, cols.get("duration")) and not _has_signal(df, cols.get("supply")) else 0.0
         ),
         HealthcareSubDomain.DIAGNOSTICS.value: (
-            0.8 if cols.get("duration") and cols.get("flag") else 0.0
+            0.8 if _has_signal(df, cols.get("duration")) and _has_signal(df, cols.get("flag")) else 0.0
         ),
         HealthcareSubDomain.PHARMACY.value: (
-            0.7 if cols.get("cost") and cols.get("supply") else 0.0
+            0.7 if _has_signal(df, cols.get("cost")) and _has_signal(df, cols.get("supply")) else 0.0
         ),
         HealthcareSubDomain.PUBLIC_HEALTH.value: (
-            0.9 if cols.get("population") else 0.0
+            0.9 if _has_signal(df, cols.get("population")) else 0.0
         ),
     }
 # =====================================================
@@ -394,7 +391,7 @@ class HealthcareDomain(BaseDomain):
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
     
-        sub_scores = infer_healthcare_subdomains(self.cols)
+        sub_scores = infer_healthcare_subdomains(df, self.cols)
     
         active_subs = {
             k: v for k, v in sub_scores.items()
@@ -506,9 +503,10 @@ class HealthcareDomain(BaseDomain):
                     and los_col in df.columns
                 ):
                     grouped = df.groupby(fac_col)[los_col].mean()
+                    mean = grouped.mean()
                     kpis["facility_variance_score"] = (
-                        grouped.std() / grouped.mean()
-                        if len(grouped) > 1 and grouped.mean() > 0
+                        grouped.std() / mean
+                        if len(grouped) > 1 and mean > 0.01
                         else None
                     )
                 else:
@@ -590,7 +588,7 @@ class HealthcareDomain(BaseDomain):
         # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {
-            k: 0.9 if isinstance(v, (int, float)) else 0.4
+            k: 0.9 if isinstance(v, (int, float)) and not pd.isna(v) and v != 0 else 0.4
             for k, v in kpis.items()
             if not k.startswith("_")
         }
@@ -638,7 +636,7 @@ class HealthcareDomain(BaseDomain):
         active_subs = [
             s for s, score in sub_scores.items()
             if isinstance(score, (int, float)) and score > 0.15
-        ] or ["hospital"]
+        ] or [kpis.get("primary_sub_domain", "unknown")]
     
         # -------------------------------------------------
         # SUB-DOMAIN CONFIDENCE WEIGHTING
@@ -1810,9 +1808,11 @@ class HealthcareDomainDetector(BaseDomainDetector):
         return DomainDetectionResult(
             domain="healthcare",
             confidence=round(confidence, 2),
-            signals=signals,
+            signals={
+                **signals,
+                "likely_subdomains": infer_healthcare_subdomains(df, cols)
+            },
         )
-
 
 def register(registry):
     registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
