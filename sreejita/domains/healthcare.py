@@ -809,19 +809,37 @@ class HealthcareDomain(BaseDomain):
         c = self.cols
         time_col = self.time_col
     
+        # -------------------------------------------------
+        # SAFETY: time column must exist & be datetime
+        # -------------------------------------------------
+        if time_col and time_col in df.columns:
+            if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
+                df = df.copy()
+                df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    
         # =================================================
         # HOSPITAL VISUALS
         # =================================================
-    
         if sub_domain == "hospital":
     
             # 1. Average LOS Trend
             if visual_key == "avg_los_trend":
                 if not (c.get("los") and time_col):
-                    raise ValueError
+                    raise ValueError("LOS or time column missing")
+    
+                series = (
+                    df[[time_col, c["los"]]]
+                    .dropna()
+                    .set_index(time_col)[c["los"]]
+                    .resample("M")
+                    .mean()
+                )
+    
+                if series.empty:
+                    raise ValueError("No LOS data")
     
                 fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(time_col)[c["los"]].resample("M").mean().plot(ax=ax)
+                series.plot(ax=ax)
                 ax.set_title("Average Length of Stay Trend", fontweight="bold")
                 ax.set_ylabel("Days")
                 ax.grid(alpha=0.3)
@@ -830,36 +848,53 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_avg_los_trend.png",
                     "Monthly trend of inpatient length of stay.",
-                    importance=0.95,
-                    confidence=0.9,
+                    0.95,
+                    0.90,
                     sub_domain,
                 )
                 return
     
             # 2. Bed Turnover Velocity
             if visual_key == "bed_turnover":
-                if not (self.cols.get("bed_id") and time_col):
-                    raise ValueError
-                
-                # Logic: How many patients per room in this period?
-                turnover = df.groupby(self.cols["bed_id"])[time_col].count()
-                
+                bed_col = c.get("bed_id")
+                if not (bed_col and time_col):
+                    raise ValueError("Bed or time column missing")
+    
+                turnover = (
+                    df[[bed_col, time_col]]
+                    .dropna()
+                    .groupby(bed_col)[time_col]
+                    .count()
+                )
+    
+                if turnover.empty:
+                    raise ValueError("No bed turnover data")
+    
                 fig, ax = plt.subplots(figsize=(6, 4))
-                turnover.plot(kind="hist", bins=15, ax=ax, color="#2c3e50")
-                ax.set_title("Bed Turnover Velocity (Volume per Room)", fontweight="bold")
-                ax.set_xlabel("Patients per Room")
-                
-                register_visual(fig, f"{sub_domain}_bed_velocity.png", 
-                               "Utilization frequency of physical hospital beds.", 
-                               0.92, 0.88, sub_domain,)
+                turnover.plot(kind="hist", bins=15, ax=ax)
+                ax.set_title("Bed Turnover Velocity", fontweight="bold")
+                ax.set_xlabel("Patients per Bed")
+    
+                register_visual(
+                    fig,
+                    f"{sub_domain}_bed_velocity.png",
+                    "Utilization frequency of physical hospital beds.",
+                    0.92,
+                    0.88,
+                    sub_domain,
+                )
                 return
     
             # 3. Readmission Risk
             if visual_key == "readmission_risk":
-                if not c.get("readmitted"):
-                    raise ValueError
+                col = c.get("readmitted")
+                if not col:
+                    raise ValueError("Readmission column missing")
     
-                rates = df[c["readmitted"]].value_counts(normalize=True)
+                rates = df[col].value_counts(normalize=True)
+                if rates.empty:
+                    raise ValueError("No readmission data")
+    
                 fig, ax = plt.subplots(figsize=(6, 4))
                 rates.plot(kind="bar", ax=ax)
                 ax.set_title("Readmission Rate Distribution", fontweight="bold")
@@ -868,18 +903,21 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_readmission.png",
                     "Distribution of 30-day readmissions.",
-                    importance=0.93,
-                    confidence=0.88,
-                    sundomain,
+                    0.93,
+                    0.88,
+                    sub_domain,
                 )
                 return
     
             # 4. Discharge Hour Distribution
             if visual_key == "discharge_hour":
                 if not time_col:
-                    raise ValueError
+                    raise ValueError("Time column missing")
     
-                hours = df[time_col].dt.hour.dropna()
+                hours = df[time_col].dropna().dt.hour
+                if hours.empty:
+                    raise ValueError("No discharge time data")
+    
                 fig, ax = plt.subplots(figsize=(6, 4))
                 hours.value_counts().sort_index().plot(kind="bar", ax=ax)
                 ax.set_title("Discharge Hour Distribution", fontweight="bold")
@@ -888,16 +926,16 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_discharge_hour.png",
                     "Inpatient discharge timing pattern.",
-                    importance=0.85,
-                    confidence=0.8,
+                    0.85,
+                    0.80,
                     sub_domain,
                 )
                 return
     
-            # 5. Acuity vs Staffing (Proxy)
+            # 5. Acuity vs Staffing
             if visual_key == "acuity_vs_staffing":
                 if not (c.get("los") and c.get("cost")):
-                    raise ValueError
+                    raise ValueError("LOS or cost missing")
     
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.scatter(df[c["los"]], df[c["cost"]], alpha=0.4)
@@ -909,8 +947,8 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_acuity_staffing.png",
                     "Relationship between patient acuity and staffing intensity.",
-                    importance=0.88,
-                    confidence=0.82,
+                    0.88,
+                    0.82,
                     sub_domain,
                 )
                 return
@@ -918,10 +956,21 @@ class HealthcareDomain(BaseDomain):
             # 6. ED Boarding Time
             if visual_key == "ed_boarding":
                 if not (c.get("duration") and time_col):
-                    raise ValueError
+                    raise ValueError("Duration or time missing")
+    
+                series = (
+                    df[[time_col, c["duration"]]]
+                    .dropna()
+                    .set_index(time_col)[c["duration"]]
+                    .resample("M")
+                    .mean()
+                )
+    
+                if series.empty:
+                    raise ValueError("No ED boarding data")
     
                 fig, ax = plt.subplots(figsize=(8, 4))
-                df.set_index(time_col)[c["duration"]].resample("M").mean().plot(ax=ax)
+                series.plot(ax=ax)
                 ax.set_title("ED Boarding Time Trend", fontweight="bold")
                 ax.set_ylabel("Hours")
     
@@ -929,20 +978,28 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_ed_boarding.png",
                     "Average emergency department boarding time.",
-                    importance=0.92,
-                    confidence=0.85,
-                    subdomain,
+                    0.92,
+                    0.85,
+                    sub_domain,
                 )
                 return
     
             # 7. Mortality Trend
             if visual_key == "mortality_trend":
-                # 🎯 FIX: Use 'flag' instead of 'readmitted' for mortality proxy
                 target_col = c.get("flag")
                 if not (target_col and time_col):
-                    raise ValueError
-            
-                rate = df.groupby(pd.Grouper(key=time_col, freq="M"))[target_col].mean()
+                    raise ValueError("Mortality proxy or time missing")
+    
+                rate = (
+                    df[[time_col, target_col]]
+                    .dropna()
+                    .groupby(pd.Grouper(key=time_col, freq="M"))[target_col]
+                    .mean()
+                )
+    
+                if rate.empty:
+                    raise ValueError("No mortality data")
+    
                 fig, ax = plt.subplots(figsize=(8, 4))
                 rate.plot(ax=ax, marker="o")
                 ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
@@ -951,11 +1008,16 @@ class HealthcareDomain(BaseDomain):
                     fig,
                     f"{sub_domain}_mortality_trend.png",
                     "Observed mortality proxy trend over time.",
-                    importance=0.9,
-                    confidence=0.8,
-                    subdomain,
+                    0.90,
+                    0.80,
+                    sub_domain,
                 )
                 return
+    
+        # -------------------------------------------------
+        # NOT HANDLED
+        # -------------------------------------------------
+        raise ValueError(f"Unhandled visual key: {visual_key}")
     
         # =================================================
         # CLINIC / AMBULATORY VISUALS
