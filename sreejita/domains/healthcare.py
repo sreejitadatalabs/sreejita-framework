@@ -2160,11 +2160,11 @@ class HealthcareDomain(BaseDomain):
                 return
 
     def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
-    return (
-        kpis.get(f"{sub}_{key}")
-        if f"{sub}_{key}" in kpis
-        else kpis.get(key)
-    )
+        return (
+            kpis.get(f"{sub}_{key}")
+            if f"{sub}_{key}" in kpis
+            else kpis.get(key)
+        )
     
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
