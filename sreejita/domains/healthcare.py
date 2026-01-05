@@ -365,42 +365,41 @@ def infer_healthcare_subdomains(
             min(1.0, 0.25 * hospital_signals)
             if hospital_signals >= 2 else 0.0
         ),
+
         HealthcareSubDomain.CLINIC.value: (
             min(0.85, 0.3 * clinic_signals)
             if clinic_signals >= 2 and diagnostics_signals < 2 else 0.0
         ),
+
         HealthcareSubDomain.DIAGNOSTICS.value: (
             min(0.85, 0.3 * diagnostics_signals)
             if diagnostics_signals >= 2 else 0.0
         ),
+
         HealthcareSubDomain.PHARMACY.value: (
             min(0.8, 0.3 * pharmacy_signals)
             if pharmacy_signals >= 2 else 0.0
         ),
+
         HealthcareSubDomain.PUBLIC_HEALTH.value: (
             min(0.9, 0.45 * public_health_signals)
             if public_health_signals >= 2 else 0.0
         ),
     }
-    
-    # Remove zero confidence
+
+    # -------------------------------
+    # REMOVE ZERO CONFIDENCE
+    # -------------------------------
     scores = {k: round(v, 2) for k, v in scores.items() if v > 0}
-    
-    # ✅ NEW: Normalize reporting confidence (for optics only)
-    # Internal weighting preserved, but reported scores appear balanced
-    if scores:
-        max_score = max(scores.values())
-        scores = {
-            k: round(min(1.0, v / max_score), 2)
-            for k, v in scores.items()
-        }
-    
-    # Hard safety fallback
+
+    # -------------------------------
+    # HARD SAFETY FALLBACK
+    # -------------------------------
     if not scores:
         return {HealthcareSubDomain.UNKNOWN.value: 1.0}
-    
-    return scores
-    
+
+    return scores    
+
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -440,27 +439,20 @@ class HealthcareDomain(BaseDomain):
                 resolve_column(df, "encounter_id")
                 or resolve_column(df, "visit_id")
                 or resolve_column(df, "record_id")
-                or resolve_column(df, "appointment_id")
             ),
 
             # Time / Lifecycle
             "date": (
                 resolve_column(df, "admission_date")
-                or resolve_column(df, "visit_date")
-                or resolve_column(df, "order_date")
-                or resolve_column(df, "appointment_date")
                 or resolve_column(df, "date")
             ),
-            "discharge_date": resolve_column(df, "discharge_date") or resolve_column(df, "checkout_date"),
+            "discharge_date": resolve_column(df, "discharge_date"),
             "fill_date": resolve_column(df, "fill_date"),
             "los": resolve_column(df, "length_of_stay"),
             "duration": resolve_column(df, "duration"),
 
             # Financial
-            "cost": resolve_column(df, "cost")
-            or resolve_column(df, "amount")
-            or resolve_column(df, "charge")
-            or resolve_column(df, "rx_cost"),
+            "cost": resolve_column(df, "cost"),
 
             # Outcomes / Flags (GENERALIZED)
             "readmitted": resolve_column(df, "readmitted"),
@@ -472,10 +464,7 @@ class HealthcareDomain(BaseDomain):
 
             # Clinical / Operational
             "facility": resolve_column(df, "facility"),
-            "doctor": resolve_column(df, "doctor")
-            or resolve_column(df, "provider")
-            or resolve_column(df, "physician")
-            or resolve_column(df, "clinician"),
+            "doctor": resolve_column(df, "doctor"),
             "diagnosis": resolve_column(df, "diagnosis"),
             "admit_type": resolve_column(df, "admission_type"),
             "bed_id": resolve_column(df, "bed_id"),
@@ -2621,30 +2610,27 @@ class HealthcareDomainDetector(BaseDomainDetector):
             2,
         )
 
-        # Soft-accept exploratory healthcare datasets below strict threshold
-        mode = "strict" if confidence >= 0.35 else "exploratory"
-        
-        # Only hard-reject if ALL confidence signals fail
-        if confidence < 0.25:
+        if confidence < 0.35:
             return DomainDetectionResult(
                 domain=None,
                 confidence=confidence,
                 signals=signals,
             )
-        
+
         # -------------------------------------------------
         # SAFE SUB-DOMAIN HINTING (NON-BINDING)
         # -------------------------------------------------
         sub_domains = infer_healthcare_subdomains(df, cols)
+
         return DomainDetectionResult(
             domain=self.domain_name,
             confidence=confidence,
             signals={
                 **signals,
-                "mode": mode,  # 🔑 NEW: exploratory or strict
                 "likely_subdomains": sub_domains,
             },
         )
+
 
 def register(registry):
     registry.register(
