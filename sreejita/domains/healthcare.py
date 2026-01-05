@@ -802,9 +802,9 @@ class HealthcareDomain(BaseDomain):
             # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
             # -------------------------------------------------
             kpis["_confidence"] = {}
-            
-            # weakest active sub-domain defines confidence ceiling
+
             min_sub_conf = min(active_subs.values()) if active_subs else 0.3
+            evidence = kpis.get("_evidence", {})
             
             for key, value in kpis.items():
                 if key.startswith("_"):
@@ -814,14 +814,17 @@ class HealthcareDomain(BaseDomain):
                     kpis["_confidence"][key] = 0.0
                     continue
             
+                coverage = evidence.get(key, 0.6)  # default conservative
+            
                 if isinstance(value, (int, float)):
-                    weighted = 0.85 * min_sub_conf
+                    base = 0.85 * min_sub_conf
+                    adjusted = base * coverage
                     kpis["_confidence"][key] = round(
-                        min(0.95, max(0.3, weighted)),
+                        min(0.95, max(0.25, adjusted)),
                         2
                     )
                 else:
-                    kpis["_confidence"][key] = 0.4
+                    kpis["_confidence"][key] = round(0.3 * coverage, 2)
 
         self._last_kpis = kpis
 
@@ -2180,6 +2183,28 @@ class HealthcareDomain(BaseDomain):
     
         for sub, score in active_subs.items():
             sub_insights: List[Dict[str, Any]] = []
+
+            # -------------------------------------------------
+            # CROSS-SUBDOMAIN INTELLIGENCE (EXECUTIVE-LEVEL)
+            # -------------------------------------------------
+            if (
+                "hospital" in active_subs
+                and "diagnostics" in active_subs
+                and isinstance(kpis.get("avg_tat"), (int, float))
+                and isinstance(kpis.get("avg_los"), (int, float))
+                and kpis["avg_tat"] > 120
+            ):
+                insights.append({
+                    "sub_domain": "cross_domain",
+                    "level": "RISK",
+                    "title": "Diagnostic Delays Driving Inpatient Length of Stay",
+                    "so_what": (
+                        f"Elevated diagnostic turnaround times ({kpis['avg_tat']:.0f} mins) "
+                        f"are likely contributing to prolonged inpatient stays "
+                        f"(avg LOS {kpis['avg_los']:.1f} days)."
+                    ),
+                    "confidence": 0.88,
+                })
     
             # =================================================
             # STRENGTHS (EVIDENCE-BASED ONLY)
@@ -2393,16 +2418,22 @@ class HealthcareDomain(BaseDomain):
             # =================================================
             # HOSPITAL
             # =================================================
-            if sub == HealthcareSubDomain.HOSPITAL.value:
-    
+            if sub == HealthcareSubDomain.HOSPITAL.value and "RISK" in levels:
+                current_los = kpis.get("avg_los")
+            
                 sub_recs.append({
                     "sub_domain": sub,
-                    "priority": "MEDIUM",
-                    "action": "Maintain inpatient flow monitoring dashboards",
+                    "priority": "HIGH",
+                    "action": "Implement centralized discharge command center",
                     "owner": "Hospital Operations",
-                    "timeline": "Ongoing",
-                    "goal": "Sustain throughput visibility and early bottleneck detection",
-                    "confidence": conf(0.72, score),
+                    "timeline": "60 days",
+                    "goal": "Reduce average inpatient length of stay",
+                    "current_value": round(current_los, 2) if current_los else None,
+                    "target_value": (
+                        round(current_los * 0.9, 2) if current_los else None
+                    ),
+                    "expected_impact": "10–15% capacity release and improved bed availability",
+                    "confidence": conf(0.90, score),
                 })
     
                 if "RISK" in levels:
