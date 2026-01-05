@@ -677,7 +677,7 @@ class HealthcareDomain(BaseDomain):
             
                 kpis.update({
                     tag_kpi(sub,"no_show_rate"): safe_rate(self.cols.get("readmitted")),
-                    tag_kpi(sub,"avg_wait_time": safe_mean(self.cols.get("duration")),
+                    tag_kpi(sub,"avg_wait_time"): safe_mean(self.cols.get("duration")),
                     tag_kpi(sub,"provider_productivity"): (
                         visits / providers if providers and providers > 0 else None
                     ),
