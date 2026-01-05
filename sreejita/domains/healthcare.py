@@ -400,32 +400,7 @@ def infer_healthcare_subdomains(
         return {HealthcareSubDomain.UNKNOWN.value: 1.0}
     
     return scores
-
-def healthcare_semantic_signals(
-    df: pd.DataFrame,
-    cols: Dict[str, Optional[str]],
-) -> Dict[str, bool]:
-    return {
-        "pid": _has_signal(df, cols.get("pid")),
-        "date": _has_signal(df, cols.get("date")),
-        "discharge_date": _has_signal(df, cols.get("discharge_date")),
-        "los": _has_signal(df, cols.get("los")),
-        "facility": _has_signal(df, cols.get("facility")),
-        "doctor": _has_signal(df, cols.get("doctor")),
-        "duration": _has_signal(df, cols.get("duration")),
-        "flag": _has_signal(df, cols.get("flag")),
-        "supply": _has_signal(df, cols.get("supply")),
-        "population": _has_signal(df, cols.get("population")),
-    }
-
-def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
-    """
-    Safely retrieve KPI in mixed or single-domain datasets.
-    """
-    namespaced = f"{sub}_{key}"
-    if namespaced in kpis:
-        return kpis.get(namespaced)
-    return kpis.get(key)
+    
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -868,57 +843,6 @@ class HealthcareDomain(BaseDomain):
                 kpis["_evidence"][key] = coverage
             else:
                 kpis["_evidence"][key] = 0.0
-
-        # -------------------------------------------------
-        # KPI SOURCE MAP (FORENSIC-GRADE LINEAGE)
-        # -------------------------------------------------
-        kpi_sources = {
-            # Hospital
-            "avg_los": ["los"],
-            "readmission_rate": ["readmitted"],
-            "mortality_rate": ["flag"],
-            "long_stay_rate": ["los"],
-        
-            # Clinic
-            "avg_wait_time": ["duration"],
-            "no_show_rate": ["readmitted"],
-        
-            # Diagnostics
-            "avg_tat": ["duration"],
-            "specimen_rejection_rate": ["flag"],
-        
-            # Pharmacy
-            "cost_per_rx": ["cost"],
-            "days_supply_on_hand": ["supply"],
-        
-            # Public Health
-            "incidence_per_100k": ["flag", "population"],
-            "screening_coverage_rate": ["flag"],
-        }
-        
-        for k, cols in kpi_sources.items():
-            values = [
-                df[c].notna().mean()
-                for c in cols
-                if c in df.columns
-            ]
-            kpis["_evidence"][k] = round(float(max(values)), 2) if values else 0.0
-
-        # -------------------------------------------------
-        # KPI INFERENCE TYPE (AUDIT & GOVERNANCE SIGNAL)
-        # -------------------------------------------------
-        kpis["_inference_type"] = {}
-        
-        for key in kpis:
-            if key.startswith("_"):
-                continue
-        
-            if "proxy" in key or "estimated" in key:
-                kpis["_inference_type"][key] = "proxy"
-            elif key.startswith("__derived"):
-                kpis["_inference_type"][key] = "derived"
-            else:
-                kpis["_inference_type"][key] = "direct"
         
         return kpis
     # -------------------------------------------------
@@ -1006,11 +930,6 @@ class HealthcareDomain(BaseDomain):
                 "importance": float(importance),
                 "confidence": final_conf,
                 "sub_domain": sub_domain,
-                "inference_type": (
-                    "proxy" if "proxy" in caption.lower()
-                    else "derived" if "trend" in caption.lower()
-                    else "direct"
-                ),
             })
     
         # -------------------------------------------------
@@ -2269,7 +2188,7 @@ class HealthcareDomain(BaseDomain):
             # STRENGTHS (EVIDENCE-BASED ONLY)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                avg_los = get_kpi(kpis, sub, "avg_los")
+                avg_los = kpis.get("avg_los")
                 if isinstance(avg_los, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2283,7 +2202,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.CLINIC.value:
-                wait = get_kpi(kpis, sub, "avg_wait_time")
+                wait = kpis.get("avg_wait_time")
                 if isinstance(wait, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2297,7 +2216,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = get_kpis(kpis, sub, "avg_tat")
+                tat = kpis.get("avg_tat")
                 if isinstance(tat, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2311,7 +2230,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                cost = get_kpis(kpis, sub, "cost_per_rx")
+                cost = kpis.get("cost_per_rx")
                 if isinstance(cost, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2325,7 +2244,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = get_kpis(kpis, sub, "incidence_per_100k")
+                inc = kpis.get("incidence_per_100k")
                 if isinstance(inc, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2342,7 +2261,7 @@ class HealthcareDomain(BaseDomain):
             # WARNINGS (EARLY SIGNALS)
             # =================================================
             if sub == HealthcareSubDomain.CLINIC.value:
-                no_show = get_kpis(kpis, sub, "no_show_rate")
+                no_show = kpis.get("no_show_rate")
                 if isinstance(no_show, (int, float)) and no_show >= 0.10:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2356,7 +2275,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                med_err = get_kpis(kpis, sub, "med_error_rate")
+                med_err = kpis.get("med_error_rate")
                 if isinstance(med_err, (int, float)) and med_err >= 0.05:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2373,7 +2292,7 @@ class HealthcareDomain(BaseDomain):
             # RISKS (MATERIAL IMPACT)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                long_stay = get_kpis(kpis, sub, "long_stay_rate")
+                long_stay = kpis.get("long_stay_rate")
                 if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2387,7 +2306,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = get_kpis(kpis, sub, "avg_tat")
+                tat = kpis.get("avg_tat")
                 if isinstance(tat, (int, float)) and tat > 120:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2401,7 +2320,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = get_kpis(kpis, sub, "incidence_per_100k")
+                inc = kpis.get("incidence_per_100k")
                 if isinstance(inc, (int, float)) and inc > 300:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2683,20 +2602,13 @@ class HealthcareDomainDetector(BaseDomainDetector):
         # -------------------------------------------------
         weights = {
             "pid": 0.15,
-        
-            # Time (balanced)
-            "date": 0.10,
-            "discharge_date": 0.08,
-            "los": 0.12,
-        
-            # Structure (boost non-hospital)
-            "facility": 0.15,
+            "date": 0.15,
+            "discharge_date": 0.10,
+            "los": 0.20,
             "diagnosis": 0.10,
-        
-            # Non-hospital anchors
-            "cost": 0.12,
+            "facility": 0.10,
             "supply": 0.10,
-            "population": 0.12,
+            "population": 0.10,
         }
 
         confidence = round(
