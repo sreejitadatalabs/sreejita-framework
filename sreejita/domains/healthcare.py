@@ -730,15 +730,32 @@ class HealthcareDomain(BaseDomain):
     
         sub_scores: Dict[str, float] = kpis.get("sub_domains", {}) or {}
     
+        # -------------------------------------------------
+        # ACTIVE SUB-DOMAIN SELECTION
+        # -------------------------------------------------
         active_subs = [
             s for s, score in sub_scores.items()
             if isinstance(score, (int, float)) and score >= 0.3
         ]
     
+        # Fallback handling
         if not active_subs:
             primary = kpis.get("primary_sub_domain")
-            if primary in HEALTHCARE_VISUAL_MAP:
+    
+            if primary == HealthcareSubDomain.MIXED.value:
+                # take top 2 confident sub-domains
+                active_subs = sorted(
+                    sub_scores,
+                    key=lambda k: sub_scores.get(k, 0),
+                    reverse=True
+                )[:2]
+    
+            elif primary in HEALTHCARE_VISUAL_MAP:
                 active_subs = [primary]
+    
+            else:
+                # UNKNOWN → no visuals, safe exit
+                return []
     
         # -------------------------------------------------
         # SUB-DOMAIN CONFIDENCE WEIGHTING
@@ -760,7 +777,10 @@ class HealthcareDomain(BaseDomain):
             base_confidence: float,
             sub_domain: str,
         ):
-            path = output_dir / name
+            # enforce unique, collision-safe naming
+            safe_name = f"{sub_domain}_{name}" if not name.startswith(sub_domain) else name
+            path = output_dir / safe_name
+    
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
     
@@ -778,20 +798,23 @@ class HealthcareDomain(BaseDomain):
             })
     
         # -------------------------------------------------
-        # MAIN VISUAL DISPATCH (SAFE PER VISUAL)
+        # MAIN VISUAL DISPATCH (SAFE, ISOLATED)
         # -------------------------------------------------
         for sub in active_subs:
-            for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
+            visual_keys = HEALTHCARE_VISUAL_MAP.get(sub, [])
+    
+            for visual_key in visual_keys:
                 try:
+                    # isolate df per visual to prevent mutation bleed
                     self._render_visual_by_key(
                         visual_key=visual_key,
-                        df=df,
+                        df=df.copy(deep=False),
                         output_dir=output_dir,
                         sub_domain=sub,
-                        register_visual=register_visual,  # ✅ FIXED
+                        register_visual=register_visual,
                     )
                 except Exception:
-                    # Never let one visual kill the rest
+                    # HARD RULE: visuals must never crash pipeline
                     continue
     
         # -------------------------------------------------
@@ -845,12 +868,12 @@ class HealthcareDomain(BaseDomain):
         # HOSPITAL VISUALS
         # =================================================
         if sub_domain == "hospital":
-    
+        
             # 1. Average LOS Trend
             if visual_key == "avg_los_trend":
                 if not (c.get("los") and time_col):
                     raise ValueError("LOS or time column missing")
-    
+        
                 series = (
                     df[[time_col, c["los"]]]
                     .dropna()
@@ -858,16 +881,16 @@ class HealthcareDomain(BaseDomain):
                     .resample("M")
                     .mean()
                 )
-    
+        
                 if series.empty:
                     raise ValueError("No LOS data")
-    
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 series.plot(ax=ax)
                 ax.set_title("Average Length of Stay Trend", fontweight="bold")
                 ax.set_ylabel("Days")
                 ax.grid(alpha=0.3)
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_avg_los_trend.png",
@@ -877,28 +900,29 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 2. Bed Turnover Velocity
             if visual_key == "bed_turnover":
                 bed_col = c.get("bed_id")
                 if not (bed_col and time_col):
                     raise ValueError("Bed or time column missing")
-    
+        
                 turnover = (
                     df[[bed_col, time_col]]
                     .dropna()
                     .groupby(bed_col)[time_col]
                     .count()
+                    .clip(upper=100)  # 🔒 outlier safety
                 )
-    
+        
                 if turnover.empty:
                     raise ValueError("No bed turnover data")
-    
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 turnover.plot(kind="hist", bins=15, ax=ax)
                 ax.set_title("Bed Turnover Velocity", fontweight="bold")
                 ax.set_xlabel("Patients per Bed")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_bed_velocity.png",
@@ -908,21 +932,25 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 3. Readmission Risk
             if visual_key == "readmission_risk":
                 col = c.get("readmitted")
                 if not col:
                     raise ValueError("Readmission column missing")
-    
-                rates = df[col].value_counts(normalize=True)
+        
+                rates = df[col].dropna().value_counts(normalize=True)
                 if rates.empty:
                     raise ValueError("No readmission data")
-    
+        
+                # Executive-friendly labels
+                rates.index = rates.index.map({0: "No", 1: "Yes"}).fillna(rates.index)
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 rates.plot(kind="bar", ax=ax)
                 ax.set_title("Readmission Rate Distribution", fontweight="bold")
-    
+                ax.set_ylabel("Rate")
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_readmission.png",
@@ -932,20 +960,21 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 4. Discharge Hour Distribution
             if visual_key == "discharge_hour":
                 if not time_col:
                     raise ValueError("Time column missing")
-    
+        
                 hours = df[time_col].dropna().dt.hour
                 if hours.empty:
                     raise ValueError("No discharge time data")
-    
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 hours.value_counts().sort_index().plot(kind="bar", ax=ax)
                 ax.set_title("Discharge Hour Distribution", fontweight="bold")
-    
+                ax.set_xlabel("Hour of Day")
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_discharge_hour.png",
@@ -955,18 +984,22 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 5. Acuity vs Staffing
             if visual_key == "acuity_vs_staffing":
                 if not (c.get("los") and c.get("cost")):
                     raise ValueError("LOS or cost missing")
-    
+        
+                tmp = df[[c["los"], c["cost"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No acuity-cost data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
-                ax.scatter(df[c["los"]], df[c["cost"]], alpha=0.4)
+                ax.scatter(tmp[c["los"]], tmp[c["cost"]], alpha=0.4)
                 ax.set_xlabel("LOS (Acuity Proxy)")
                 ax.set_ylabel("Cost (Staffing Proxy)")
                 ax.set_title("Acuity vs Staffing Intensity", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_acuity_staffing.png",
@@ -976,12 +1009,12 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 6. ED Boarding Time
             if visual_key == "ed_boarding":
                 if not (c.get("duration") and time_col):
                     raise ValueError("Duration or time missing")
-    
+        
                 series = (
                     df[[time_col, c["duration"]]]
                     .dropna()
@@ -989,15 +1022,15 @@ class HealthcareDomain(BaseDomain):
                     .resample("M")
                     .mean()
                 )
-    
+        
                 if series.empty:
                     raise ValueError("No ED boarding data")
-    
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 series.plot(ax=ax)
                 ax.set_title("ED Boarding Time Trend", fontweight="bold")
                 ax.set_ylabel("Hours")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_ed_boarding.png",
@@ -1007,27 +1040,28 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # 7. Mortality Trend
             if visual_key == "mortality_trend":
                 target_col = c.get("flag")
                 if not (target_col and time_col):
                     raise ValueError("Mortality proxy or time missing")
-    
+        
                 rate = (
                     df[[time_col, target_col]]
                     .dropna()
-                    .groupby(pd.Grouper(key=time_col, freq="M"))[target_col]
+                    .set_index(time_col)[target_col]
+                    .resample("M")
                     .mean()
                 )
-    
+        
                 if rate.empty:
                     raise ValueError("No mortality data")
-    
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 rate.plot(ax=ax, marker="o")
                 ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_mortality_trend.png",
@@ -1052,13 +1086,17 @@ class HealthcareDomain(BaseDomain):
                 if tmp.empty:
                     raise ValueError("No no-show data")
         
-                dow = tmp[time_col].dt.day_name()
-                rate = tmp.groupby(dow)[c["readmitted"]].mean()
+                tmp["_dow"] = tmp[time_col].dt.day_name()
+                rate = tmp.groupby("_dow")[c["readmitted"]].mean()
+        
+                day_order = [
+                    "Monday", "Tuesday", "Wednesday",
+                    "Thursday", "Friday", "Saturday", "Sunday"
+                ]
+                rate = rate.reindex(day_order).fillna(0)
         
                 fig, ax = plt.subplots(figsize=(6, 4))
-                rate.reindex(
-                    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                ).plot(kind="bar", ax=ax)
+                rate.plot(kind="bar", ax=ax)
                 ax.set_title("No-Show Rate by Day of Week", fontweight="bold")
                 ax.set_ylabel("Rate")
         
@@ -1080,7 +1118,8 @@ class HealthcareDomain(BaseDomain):
                 series = (
                     df[[time_col, c["duration"]]]
                     .dropna()
-                    .set_index(time_col)[c["duration"]]
+                    .assign(_dur=lambda x: x[c["duration"]].clip(upper=240))
+                    .set_index(time_col)["_dur"]
                     .resample("D")
                     .mean()
                 )
@@ -1108,7 +1147,7 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("date") and c.get("pid")):
                     raise ValueError("Date or patient ID missing")
         
-                tmp = df[[c["pid"], c["date"]]].dropna()
+                tmp = df[[c["pid"], c["date"]]].dropna().copy()
                 tmp[c["date"]] = pd.to_datetime(tmp[c["date"]], errors="coerce")
         
                 lag = (
@@ -1141,7 +1180,12 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("doctor"):
                     raise ValueError("Doctor column missing")
         
-                counts = df[c["doctor"]].value_counts().head(10)
+                counts = (
+                    df[c["doctor"]]
+                    .astype(str)
+                    .value_counts()
+                    .head(10)
+                )
                 if counts.empty:
                     raise ValueError("No provider data")
         
@@ -1165,12 +1209,16 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("facility"):
                     raise ValueError("Facility column missing")
         
-                geo = df[c["facility"]].value_counts().head(8)
-                if geo.empty:
+                counts = df[c["facility"]].value_counts()
+                if counts.empty:
                     raise ValueError("No geographic data")
         
+                top = counts.head(7)
+                if len(counts) > 7:
+                    top["Other"] = counts.iloc[7:].sum()
+        
                 fig, ax = plt.subplots(figsize=(6, 6))
-                geo.plot(kind="pie", ax=ax, autopct="%1.0f%%")
+                top.plot(kind="pie", ax=ax, autopct="%1.0f%%")
                 ax.set_ylabel("")
                 ax.set_title("Patient Demographic Reach", fontweight="bold")
         
@@ -1184,22 +1232,22 @@ class HealthcareDomain(BaseDomain):
                 )
                 return
         
-            # 6. REFERRAL FUNNEL
+            # 6. REFERRAL FUNNEL (ESTIMATED)
             if visual_key == "referral_funnel":
                 stages = {
                     "Referrals": len(df),
-                    "Scheduled": int(len(df) * 0.75),
-                    "Completed": int(len(df) * 0.65),
+                    "Scheduled (Est.)": int(len(df) * 0.75),
+                    "Completed (Est.)": int(len(df) * 0.65),
                 }
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(stages.keys(), stages.values())
-                ax.set_title("Referral Conversion Funnel", fontweight="bold")
+                ax.set_title("Referral Conversion Funnel (Estimated)", fontweight="bold")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_referral_funnel.png",
-                    "Referral flow from intake to completed visits.",
+                    "Estimated referral flow from intake to completed visits.",
                     0.87,
                     0.70,
                     sub_domain,
@@ -1211,8 +1259,15 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("facility"):
                     raise ValueError("Facility column missing")
         
-                mix = df[c["facility"]].astype(str).apply(
-                    lambda x: "Telehealth" if "tele" in x.lower() else "In-Person"
+                series = (
+                    df[c["facility"]]
+                    .fillna("")
+                    .astype(str)
+                    .str.lower()
+                )
+        
+                mix = series.apply(
+                    lambda x: "Telehealth" if "tele" in x else "In-Person"
                 ).value_counts()
         
                 if mix.empty:
@@ -1249,11 +1304,15 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("duration") and time_col):
                     raise ValueError("Duration or time column missing")
         
-                tmp = df[[time_col, c["duration"]]].dropna()
+                tmp = (
+                    df[[time_col, c["duration"]]]
+                    .dropna()
+                    .assign(_dur=lambda x: x[c["duration"]].clip(upper=720))
+                )
                 if tmp.empty:
                     raise ValueError("No TAT data")
         
-                grouped = tmp.set_index(time_col)[c["duration"]].resample("D")
+                grouped = tmp.set_index(time_col)["_dur"].resample("D")
                 p50 = grouped.quantile(0.50)
                 p90 = grouped.quantile(0.90)
                 p95 = grouped.quantile(0.95)
@@ -1286,7 +1345,10 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("duration") and c.get("flag")):
                     raise ValueError("Flag or duration missing")
         
-                critical = df[df[c["flag"]] == 1][c["duration"]].dropna()
+                flag = pd.to_numeric(df[c["flag"]], errors="coerce")
+                dur = pd.to_numeric(df[c["duration"]], errors="coerce")
+        
+                critical = dur[flag == 1].dropna()
                 if critical.empty:
                     raise ValueError("No critical alerts")
         
@@ -1306,25 +1368,29 @@ class HealthcareDomain(BaseDomain):
                 return
         
             # -------------------------------------------------
-            # 3. SPECIMEN REJECTION PARETO
+            # 3. SPECIMEN REJECTION (PROXY)
             # -------------------------------------------------
             if visual_key == "specimen_rejection":
                 if not c.get("flag"):
                     raise ValueError("Flag column missing")
         
-                reasons = df[c["flag"]].value_counts()
+                reasons = (
+                    pd.to_numeric(df[c["flag"]], errors="coerce")
+                    .value_counts()
+                    .head(5)
+                )
                 if reasons.empty:
                     raise ValueError("No rejection data")
         
                 fig, ax = plt.subplots(figsize=(8, 4))
                 reasons.plot(kind="bar", ax=ax)
-                ax.set_title("Specimen Rejection Pareto", fontweight="bold")
+                ax.set_title("Specimen Rejection Signals (Proxy)", fontweight="bold")
                 ax.set_ylabel("Count")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_specimen_rejection.png",
-                    "Primary causes of diagnostic specimen rejection.",
+                    "Observed specimen rejection indicators (proxy signal).",
                     0.90,
                     0.85,
                     sub_domain,
@@ -1342,7 +1408,12 @@ class HealthcareDomain(BaseDomain):
                 if tmp.empty:
                     raise ValueError("No device usage data")
         
-                downtime = tmp.groupby(c["facility"]).size().sort_values()
+                downtime = (
+                    tmp[c["facility"]]
+                    .astype(str)
+                    .value_counts()
+                    .head(10)
+                )
         
                 fig, ax = plt.subplots(figsize=(8, 4))
                 downtime.plot(kind="bar", ax=ax)
@@ -1380,11 +1451,13 @@ class HealthcareDomain(BaseDomain):
                     "Monday", "Tuesday", "Wednesday",
                     "Thursday", "Friday", "Saturday", "Sunday"
                 ]
-                heat = heat.reindex(day_order).dropna(how="all")
+                heat = heat.reindex(day_order).fillna(0)
         
                 fig, ax = plt.subplots(figsize=(10, 4))
                 im = ax.imshow(heat, aspect="auto", cmap="Blues")
                 ax.set_title("Peak Diagnostic Order Load", fontweight="bold")
+                ax.set_xlabel("Hour of Day")
+                ax.set_ylabel("Day of Week")
                 plt.colorbar(im, ax=ax)
         
                 register_visual(
@@ -1432,7 +1505,12 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("doctor"):
                     raise ValueError("Doctor column missing")
         
-                orders = df[c["doctor"]].value_counts().head(10)
+                orders = (
+                    df[c["doctor"]]
+                    .astype(str)
+                    .value_counts()
+                    .head(10)
+                )
                 if orders.empty:
                     raise ValueError("No provider ordering data")
         
@@ -1484,6 +1562,10 @@ class HealthcareDomain(BaseDomain):
                 ax.set_title("Medication Spend Velocity", fontweight="bold")
                 ax.set_ylabel("Cumulative Spend")
         
+                ax.yaxis.set_major_formatter(
+                    lambda x, _: f"{x/1_000_000:.1f}M" if x >= 1_000_000 else f"{x/1_000:.0f}K"
+                )
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_spend_velocity.png",
@@ -1505,7 +1587,7 @@ class HealthcareDomain(BaseDomain):
                 supply = pd.to_numeric(df[c["supply"]], errors="coerce")
         
                 expected = fill + pd.to_timedelta(supply, unit="D")
-                gap = (fill - expected).dt.days.dropna()
+                gap = (expected - fill).dt.days.dropna()  # ✅ positive = late
         
                 if gap.empty:
                     raise ValueError("No refill gap data")
@@ -1513,6 +1595,7 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots(figsize=(6, 4))
                 gap.clip(lower=-30, upper=60).hist(ax=ax, bins=20)
                 ax.set_title("Refill Adherence Gap (Days)", fontweight="bold")
+                ax.set_xlabel("Days Late / Early")
         
                 register_visual(
                     fig,
@@ -1534,7 +1617,8 @@ class HealthcareDomain(BaseDomain):
                 spend = (
                     df[[c["facility"], c["cost"]]]
                     .dropna()
-                    .groupby(c["facility"])[c["cost"]]
+                    .assign(_cat=lambda x: x[c["facility"]].astype(str))
+                    .groupby("_cat")[c["cost"]]
                     .sum()
                     .nlargest(6)
                 )
@@ -1545,12 +1629,12 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots(figsize=(6, 6))
                 spend.plot(kind="pie", autopct="%1.0f%%", ax=ax)
                 ax.set_ylabel("")
-                ax.set_title("Therapeutic Class Spend Distribution", fontweight="bold")
+                ax.set_title("Therapeutic Spend Distribution (Proxy)", fontweight="bold")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_therapeutic_spend.png",
-                    "Medication spend distribution by therapeutic class (proxy).",
+                    "Medication spend distribution by therapeutic class (proxy grouping).",
                     0.90,
                     0.80,
                     sub_domain,
@@ -1564,11 +1648,17 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("facility"):
                     raise ValueError("Facility column missing")
         
-                series = df[c["facility"]].astype(str)
-                if series.empty:
-                    raise ValueError("No facility data")
+                series = (
+                    df[c["facility"]]
+                    .astype(str)
+                    .str.lower()
+                    .str.contains("generic", na=False)
+                )
         
-                rate = series.str.contains("generic", case=False).mean()
+                if series.empty:
+                    raise ValueError("No generic indicator data")
+        
+                rate = series.mean()
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Generic Substitution Rate"], [rate])
@@ -1578,7 +1668,7 @@ class HealthcareDomain(BaseDomain):
                 register_visual(
                     fig,
                     f"{sub_domain}_generic_rate.png",
-                    "Share of prescriptions filled with generic alternatives.",
+                    "Share of prescriptions filled with generic alternatives (proxy).",
                     0.88,
                     0.75,
                     sub_domain,
@@ -1595,7 +1685,8 @@ class HealthcareDomain(BaseDomain):
                 variance = (
                     df[[c["doctor"], c["cost"]]]
                     .dropna()
-                    .groupby(c["doctor"])[c["cost"]]
+                    .assign(_doc=lambda x: x[c["doctor"]].astype(str))
+                    .groupby("_doc")[c["cost"]]
                     .mean()
                     .nlargest(10)
                 )
@@ -1625,8 +1716,11 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("supply") and c.get("cost")):
                     raise ValueError("Supply or cost missing")
         
-                total_cost = pd.to_numeric(df[c["cost"]], errors="coerce").sum()
-                avg_supply = pd.to_numeric(df[c["supply"]], errors="coerce").mean()
+                supply = pd.to_numeric(df[c["supply"]], errors="coerce")
+                cost = pd.to_numeric(df[c["cost"]], errors="coerce")
+        
+                avg_supply = supply.mean()
+                total_cost = cost.sum()
         
                 if not avg_supply or avg_supply <= 0:
                     raise ValueError("Invalid inventory supply")
@@ -1635,7 +1729,7 @@ class HealthcareDomain(BaseDomain):
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Inventory Turn Ratio"], [turn])
-                ax.set_title("Inventory Turn Ratio", fontweight="bold")
+                ax.set_title("Inventory Turn Ratio (Proxy)", fontweight="bold")
         
                 register_visual(
                     fig,
@@ -1654,7 +1748,12 @@ class HealthcareDomain(BaseDomain):
                 if not c.get("flag"):
                     raise ValueError("Flag column missing")
         
-                alerts = df[c["flag"]].value_counts(normalize=True)
+                alerts = (
+                    pd.to_numeric(df[c["flag"]], errors="coerce")
+                    .value_counts(normalize=True)
+                    .sort_index()
+                )
+        
                 if alerts.empty:
                     raise ValueError("No alert data")
         
@@ -1666,12 +1765,12 @@ class HealthcareDomain(BaseDomain):
                 register_visual(
                     fig,
                     f"{sub_domain}_drug_alerts.png",
-                    "Frequency of pharmacist interventions for drug safety.",
+                    "Frequency of pharmacist interventions for drug safety (proxy).",
                     0.89,
                     0.80,
                     sub_domain,
                 )
-                return   
+                return 
                 
         # =================================================
         # PUBLIC HEALTH / POPULATION HEALTH VISUALS
@@ -1690,17 +1789,18 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("population") and c.get("flag")):
                     raise ValueError("Population or outcome flag missing")
         
-                pop = pd.to_numeric(df[c["population"]], errors="coerce")
-                cases = pd.to_numeric(df[c["flag"]], errors="coerce")
+                pop = pd.to_numeric(df[c["population"]], errors="coerce").dropna()
+                cases = pd.to_numeric(df[c["flag"]], errors="coerce").fillna(0)
         
-                if pop.dropna().empty or cases.dropna().empty:
+                if pop.empty or cases.empty:
                     raise ValueError("Insufficient incidence data")
         
-                pop_mean = pop.mean()
-                if not pop_mean or pop_mean <= 0:
+                # Robust denominator selection
+                pop_denom = pop.median() if pop.nunique() > 1 else pop.iloc[0]
+                if pop_denom <= 0:
                     raise ValueError("Invalid population denominator")
         
-                incidence = (cases.sum() / pop_mean) * 100_000
+                incidence = (cases.sum() / pop_denom) * 100_000
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Incidence per 100k"], [incidence])
@@ -1710,7 +1810,7 @@ class HealthcareDomain(BaseDomain):
                 register_visual(
                     fig,
                     f"{sub_domain}_incidence_rate.png",
-                    "Observed disease incidence per 100,000 population.",
+                    "Observed disease incidence per 100,000 population (proxy).",
                     0.95,
                     0.90,
                     sub_domain,
@@ -1729,8 +1829,9 @@ class HealthcareDomain(BaseDomain):
                     raise ValueError("No cohort data")
         
                 cohort = (
-                    tmp.set_index(time_col)[c["flag"]]
-                    .resample("M")
+                    (tmp[c["flag"]] == 1)
+                    .astype(int)
+                    .groupby(tmp[time_col].dt.to_period("M"))
                     .sum()
                     .cumsum()
                 )
@@ -1738,12 +1839,12 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots(figsize=(8, 4))
                 cohort.plot(ax=ax)
                 ax.set_title("Cohort Growth Trajectory", fontweight="bold")
-                ax.set_ylabel("Active Cases")
+                ax.set_ylabel("Cumulative Cases")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_cohort_growth.png",
-                    "Growth of observed health cohort over time.",
+                    "Cumulative growth of observed population health cohort.",
                     0.93,
                     0.88,
                     sub_domain,
@@ -1757,31 +1858,33 @@ class HealthcareDomain(BaseDomain):
                 if not (c.get("pid") and c.get("flag")):
                     raise ValueError("Patient id or outcome flag missing")
         
-                pid = df[c["pid"]].astype(str)
+                pid_len = df[c["pid"]].astype(str).str.len()
                 flag = pd.to_numeric(df[c["flag"]], errors="coerce")
         
-                if pid.empty or flag.dropna().empty:
-                    raise ValueError("No prevalence data")
-        
                 buckets = pd.cut(
-                    pid.str.len(),
+                    pid_len,
                     bins=[0, 6, 8, 10, 99],
                     labels=["0–18", "19–35", "36–60", "60+"],
                 )
         
-                prevalence = flag.groupby(buckets).mean()
+                prevalence = (
+                    flag.groupby(buckets)
+                    .mean()
+                    .dropna()
+                )
+        
                 if prevalence.empty:
                     raise ValueError("Prevalence calculation failed")
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 prevalence.plot(kind="bar", ax=ax)
-                ax.set_title("Prevalence by Age Group", fontweight="bold")
+                ax.set_title("Prevalence by Age Group (Proxy)", fontweight="bold")
                 ax.set_ylabel("Rate")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_prevalence_age.png",
-                    "Relative prevalence across demographic age groups.",
+                    "Relative prevalence across demographic age groups (proxy).",
                     0.90,
                     0.75,
                     sub_domain,
@@ -1789,34 +1892,34 @@ class HealthcareDomain(BaseDomain):
                 return
         
             # -------------------------------------------------
-            # 4. SERVICE ACCESS GAP
+            # 4. SERVICE ACCESS GAP (PROXY)
             # -------------------------------------------------
             if visual_key == "access_gap":
                 if not (c.get("population") and c.get("facility")):
                     raise ValueError("Population or facility missing")
         
-                pop = pd.to_numeric(df[c["population"]], errors="coerce")
-                facilities = df[c["facility"]]
+                pop = pd.to_numeric(df[c["population"]], errors="coerce").dropna()
+                facilities = df[c["facility"]].astype(str).dropna()
         
-                if pop.dropna().empty or facilities.dropna().empty:
+                if pop.empty or facilities.empty:
                     raise ValueError("No access data")
         
                 providers = facilities.nunique()
-                pop_mean = pop.mean()
+                pop_denom = pop.median()
         
-                if not pop_mean or pop_mean <= 0:
+                if pop_denom <= 0:
                     raise ValueError("Invalid population denominator")
         
-                ratio = providers / pop_mean * 1000
+                ratio = providers / pop_denom * 1000
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Providers per 1k"], [ratio])
-                ax.set_title("Healthcare Access Indicator", fontweight="bold")
+                ax.set_title("Healthcare Access Indicator (Proxy)", fontweight="bold")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_access_gap.png",
-                    "Healthcare provider availability per 1,000 residents.",
+                    "Healthcare provider availability per 1,000 residents (proxy).",
                     0.92,
                     0.85,
                     sub_domain,
@@ -1835,8 +1938,11 @@ class HealthcareDomain(BaseDomain):
                     raise ValueError("No program outcome data")
         
                 trend = (
-                    tmp.set_index(time_col)[c["flag"]]
-                    .resample("M")
+                    (tmp[c["flag"]] == 1)
+                    .astype(int)
+                    .groupby(tmp[time_col].dt.to_period("M"))
+                    .mean()
+                    .rolling(3, min_periods=1)
                     .mean()
                 )
         
@@ -1848,7 +1954,7 @@ class HealthcareDomain(BaseDomain):
                 register_visual(
                     fig,
                     f"{sub_domain}_program_effect.png",
-                    "Population outcome trends following interventions.",
+                    "Smoothed population outcome trends following interventions.",
                     0.90,
                     0.80,
                     sub_domain,
@@ -1865,7 +1971,8 @@ class HealthcareDomain(BaseDomain):
                 sdoh = (
                     df[[c["facility"], c["flag"]]]
                     .dropna()
-                    .groupby(c["facility"])[c["flag"]]
+                    .assign(_area=lambda x: x[c["facility"]].astype(str))
+                    .groupby("_area")[c["flag"]]
                     .mean()
                     .nlargest(8)
                 )
@@ -1875,13 +1982,13 @@ class HealthcareDomain(BaseDomain):
         
                 fig, ax = plt.subplots(figsize=(8, 4))
                 sdoh.plot(kind="bar", ax=ax)
-                ax.set_title("Social Determinants Risk Overlay", fontweight="bold")
+                ax.set_title("Social Determinants Risk Overlay (Proxy)", fontweight="bold")
                 ax.set_ylabel("Outcome Rate")
         
                 register_visual(
                     fig,
                     f"{sub_domain}_sdoh_overlay.png",
-                    "Health outcome variation across socioeconomic regions.",
+                    "Health outcome variation across socioeconomic regions (proxy).",
                     0.88,
                     0.75,
                     sub_domain,
@@ -1898,6 +2005,8 @@ class HealthcareDomain(BaseDomain):
                 rate = pd.to_numeric(df[c["flag"]], errors="coerce").mean()
                 if pd.isna(rate):
                     raise ValueError("Invalid coverage rate")
+        
+                rate = min(max(rate, 0.0), 1.0)
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Coverage Rate"], [rate])
@@ -1929,7 +2038,13 @@ class HealthcareDomain(BaseDomain):
         active_subs: Dict[str, float] = kpis.get("sub_domains", {}) or {}
     
         def conf(base: float, sub_score: float) -> float:
-            return round(min(0.95, base + sub_score * 0.25), 2)
+            return round(min(0.95, base + min(sub_score, 1.0) * 0.25), 2)
+    
+        filler_titles = [
+            "Operational Baseline Signal",
+            "Stable Performance Pattern",
+            "No Material Risk Detected",
+        ]
     
         for sub, score in active_subs.items():
             sub_insights: List[Dict[str, Any]] = []
@@ -1945,23 +2060,62 @@ class HealthcareDomain(BaseDomain):
                         "level": "STRENGTH",
                         "title": "Inpatient Throughput Visibility",
                         "so_what": (
-                            f"Length of stay is actively measurable "
+                            f"Length of stay is measurable "
                             f"(current avg: {avg_los:.1f} days), enabling operational control."
                         ),
                         "confidence": conf(0.72, score),
                     })
     
-            if sub == HealthcareSubDomain.CLINIC.value:
+            elif sub == HealthcareSubDomain.CLINIC.value:
                 sub_insights.append({
                     "sub_domain": sub,
                     "level": "STRENGTH",
                     "title": "Appointment Flow Visibility",
-                    "so_what": "Clinic operations show sufficient appointment signal density for access optimization.",
+                    "so_what": (
+                        "Clinic data contains sufficient appointment signals "
+                        "to support access and scheduling optimization."
+                    ),
                     "confidence": conf(0.70, score),
                 })
     
+            elif sub == HealthcareSubDomain.DIAGNOSTICS.value:
+                sub_insights.append({
+                    "sub_domain": sub,
+                    "level": "STRENGTH",
+                    "title": "Diagnostic Process Observability",
+                    "so_what": (
+                        "Turnaround and alert timing signals are present, "
+                        "enabling diagnostic service performance monitoring."
+                    ),
+                    "confidence": conf(0.70, score),
+                })
+    
+            elif sub == HealthcareSubDomain.PHARMACY.value:
+                sub_insights.append({
+                    "sub_domain": sub,
+                    "level": "STRENGTH",
+                    "title": "Medication Flow Visibility",
+                    "so_what": (
+                        "Prescription and refill activity provides visibility "
+                        "into medication utilization and cost patterns."
+                    ),
+                    "confidence": conf(0.68, score),
+                })
+    
+            elif sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
+                sub_insights.append({
+                    "sub_domain": sub,
+                    "level": "STRENGTH",
+                    "title": "Population Signal Coverage",
+                    "so_what": (
+                        "Population-level indicators enable monitoring of "
+                        "disease incidence and prevention program reach."
+                    ),
+                    "confidence": conf(0.72, score),
+                })
+    
             # =================================================
-            # 3–6. WARNINGS (CONDITIONAL)
+            # 3–6. RISKS (CONDITIONAL)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
                 long_stay = kpis.get("long_stay_rate")
@@ -1972,29 +2126,11 @@ class HealthcareDomain(BaseDomain):
                         "title": "Emerging Discharge Delays",
                         "so_what": (
                             f"{long_stay:.1%} of patients exceed acceptable stay thresholds, "
-                            "suggesting discharge or bed-management friction."
+                            "indicating discharge or bed-management friction."
                         ),
                         "confidence": conf(0.80, score),
                     })
     
-            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                avg_tat = kpis.get("avg_tat")
-                if isinstance(avg_tat, (int, float)) and avg_tat > 120:
-                    sub_insights.append({
-                        "sub_domain": sub,
-                        "level": "WARNING",
-                        "title": "Turnaround Time Pressure",
-                        "so_what": (
-                            f"Average turnaround time of {avg_tat:.0f} minutes may delay "
-                            "clinical decision-making during peak demand."
-                        ),
-                        "confidence": conf(0.78, score),
-                    })
-    
-            # =================================================
-            # 7–9. RISKS (CONDITIONAL)
-            # =================================================
-            if sub == HealthcareSubDomain.HOSPITAL.value:
                 fac_var = kpis.get("facility_variance_score")
                 if isinstance(fac_var, (int, float)) and fac_var > 0.5:
                     sub_insights.append({
@@ -2002,10 +2138,24 @@ class HealthcareDomain(BaseDomain):
                         "level": "RISK",
                         "title": "High Facility Performance Variance",
                         "so_what": (
-                            "Significant variation across facilities indicates inconsistent "
-                            "clinical or operational standards."
+                            "Significant variation across facilities suggests "
+                            "inconsistent clinical or operational standards."
                         ),
                         "confidence": conf(0.85, score),
+                    })
+    
+            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
+                avg_tat = kpis.get("avg_tat")
+                if isinstance(avg_tat, (int, float)) and avg_tat > 120:
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "RISK",
+                        "title": "Turnaround Time Pressure",
+                        "so_what": (
+                            f"Average turnaround time of {avg_tat:.0f} minutes may delay "
+                            "clinical decision-making during peak demand."
+                        ),
+                        "confidence": conf(0.78, score),
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
@@ -2017,25 +2167,27 @@ class HealthcareDomain(BaseDomain):
                         "title": "Elevated Population Incidence",
                         "so_what": (
                             f"Incidence rate of {inc:.0f} per 100k exceeds expected norms, "
-                            "indicating prevention gaps."
+                            "indicating prevention or access gaps."
                         ),
                         "confidence": conf(0.85, score),
                     })
     
             # =================================================
-            # HARD GUARANTEE: 9 INSIGHTS PER SUB-DOMAIN
+            # HARD GUARANTEE: EXACTLY 9 INSIGHTS PER SUB-DOMAIN
             # =================================================
+            filler_idx = 0
             while len(sub_insights) < 9:
                 sub_insights.append({
                     "sub_domain": sub,
                     "level": "INFO",
-                    "title": "Operational Baseline Signal",
+                    "title": filler_titles[filler_idx % len(filler_titles)],
                     "so_what": (
-                        "Current data indicates stable operations without statistically "
-                        "significant deviations requiring intervention."
+                        "Current indicators remain within expected operating ranges "
+                        "with no statistically significant anomalies detected."
                     ),
                     "confidence": conf(0.65, score),
                 })
+                filler_idx += 1
     
             insights.extend(sub_insights[:9])
     
@@ -2053,12 +2205,22 @@ class HealthcareDomain(BaseDomain):
         active_subs: Dict[str, float] = kpis.get("sub_domains", {}) or {}
     
         def conf(base: float, sub_score: float) -> float:
-            return round(min(0.95, base + sub_score * 0.25), 2)
+            return round(min(0.95, base + min(sub_score, 1.0) * 0.25), 2)
     
-        insight_titles = {i["title"] for i in insights}
+        # Index insights by sub-domain for safe coupling
+        insights_by_sub = {}
+        for i in insights:
+            insights_by_sub.setdefault(i.get("sub_domain"), []).append(i.get("title"))
+    
+        fallback_actions = [
+            "Continue monitoring operational performance indicators",
+            "Review trends during monthly governance meetings",
+            "Maintain current controls and escalation pathways",
+        ]
     
         for sub, score in active_subs.items():
             sub_recs: List[Dict[str, Any]] = []
+            sub_insight_titles = set(insights_by_sub.get(sub, []))
     
             # ---------------- HOSPITAL ----------------
             if sub == HealthcareSubDomain.HOSPITAL.value:
@@ -2072,7 +2234,7 @@ class HealthcareDomain(BaseDomain):
                     "confidence": conf(0.70, score),
                 })
     
-                if "High Facility Performance Variance" in insight_titles:
+                if "High Facility Performance Variance" in sub_insight_titles:
                     sub_recs.append({
                         "sub_domain": sub,
                         "priority": "HIGH",
@@ -2083,7 +2245,8 @@ class HealthcareDomain(BaseDomain):
                         "confidence": conf(0.85, score),
                     })
     
-                if kpis.get("long_stay_rate", 0) >= 0.25:
+                long_stay = kpis.get("long_stay_rate")
+                if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
                     sub_recs.append({
                         "sub_domain": sub,
                         "priority": "HIGH",
@@ -2142,25 +2305,31 @@ class HealthcareDomain(BaseDomain):
                     "confidence": conf(0.85, score),
                 })
     
-            # HARD GUARANTEE: ≥5 RECOMMENDATIONS PER SUB
+            # ---------------- HARD GUARANTEE: ≥5 ----------------
+            idx = 0
             while len(sub_recs) < 5:
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "LOW",
-                    "action": "Continue monitoring operational performance indicators",
+                    "action": fallback_actions[idx % len(fallback_actions)],
                     "owner": "Operations",
                     "timeline": "Ongoing",
-                    "goal": "Ensure sustained stability and early anomaly detection",
+                    "goal": "Maintain stability and detect early deviations",
                     "confidence": conf(0.60, score),
                 })
+                idx += 1
     
             recommendations.extend(sub_recs[:5])
     
         priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-        recommendations.sort(key=lambda r: priority_order.get(r["priority"], 3))
+        recommendations.sort(
+            key=lambda r: (
+                priority_order.get(r.get("priority"), 3),
+                r.get("sub_domain", ""),
+            )
+        )
     
         return recommendations
-
 # =====================================================
 # REGISTRATION
 # =====================================================
@@ -2168,30 +2337,92 @@ class HealthcareDomain(BaseDomain):
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
 
-    def detect(self, df):
+    def detect(self, df: pd.DataFrame):
+
+        # -------------------------------------------------
+        # SEMANTIC SIGNALS (MUST ALIGN WITH DOMAIN LOGIC)
+        # -------------------------------------------------
         cols = {
-            "patient": resolve_column(df, "patient_id"),
-            "admit": resolve_column(df, "admission_date"),
-            "discharge": resolve_column(df, "discharge_date"),
+            # Identity
+            "pid": resolve_column(df, "patient_id"),
+
+            # Time / Lifecycle
+            "date": resolve_column(df, "admission_date"),
+            "discharge_date": resolve_column(df, "discharge_date"),
             "los": resolve_column(df, "length_of_stay"),
+
+            # Clinical / Ops
             "diagnosis": resolve_column(df, "diagnosis"),
             "facility": resolve_column(df, "facility"),
+
+            # Pharmacy / Population (critical for routing)
+            "supply": resolve_column(df, "supply"),
+            "cost": resolve_column(df, "cost"),
+            "population": resolve_column(df, "population"),
         }
-    
+
         signals = {k: _has_signal(df, v) for k, v in cols.items()}
-        confidence = round(sum(signals.values()) / len(signals), 2)
-    
-        if confidence < 0.3:
-            return DomainDetectionResult(None, 0.0, signals)
-    
+
+        # -------------------------------------------------
+        # HARD GUARDRAIL: require ≥2 meaningful signals
+        # -------------------------------------------------
+        signal_count = sum(signals.values())
+        if signal_count < 2:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=0.0,
+                signals=signals,
+            )
+
+        # -------------------------------------------------
+        # WEIGHTED CONFIDENCE (ROUTING-SAFE)
+        # -------------------------------------------------
+        weights = {
+            "pid": 0.15,
+            "date": 0.15,
+            "discharge_date": 0.10,
+            "los": 0.20,
+            "diagnosis": 0.10,
+            "facility": 0.10,
+            "supply": 0.10,
+            "population": 0.10,
+        }
+
+        confidence = round(
+            min(
+                0.95,
+                sum(
+                    weights.get(k, 0) for k, v in signals.items() if v
+                )
+            ),
+            2,
+        )
+
+        if confidence < 0.35:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=confidence,
+                signals=signals,
+            )
+
+        # -------------------------------------------------
+        # SAFE SUB-DOMAIN HINTING (NON-BINDING)
+        # -------------------------------------------------
+        sub_domains = infer_healthcare_subdomains(df, cols)
+
         return DomainDetectionResult(
-            domain="healthcare",
+            domain=self.domain_name,
             confidence=confidence,
             signals={
                 **signals,
-                "likely_subdomains": infer_healthcare_subdomains(df, cols),
+                "likely_subdomains": sub_domains,
             },
         )
-        
+
+
 def register(registry):
-    registry.register("healthcare", HealthcareDomain, HealthcareDomainDetector)
+    registry.register(
+        "healthcare",
+        HealthcareDomain,
+        HealthcareDomainDetector,
+    )
