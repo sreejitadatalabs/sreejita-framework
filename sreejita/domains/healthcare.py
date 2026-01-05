@@ -725,106 +725,105 @@ class HealthcareDomain(BaseDomain):
                     "cost_per_member": safe_mean(self.cols.get("cost")),
                 })
             
-            # -------------------------------------------------
-            # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
-            # -------------------------------------------------
-            kpis["_kpi_capabilities"] = {
+        # -------------------------------------------------
+        # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
+        # -------------------------------------------------
+        kpis["_kpi_capabilities"] = {
             # Time / Flow
             "avg_los": Capability.TIME_FLOW.value,
             "avg_wait_time": Capability.TIME_FLOW.value,
             "avg_tat": Capability.TIME_FLOW.value,
             "visit_cycle_time": Capability.TIME_FLOW.value,
-            "er_boarding_time": Capability.TIME_FLOW.value,
-        
+                "er_boarding_time": Capability.TIME_FLOW.value,
+            
             # Cost
             "cost_per_rx": Capability.COST.value,
             "cost_per_test": Capability.COST.value,
             "cost_per_member": Capability.COST.value,
             "avg_cost_per_day": Capability.COST.value,
             "labor_cost_per_day": Capability.COST.value,
-        
+            
             # Quality
             "no_show_rate": Capability.QUALITY.value,
             "readmission_rate": Capability.QUALITY.value,
             "mortality_rate": Capability.QUALITY.value,
             "specimen_rejection_rate": Capability.QUALITY.value,
             "med_error_rate": Capability.QUALITY.value,
-        
+            
             # Volume / Access
             "rx_volume": Capability.VOLUME.value,
             "tests_per_fte": Capability.VOLUME.value,
             "visits_per_provider": Capability.ACCESS.value,
             "incidence_per_100k": Capability.VOLUME.value,
-        
+            
             # Variance
             "facility_variance_score": Capability.VARIANCE.value,
             "long_stay_rate": Capability.VARIANCE.value,
         }
             
-            # -------------------------------------------------
-            # KPI EVIDENCE COVERAGE (FORENSIC)
-            # -------------------------------------------------
-            kpis["_evidence"] = {}
+        # -------------------------------------------------
+        # KPI EVIDENCE COVERAGE (FORENSIC)
+        # -------------------------------------------------
+        kpis["_evidence"] = {}
             
-            kpi_sources  = {
-                "avg_los": [self.cols.get("los")],
-                "readmission_rate": [self.cols.get("readmitted")],
-                "avg_wait_time": [self.cols.get("duration")],
-                "cost_per_rx": [self.cols.get("cost")],
-                "incidence_per_100k": [self.cols.get("population"), self.cols.get("flag")],
-            }
+        kpi_sources  = {
+            "avg_los": [self.cols.get("los")],
+            "readmission_rate": [self.cols.get("readmitted")],
+            "avg_wait_time": [self.cols.get("duration")],
+            "cost_per_rx": [self.cols.get("cost")],
+            "incidence_per_100k": [self.cols.get("population"), self.cols.get("flag")],
+        }
             
-            for k, cols in kpi_sources.items():
-                coverages = [
-                    df[c].notna().mean()
-                    for c in cols
-                    if c and c in df.columns
-                ]
-                if coverages:
-                    kpis["_evidence"][k] = round(float(max(coverages)), 2)
+        for k, cols in kpi_sources.items():
+            coverages = [
+                df[c].notna().mean()
+                for c in cols
+                if c and c in df.columns
+            ]
+            if coverages:
+                kpis["_evidence"][k] = round(float(max(coverages)), 2)
 
-            # -------------------------------------------------
-            # KPI INFERENCE TYPE (AUDIT-READY)
-            # -------------------------------------------------
-            kpis["_inference_type"] = {}
+        # -------------------------------------------------
+        # KPI INFERENCE TYPE (AUDIT-READY)
+        # -------------------------------------------------
+        kpis["_inference_type"] = {}
             
-            for key in kpis:
-                if key.startswith("_"):
-                    continue
+        for key in kpis:
+            if key.startswith("_"):
+                continue
             
-                if "proxy" in key or "estimated" in key:
-                    kpis["_inference_type"][key] = "proxy"
-                elif key.startswith("__derived"):
-                    kpis["_inference_type"][key] = "derived"
-                else:
-                    kpis["_inference_type"][key] = "direct"
-            # -------------------------------------------------
-            # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
-            # -------------------------------------------------
-            kpis["_confidence"] = {}
+            if "proxy" in key or "estimated" in key:
+                kpis["_inference_type"][key] = "proxy"
+            elif key.startswith("__derived"):
+                kpis["_inference_type"][key] = "derived"
+            else:
+                kpis["_inference_type"][key] = "direct"
+                
+        # -------------------------------------------------
+        # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
+        # -------------------------------------------------
+        kpis["_confidence"] = {}
 
-            min_sub_conf = min(active_subs.values()) if active_subs else 0.3
-            evidence = kpis.get("_evidence", {})
+        min_sub_conf = min(active_subs.values()) if active_subs else 0.3
+        evidence = kpis.get("_evidence", {})
             
-            for key, value in kpis.items():
-                if key.startswith("_"):
-                    continue
+        for key, value in kpis.items():
+            if key.startswith("_"):
+                continue
             
-                if key.endswith("_placeholder_kpi"):
-                    kpis["_confidence"][key] = 0.0
-                    continue
+            if key.endswith("_placeholder_kpi"):
+                kpis["_confidence"][key] = 0.0
+                continue
             
-                coverage = evidence.get(key, 0.6)  # default conservative
+            coverage = evidence.get(key, 0.6)  # default conservative
             
-                if isinstance(value, (int, float)):
-                    base = 0.85 * min_sub_conf
-                    adjusted = base * coverage
-                    kpis["_confidence"][key] = round(
-                        min(0.95, max(0.25, adjusted)),
-                        2
-                    )
-                else:
-                    kpis["_confidence"][key] = round(0.3 * coverage, 2)
+            if isinstance(value, (int, float)):
+                base = 0.85 * min_sub_conf
+                adjusted = base * coverage
+                kpis["_confidence"][key] = round(min(0.95, max(0.25, adjusted)), 2)
+                
+            else:
+                kpis["_confidence"][key] = round(0.3 * coverage, 2)
 
         self._last_kpis = kpis
 
@@ -2159,6 +2158,14 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
+
+    def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
+    return (
+        kpis.get(f"{sub}_{key}")
+        if f"{sub}_{key}" in kpis
+        else kpis.get(key)
+    )
+    
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
@@ -2210,7 +2217,7 @@ class HealthcareDomain(BaseDomain):
             # STRENGTHS (EVIDENCE-BASED ONLY)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                avg_los = kpis.get("avg_los")
+                avg_los = get_kpi(kpis, sub, "avg_los")
                 if isinstance(avg_los, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2224,7 +2231,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.CLINIC.value:
-                wait = kpis.get("avg_wait_time")
+                wait = get_kpi(kpis, sub, "avg_wait_time")
                 if isinstance(wait, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2238,7 +2245,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = kpis.get("avg_tat")
+                tat = get_kpi(kpis, sub, "avg_tat")
                 if isinstance(tat, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2252,7 +2259,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                cost = kpis.get("cost_per_rx")
+                cost = get_kpi(kpis, sub, "cost_per_rx")
                 if isinstance(cost, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2266,7 +2273,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = kpis.get("incidence_per_100k")
+                inc = get_kpi(kpis, sub, "incidence_per_100k")
                 if isinstance(inc, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2283,7 +2290,7 @@ class HealthcareDomain(BaseDomain):
             # WARNINGS (EARLY SIGNALS)
             # =================================================
             if sub == HealthcareSubDomain.CLINIC.value:
-                no_show = kpis.get("no_show_rate")
+                no_show = get_kpi(kpis, sub, "no_show_rate")
                 if isinstance(no_show, (int, float)) and no_show >= 0.10:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2297,7 +2304,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                med_err = kpis.get("med_error_rate")
+                med_err = get_kpi(kpis, sub, "med_error_rate")
                 if isinstance(med_err, (int, float)) and med_err >= 0.05:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2314,7 +2321,7 @@ class HealthcareDomain(BaseDomain):
             # RISKS (MATERIAL IMPACT)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                long_stay = kpis.get("long_stay_rate")
+                long_stay = get_kpi(kpis, sub, "long_stay_rate")
                 if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2328,7 +2335,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = kpis.get("avg_tat")
+                tat = get_kpi(kpis, sub, "avg_tat")
                 if isinstance(tat, (int, float)) and tat > 120:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2342,7 +2349,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = kpis.get("incidence_per_100k")
+                inc = get_kpi(kpis, sub, "incidence_per_100k")
                 if isinstance(inc, (int, float)) and inc > 300:
                     sub_insights.append({
                         "sub_domain": sub,
