@@ -1,6 +1,6 @@
 # =====================================================
 # EXECUTIVE COGNITION — UNIVERSAL (FINAL, GOVERNED)
-# Sreejita Framework v3.5+
+# Sreejita Framework v3.5.x
 # =====================================================
 
 from typing import Dict, Any, List
@@ -8,34 +8,30 @@ from sreejita.core.capabilities import Capability
 
 
 # =====================================================
-# EXECUTIVE RISK BANDS (BOARD LEGIBLE)
+# EXECUTIVE RISK BANDS (SEMANTIC ONLY — NO EMOJIS)
 # =====================================================
 
 EXECUTIVE_RISK_BANDS = [
-    (85, "LOW", "🟢"),
-    (70, "MEDIUM", "🟡"),
-    (50, "HIGH", "🟠"),
-    (0,  "CRITICAL", "🔴"),
+    (85, "LOW"),
+    (70, "MEDIUM"),
+    (50, "HIGH"),
+    (0,  "CRITICAL"),
 ]
 
 
 def derive_risk_level(score: int) -> Dict[str, Any]:
     score = int(score or 0)
 
-    for threshold, label, icon in EXECUTIVE_RISK_BANDS:
+    for threshold, label in EXECUTIVE_RISK_BANDS:
         if score >= threshold:
             return {
                 "label": label,
-                "icon": icon,
                 "score": score,
-                "display": f"{icon} {label} (Score: {score}/100)",
             }
 
     return {
         "label": "CRITICAL",
-        "icon": "🔴",
         "score": score,
-        "display": f"🔴 CRITICAL (Score: {score}/100)",
     }
 
 
@@ -82,18 +78,31 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 # =====================================================
-# INSIGHT STRUCTURING (EXECUTIVE FLOW)
+# INSIGHT STRUCTURING (LEVEL NORMALIZATION)
 # =====================================================
 
 def structure_insights(insights: List[Dict[str, Any]]) -> Dict[str, Any]:
     insights = insights or []
 
-    strengths = [i for i in insights if i.get("level") == "STRENGTH"][:2]
-    warnings  = [i for i in insights if i.get("level") == "WARNING"][:2]
-    risks     = [i for i in insights if i.get("level") == "RISK"][:1]
+    # Normalize levels (INFO → WARNING)
+    normalized: List[Dict[str, Any]] = []
+    for i in insights:
+        if not isinstance(i, dict):
+            continue
+        lvl = i.get("level", "INFO")
+        if lvl == "INFO":
+            lvl = "WARNING"
+        item = dict(i)
+        item["level"] = lvl
+        normalized.append(item)
+
+    strengths = [i for i in normalized if i["level"] == "STRENGTH"][:2]
+    warnings  = [i for i in normalized if i["level"] == "WARNING"][:2]
+    risks     = [i for i in normalized if i["level"] == "RISK"][:1]
 
     avg_conf = round(
-        sum(float(i.get("confidence", 0.7)) for i in insights) / max(len(insights), 1),
+        sum(float(i.get("confidence", 0.7)) for i in normalized)
+        / max(len(normalized), 1),
         2,
     )
 
@@ -118,15 +127,15 @@ def structure_insights(insights: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def compute_board_readiness_score(kpis, insights):
     conf_map = kpis.get("_confidence", {}) or {}
-    
-    # Count ONLY high-confidence KPIs (exclude placeholders)
+
+    # Count ONLY high-confidence, non-placeholder KPIs
     high_conf_kpis = [
-        v for k, v in conf_map.items() 
-        if isinstance(v, (int, float)) 
+        v for k, v in conf_map.items()
+        if isinstance(v, (int, float))
         and v >= 0.7
-        and not k.endswith("_placeholder_kpi")
+        and not str(k).endswith("_placeholder_kpi")
     ]
-    
+
     # Evidence strength (max 40)
     evidence_score = (len(high_conf_kpis) / 6) * 40
 
@@ -144,7 +153,7 @@ def compute_board_readiness_score(kpis, insights):
                 100,
                 evidence_score + coverage_score + 20
                 - warning_penalty
-                - risk_penalty
+                - risk_penalty,
             ),
         )
     )
@@ -154,7 +163,6 @@ def compute_board_readiness_score(kpis, insights):
         if kpis["data_completeness"] < 0.7:
             score = min(score, 60)
 
-    # ✅ FIX: derive band correctly
     risk = derive_risk_level(score)
 
     return {
@@ -162,8 +170,9 @@ def compute_board_readiness_score(kpis, insights):
         "band": risk["label"],
     }
 
+
 # =====================================================
-# 1-MINUTE EXECUTIVE BRIEF (CEO LEGIBLE)
+# 1-MINUTE EXECUTIVE BRIEF (CEO-LEGIBLE)
 # =====================================================
 
 def build_executive_brief(
@@ -173,7 +182,7 @@ def build_executive_brief(
 ) -> str:
 
     risk = derive_risk_level(board_score)
-    sub_domain = sub_domain.replace("_", " ")
+    sub_domain = str(sub_domain).replace("_", " ")
 
     brief: List[str] = [
         f"This {sub_domain} performance review is assessed as "
@@ -213,6 +222,8 @@ def normalize_recommendations(
     normalized: List[Dict[str, Any]] = []
 
     for r in (recommendations or [])[:5]:
+        if not isinstance(r, dict):
+            continue
         normalized.append({
             "priority": r.get("priority", "MEDIUM"),
             "action": r.get("action"),
@@ -226,7 +237,7 @@ def normalize_recommendations(
 
 
 # =====================================================
-# EXECUTIVE PAYLOAD (GLOBAL / SUB-DOMAIN)
+# EXECUTIVE PAYLOAD (GLOBAL)
 # =====================================================
 
 def build_executive_payload(
@@ -258,40 +269,50 @@ def build_executive_payload(
 
 
 # =====================================================
-# PER-SUB-DOMAIN EXECUTIVE COGNITION (CRITICAL)
+# PER-SUB-DOMAIN EXECUTIVE COGNITION (STRICT & SAFE)
 # =====================================================
 
-def build_subdomain_executive_payloads(kpis, insights, recommendations):
+def build_subdomain_executive_payloads(
+    kpis: Dict[str, Any],
+    insights: List[Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+
     sub_domains = kpis.get("sub_domains", {}) or {}
-    results = {}
-    
+    results: Dict[str, Dict[str, Any]] = {}
+
+    # Optional domain-provided KPI map
+    domain_kpi_map = kpis.get("_domain_kpi_map", {}) or {}
+
     for sub in sub_domains.keys():
-        # Filter insights to just this sub-domain
+
         sub_insights = [
-            i for i in insights 
+            i for i in insights
             if isinstance(i, dict) and i.get("sub_domain") == sub
         ]
-        
-        # Filter recommendations to just this sub-domain
+
         sub_recs = [
-            r for r in recommendations 
+            r for r in recommendations
             if isinstance(r, dict) and r.get("sub_domain") == sub
         ]
-        
-        # Create sub-domain-specific KPI dict (NOT copy all!)
+
+        allowed_kpis = set(domain_kpi_map.get(sub, []))
+
         sub_kpis = {
             k: v for k, v in kpis.items()
-            if k.startswith("_") or k in ["primary_sub_domain", "sub_domains", "total_volume"]
-            or (isinstance(k, str) and sub in k)  # Only KPIs for this sub-domain
+            if (
+                k.startswith("_")
+                or k in ["primary_sub_domain", "sub_domains", "total_volume"]
+                or k in allowed_kpis
+            )
         }
-        
+
         sub_kpis["primary_sub_domain"] = sub
-        
+
         results[sub] = build_executive_payload(
             kpis=sub_kpis,
             insights=sub_insights,
             recommendations=sub_recs,
         )
-    
-    return results
 
+    return results
