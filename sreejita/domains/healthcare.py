@@ -805,7 +805,7 @@ class HealthcareDomain(BaseDomain):
         kpis["_confidence"] = {}
 
         min_sub_conf = min(active_subs.values()) if active_subs else 0.3
-        evidence = kpis.get("_evidence", {})
+        evidence = get_kpi(kpis, sub, "_evidence", {})
             
         for key, value in kpis.items():
             if key.startswith("_"):
@@ -2197,20 +2197,26 @@ class HealthcareDomain(BaseDomain):
             if (
                 "hospital" in active_subs
                 and "diagnostics" in active_subs
-                and isinstance(kpis.get("avg_tat"), (int, float))
-                and isinstance(kpis.get("avg_los"), (int, float))
-                and kpis["avg_tat"] > 120
+                and isinstance(self.get_kpi(kpis, "diagnostics", "avg_tat"), (int, float))
+                and isinstance(self.get_kpi(kpis, "hospital", "avg_los"), (int, float))
+                and self.get_kpi(kpis, "diagnostics", "avg_tat") > 120
             ):
+                cross_conf = min(
+                    kpis.get("_confidence", {}).get("avg_tat", 0.6),
+                    kpis.get("_confidence", {}).get("avg_los", 0.6),
+                )
+            
                 insights.append({
                     "sub_domain": "cross_domain",
                     "level": "RISK",
                     "title": "Diagnostic Delays Driving Inpatient Length of Stay",
                     "so_what": (
-                        f"Elevated diagnostic turnaround times ({kpis['avg_tat']:.0f} mins) "
+                        f"Elevated diagnostic turnaround times "
+                        f"({self.get_kpi(kpis, 'diagnostics', 'avg_tat'):.0f} mins) "
                         f"are likely contributing to prolonged inpatient stays "
-                        f"(avg LOS {kpis['avg_los']:.1f} days)."
+                        f"(avg LOS {self.get_kpi(kpis, 'hospital', 'avg_los'):.1f} days)."
                     ),
-                    "confidence": 0.88,
+                    "confidence": round(min(0.95, cross_conf), 2),
                 })
     
             # =================================================
@@ -2426,7 +2432,7 @@ class HealthcareDomain(BaseDomain):
             # HOSPITAL
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value and "RISK" in levels:
-                current_los = kpis.get("avg_los")
+                current_los = get_kpi(kpis, sub, "avg_los")
             
                 sub_recs.append({
                     "sub_domain": sub,
