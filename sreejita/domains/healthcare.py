@@ -826,7 +826,7 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # KPI EVIDENCE COVERAGE (EXECUTIVE TRUST SIGNAL)
         # -------------------------------------------------
-        kpis["_evidence"] = {}
+        kpis["_evidence"] = {"inference_type": "soft_routing"}
         
         for key in kpis:
             if key.startswith("_"):
@@ -843,7 +843,25 @@ class HealthcareDomain(BaseDomain):
                 kpis["_evidence"][key] = coverage
             else:
                 kpis["_evidence"][key] = 0.0
-        
+
+
+         # -------------------------------------------------
+ # KPI INFERENCE TYPE TRACKING (AUDIT READINESS)
+ # -------------------------------------------------
+ kpis["_inference_type"] = {}
+ 
+ for key in kpis:
+     if key.startswith("_"):
+         continue
+     
+     if "proxy" in key or "estimated" in key:
+         kpis["_inference_type"][key] = "proxy"
+     elif key.startswith("__derived"):
+         kpis["_inference_type"][key] = "derived"
+     else:
+         kpis["_inference_type"][key] = "direct"
+
+     
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
@@ -930,6 +948,7 @@ class HealthcareDomain(BaseDomain):
                 "importance": float(importance),
                 "confidence": final_conf,
                 "sub_domain": sub_domain,
+                            "inference_type": inference_type,
             })
     
         # -------------------------------------------------
