@@ -1212,21 +1212,31 @@ class HealthcareDomain(BaseDomain):
         # DIAGNOSTICS (LABS / RADIOLOGY) VISUALS
         # =================================================
         if sub_domain == "diagnostics":
-    
-            # 1. TAT PERCENTILES (50 / 90 / 95)
+        
+            # Ensure datetime safety once
+            if time_col:
+                df = df.copy()
+                df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+        
+            # -------------------------------------------------
+            # 1. TURNAROUND TIME PERCENTILES
+            # -------------------------------------------------
             if visual_key == "tat_percentiles":
                 if not (c.get("duration") and time_col):
-                    raise ValueError
-    
-                tat = df[c["duration"]].dropna()
-                if tat.empty:
-                    raise ValueError
-    
-                grouped = df.set_index(time_col)[c["duration"]].resample("D")
+                    raise ValueError("Duration or time column missing")
+        
+                tmp = df[[time_col, c["duration"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No TAT data")
+        
+                grouped = tmp.set_index(time_col)[c["duration"]].resample("D")
                 p50 = grouped.quantile(0.50)
                 p90 = grouped.quantile(0.90)
                 p95 = grouped.quantile(0.95)
-    
+        
+                if p50.empty:
+                    raise ValueError("Insufficient TAT distribution")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 p50.plot(ax=ax, label="50th %ile")
                 p90.plot(ax=ax, label="90th %ile")
@@ -1234,496 +1244,648 @@ class HealthcareDomain(BaseDomain):
                 ax.legend()
                 ax.set_title("Turnaround Time Percentiles", fontweight="bold")
                 ax.set_ylabel("Minutes")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_tat_percentiles.png",
                     "Diagnostic turnaround time percentiles over time.",
-                    importance=0.95,
-                    confidence=0.9,
+                    0.95,
+                    0.90,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 2. CRITICAL VALUE NOTIFICATION SPEED
+            # -------------------------------------------------
             if visual_key == "critical_alert_time":
                 if not (c.get("duration") and c.get("flag")):
-                    raise ValueError
-    
-                critical = df[df[c["flag"]] == 1]
+                    raise ValueError("Flag or duration missing")
+        
+                critical = df[df[c["flag"]] == 1][c["duration"]].dropna()
                 if critical.empty:
-                    raise ValueError
-    
+                    raise ValueError("No critical alerts")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
-                critical[c["duration"]].clip(upper=180).hist(ax=ax, bins=20)
+                critical.clip(upper=180).hist(ax=ax, bins=20)
                 ax.set_title("Critical Result Notification Time", fontweight="bold")
                 ax.set_xlabel("Minutes")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_critical_alert_time.png",
                     "Speed of notifying life-threatening diagnostic results.",
-                    importance=0.93,
-                    confidence=0.88,
+                    0.93,
+                    0.88,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 3. SPECIMEN REJECTION PARETO
+            # -------------------------------------------------
             if visual_key == "specimen_rejection":
                 if not c.get("flag"):
-                    raise ValueError
-    
+                    raise ValueError("Flag column missing")
+        
                 reasons = df[c["flag"]].value_counts()
                 if reasons.empty:
-                    raise ValueError
-    
+                    raise ValueError("No rejection data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 reasons.plot(kind="bar", ax=ax)
                 ax.set_title("Specimen Rejection Pareto", fontweight="bold")
                 ax.set_ylabel("Count")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_specimen_rejection.png",
                     "Primary causes of diagnostic specimen rejection.",
-                    importance=0.90,
-                    confidence=0.85,
+                    0.90,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
-            # 4. DEVICE DOWNTIME ANALYSIS (PROXY)
+        
+            # -------------------------------------------------
+            # 4. DEVICE UTILIZATION (DOWNTIME PROXY)
+            # -------------------------------------------------
             if visual_key == "device_downtime":
                 if not (c.get("facility") and time_col):
-                    raise ValueError
-    
-                downtime = df.groupby(c["facility"])[time_col].count().sort_values()
+                    raise ValueError("Facility or time missing")
+        
+                tmp = df[[c["facility"], time_col]].dropna()
+                if tmp.empty:
+                    raise ValueError("No device usage data")
+        
+                downtime = tmp.groupby(c["facility"]).size().sort_values()
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 downtime.plot(kind="bar", ax=ax)
                 ax.set_title("Relative Device Utilization (Downtime Proxy)", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_device_downtime.png",
                     "Relative diagnostic equipment availability across facilities.",
-                    importance=0.87,
-                    confidence=0.75,
+                    0.87,
+                    0.75,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 5. PEAK ORDER LOAD HEATMAP
+            # -------------------------------------------------
             if visual_key == "order_heatmap":
                 if not time_col:
-                    raise ValueError
-    
-                tmp = df[[time_col]].copy()
+                    raise ValueError("Time column missing")
+        
+                tmp = df[[time_col]].dropna()
+                if tmp.empty:
+                    raise ValueError("No order timestamps")
+        
                 tmp["_hour"] = tmp[time_col].dt.hour
                 tmp["_day"] = tmp[time_col].dt.day_name()
-                
+        
                 heat = pd.crosstab(tmp["_day"], tmp["_hour"])
-
                 if heat.empty:
-                    raise ValueError
-    
+                    raise ValueError("Empty heatmap")
+        
+                day_order = [
+                    "Monday", "Tuesday", "Wednesday",
+                    "Thursday", "Friday", "Saturday", "Sunday"
+                ]
+                heat = heat.reindex(day_order).dropna(how="all")
+        
                 fig, ax = plt.subplots(figsize=(10, 4))
                 im = ax.imshow(heat, aspect="auto", cmap="Blues")
                 ax.set_title("Peak Diagnostic Order Load", fontweight="bold")
                 plt.colorbar(im, ax=ax)
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_order_heatmap.png",
                     "Hourly diagnostic order intensity by day.",
-                    importance=0.92,
-                    confidence=0.9,
+                    0.92,
+                    0.90,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 6. REPEAT SCAN INCIDENCE
+            # -------------------------------------------------
             if visual_key == "repeat_scan":
                 if not c.get("encounter"):
-                    raise ValueError
-    
-                repeats = df[c["encounter"]].value_counts()
-                repeat_rate = (
-                    (repeats > 1).sum() / len(repeats)
-                    if len(repeats) > 0
-                    else 0
-                )
-    
+                    raise ValueError("Encounter column missing")
+        
+                counts = df[c["encounter"]].value_counts()
+                if counts.empty:
+                    raise ValueError("No scan data")
+        
+                repeat_rate = (counts > 1).mean()
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Repeat Scan Rate"], [repeat_rate])
                 ax.set_ylim(0, 1)
                 ax.set_title("Repeat Diagnostic Incidence", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_repeat_scan.png",
                     "Rate of repeated diagnostic tests indicating waste.",
-                    importance=0.89,
-                    confidence=0.8,
+                    0.89,
+                    0.80,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 7. PROVIDER ORDERING VARIANCE
+            # -------------------------------------------------
             if visual_key == "ordering_variance":
                 if not c.get("doctor"):
-                    raise ValueError
-    
+                    raise ValueError("Doctor column missing")
+        
                 orders = df[c["doctor"]].value_counts().head(10)
+                if orders.empty:
+                    raise ValueError("No provider ordering data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 orders.plot(kind="bar", ax=ax)
                 ax.set_title("Provider Ordering Variance", fontweight="bold")
                 ax.set_ylabel("Orders")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_ordering_variance.png",
                     "Variation in diagnostic ordering behavior across providers.",
-                    importance=0.88,
-                    confidence=0.85,
+                    0.88,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
+        
         # =================================================
         # PHARMACY VISUALS
         # =================================================
         if sub_domain == "pharmacy":
-    
-            # 1. SPEND VELOCITY (CUMULATIVE)
+        
+            # Ensure datetime safety once
+            if time_col:
+                df = df.copy()
+                df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+        
+            # -------------------------------------------------
+            # 1. MEDICATION SPEND VELOCITY (CUMULATIVE)
+            # -------------------------------------------------
             if visual_key == "spend_velocity":
                 if not (c.get("cost") and time_col):
-                    raise ValueError
-    
-                spend = df.set_index(time_col)[c["cost"]].resample("M").sum().cumsum()
-                if spend.empty:
-                    raise ValueError
-    
+                    raise ValueError("Cost or time column missing")
+        
+                tmp = df[[time_col, c["cost"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No spend data")
+        
+                spend = (
+                    tmp.set_index(time_col)[c["cost"]]
+                    .resample("M")
+                    .sum()
+                    .cumsum()
+                )
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 spend.plot(ax=ax)
                 ax.set_title("Medication Spend Velocity", fontweight="bold")
                 ax.set_ylabel("Cumulative Spend")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_spend_velocity.png",
                     "Cumulative medication expenditure over time.",
-                    importance=0.95,
-                    confidence=0.9,
+                    0.95,
+                    0.90,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 2. REFILL ADHERENCE GAP (DAYS LATE)
+            # -------------------------------------------------
             if visual_key == "refill_gap":
                 if not (c.get("fill_date") and c.get("supply")):
-                    raise ValueError
-    
+                    raise ValueError("Fill date or supply missing")
+        
                 fill = pd.to_datetime(df[c["fill_date"]], errors="coerce")
-                expected = fill + pd.to_timedelta(df[c["supply"]], unit="D")
+                supply = pd.to_numeric(df[c["supply"]], errors="coerce")
+        
+                expected = fill + pd.to_timedelta(supply, unit="D")
                 gap = (fill - expected).dt.days.dropna()
-    
+        
                 if gap.empty:
-                    raise ValueError
-    
+                    raise ValueError("No refill gap data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 gap.clip(lower=-30, upper=60).hist(ax=ax, bins=20)
                 ax.set_title("Refill Adherence Gap (Days)", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_refill_gap.png",
                     "Delay between expected and actual prescription refills.",
-                    importance=0.92,
-                    confidence=0.85,
+                    0.92,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 3. THERAPEUTIC CLASS SPEND (PROXY)
+            # -------------------------------------------------
             if visual_key == "therapeutic_spend":
                 if not (c.get("facility") and c.get("cost")):
-                    raise ValueError
-    
-                spend = df.groupby(c["facility"])[c["cost"]].sum().nlargest(6)
+                    raise ValueError("Facility or cost missing")
+        
+                spend = (
+                    df[[c["facility"], c["cost"]]]
+                    .dropna()
+                    .groupby(c["facility"])[c["cost"]]
+                    .sum()
+                    .nlargest(6)
+                )
+        
                 if spend.empty:
-                    raise ValueError
-    
+                    raise ValueError("No therapeutic spend data")
+        
                 fig, ax = plt.subplots(figsize=(6, 6))
                 spend.plot(kind="pie", autopct="%1.0f%%", ax=ax)
                 ax.set_ylabel("")
                 ax.set_title("Therapeutic Class Spend Distribution", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_therapeutic_spend.png",
                     "Medication spend distribution by therapeutic class (proxy).",
-                    importance=0.9,
-                    confidence=0.8,
+                    0.90,
+                    0.80,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 4. GENERIC SUBSTITUTION RATE
+            # -------------------------------------------------
             if visual_key == "generic_rate":
                 if not c.get("facility"):
-                    raise ValueError
-    
-                generic = df[c["facility"]].astype(str).str.contains("generic", case=False)
-                rate = generic.mean()
-    
+                    raise ValueError("Facility column missing")
+        
+                series = df[c["facility"]].astype(str)
+                if series.empty:
+                    raise ValueError("No facility data")
+        
+                rate = series.str.contains("generic", case=False).mean()
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Generic Substitution Rate"], [rate])
                 ax.set_ylim(0, 1)
                 ax.set_title("Generic Substitution Rate", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_generic_rate.png",
                     "Share of prescriptions filled with generic alternatives.",
-                    importance=0.88,
-                    confidence=0.75,
+                    0.88,
+                    0.75,
                     sub_domain,
                 )
                 return
-    
-            # 5. PRESCRIBING VARIANCE
+        
+            # -------------------------------------------------
+            # 5. PRESCRIBING COST VARIANCE
+            # -------------------------------------------------
             if visual_key == "prescribing_variance":
                 if not (c.get("doctor") and c.get("cost")):
-                    raise ValueError
-    
-                variance = df.groupby(c["doctor"])[c["cost"]].mean().nlargest(10)
+                    raise ValueError("Doctor or cost missing")
+        
+                variance = (
+                    df[[c["doctor"], c["cost"]]]
+                    .dropna()
+                    .groupby(c["doctor"])[c["cost"]]
+                    .mean()
+                    .nlargest(10)
+                )
+        
                 if variance.empty:
-                    raise ValueError
-    
+                    raise ValueError("No prescribing variance data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 variance.plot(kind="bar", ax=ax)
                 ax.set_title("Prescribing Cost Variance (Top Providers)", fontweight="bold")
-                ax.set_ylabel("Avg Cost")
-    
+                ax.set_ylabel("Average Cost")
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_prescribing_variance.png",
                     "Variation in average prescribing cost across providers.",
-                    importance=0.91,
-                    confidence=0.85,
+                    0.91,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 6. INVENTORY TURN RATIO (PROXY)
+            # -------------------------------------------------
             if visual_key == "inventory_turn":
                 if not (c.get("supply") and c.get("cost")):
-                    raise ValueError
-    
-                turn = df[c["cost"]].sum() / max(df[c["supply"]].mean(), 1)
+                    raise ValueError("Supply or cost missing")
+        
+                total_cost = pd.to_numeric(df[c["cost"]], errors="coerce").sum()
+                avg_supply = pd.to_numeric(df[c["supply"]], errors="coerce").mean()
+        
+                if not avg_supply or avg_supply <= 0:
+                    raise ValueError("Invalid inventory supply")
+        
+                turn = total_cost / avg_supply
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Inventory Turn Ratio"], [turn])
                 ax.set_title("Inventory Turn Ratio", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_inventory_turn.png",
                     "Efficiency of medication inventory turnover.",
-                    importance=0.87,
-                    confidence=0.7,
+                    0.87,
+                    0.70,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 7. DRUG INTERACTION ALERTS (PROXY)
+            # -------------------------------------------------
             if visual_key == "drug_alerts":
                 if not c.get("flag"):
-                    raise ValueError
-    
+                    raise ValueError("Flag column missing")
+        
                 alerts = df[c["flag"]].value_counts(normalize=True)
                 if alerts.empty:
-                    raise ValueError
-    
+                    raise ValueError("No alert data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 alerts.plot(kind="bar", ax=ax)
                 ax.set_title("Pharmacist Safety Interventions", fontweight="bold")
                 ax.set_ylabel("Rate")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_drug_alerts.png",
                     "Frequency of pharmacist interventions for drug safety.",
-                    importance=0.89,
-                    confidence=0.8,
+                    0.89,
+                    0.80,
                     sub_domain,
                 )
-                return
-    
+                return   
+                
         # =================================================
         # PUBLIC HEALTH / POPULATION HEALTH VISUALS
         # =================================================
         if sub_domain == "public_health":
-    
+        
+            # Ensure datetime safety once
+            if time_col:
+                df = df.copy()
+                df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+        
+            # -------------------------------------------------
             # 1. DISEASE INCIDENCE RATE (PER 100K)
+            # -------------------------------------------------
             if visual_key == "incidence_geo":
                 if not (c.get("population") and c.get("flag")):
-                    raise ValueError
-    
-                incidence = (df[c["flag"]].sum() / df[c["population"]].mean()) * 100000
-    
+                    raise ValueError("Population or outcome flag missing")
+        
+                pop = pd.to_numeric(df[c["population"]], errors="coerce")
+                cases = pd.to_numeric(df[c["flag"]], errors="coerce")
+        
+                if pop.dropna().empty or cases.dropna().empty:
+                    raise ValueError("Insufficient incidence data")
+        
+                pop_mean = pop.mean()
+                if not pop_mean or pop_mean <= 0:
+                    raise ValueError("Invalid population denominator")
+        
+                incidence = (cases.sum() / pop_mean) * 100_000
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Incidence per 100k"], [incidence])
                 ax.set_title("Disease Incidence Rate", fontweight="bold")
                 ax.set_ylabel("Cases per 100,000")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_incidence_rate.png",
                     "Observed disease incidence per 100,000 population.",
-                    importance=0.95,
-                    confidence=0.9,
+                    0.95,
+                    0.90,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 2. COHORT GROWTH TRAJECTORY
+            # -------------------------------------------------
             if visual_key == "cohort_growth":
                 if not (time_col and c.get("flag")):
-                    raise ValueError
-    
-                cohort = df.set_index(time_col)[c["flag"]].resample("M").sum().cumsum()
-                if cohort.empty:
-                    raise ValueError
-    
+                    raise ValueError("Time or outcome flag missing")
+        
+                tmp = df[[time_col, c["flag"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No cohort data")
+        
+                cohort = (
+                    tmp.set_index(time_col)[c["flag"]]
+                    .resample("M")
+                    .sum()
+                    .cumsum()
+                )
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 cohort.plot(ax=ax)
                 ax.set_title("Cohort Growth Trajectory", fontweight="bold")
                 ax.set_ylabel("Active Cases")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_cohort_growth.png",
                     "Growth of observed health cohort over time.",
-                    importance=0.93,
-                    confidence=0.88,
+                    0.93,
+                    0.88,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 3. PREVALENCE BY AGE GROUP (PROXY)
+            # -------------------------------------------------
             if visual_key == "prevalence_age":
                 if not (c.get("pid") and c.get("flag")):
-                    raise ValueError
-    
-                # proxy age buckets via patient id hash (safe, deterministic)
+                    raise ValueError("Patient id or outcome flag missing")
+        
+                pid = df[c["pid"]].astype(str)
+                flag = pd.to_numeric(df[c["flag"]], errors="coerce")
+        
+                if pid.empty or flag.dropna().empty:
+                    raise ValueError("No prevalence data")
+        
                 buckets = pd.cut(
-                    df[c["pid"]].astype(str).str.len(),
+                    pid.str.len(),
                     bins=[0, 6, 8, 10, 99],
-                    labels=["0–18", "19–35", "36–60", "60+"]
+                    labels=["0–18", "19–35", "36–60", "60+"],
                 )
-                prevalence = df.groupby(buckets)[c["flag"]].mean()
-    
+        
+                prevalence = flag.groupby(buckets).mean()
+                if prevalence.empty:
+                    raise ValueError("Prevalence calculation failed")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 prevalence.plot(kind="bar", ax=ax)
                 ax.set_title("Prevalence by Age Group", fontweight="bold")
                 ax.set_ylabel("Rate")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_prevalence_age.png",
                     "Relative prevalence across demographic age groups.",
-                    importance=0.9,
-                    confidence=0.75,
+                    0.90,
+                    0.75,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 4. SERVICE ACCESS GAP
+            # -------------------------------------------------
             if visual_key == "access_gap":
                 if not (c.get("population") and c.get("facility")):
-                    raise ValueError
-    
-                providers = df[c["facility"]].nunique()
-                pop = df[c["population"]].mean()
-                ratio = providers / max(pop, 1) * 1000
-    
+                    raise ValueError("Population or facility missing")
+        
+                pop = pd.to_numeric(df[c["population"]], errors="coerce")
+                facilities = df[c["facility"]]
+        
+                if pop.dropna().empty or facilities.dropna().empty:
+                    raise ValueError("No access data")
+        
+                providers = facilities.nunique()
+                pop_mean = pop.mean()
+        
+                if not pop_mean or pop_mean <= 0:
+                    raise ValueError("Invalid population denominator")
+        
+                ratio = providers / pop_mean * 1000
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Providers per 1k"], [ratio])
                 ax.set_title("Healthcare Access Indicator", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_access_gap.png",
                     "Healthcare provider availability per 1,000 residents.",
-                    importance=0.92,
-                    confidence=0.85,
+                    0.92,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 5. PROGRAM EFFICACY TREND
+            # -------------------------------------------------
             if visual_key == "program_effect":
                 if not (time_col and c.get("flag")):
-                    raise ValueError
-    
-                before_after = df.set_index(time_col)[c["flag"]].resample("M").mean()
-    
+                    raise ValueError("Time or outcome flag missing")
+        
+                tmp = df[[time_col, c["flag"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No program outcome data")
+        
+                trend = (
+                    tmp.set_index(time_col)[c["flag"]]
+                    .resample("M")
+                    .mean()
+                )
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
-                before_after.plot(ax=ax)
+                trend.plot(ax=ax)
                 ax.set_title("Program Efficacy Trend", fontweight="bold")
                 ax.set_ylabel("Outcome Rate")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_program_effect.png",
                     "Population outcome trends following interventions.",
-                    importance=0.9,
-                    confidence=0.8,
+                    0.90,
+                    0.80,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 6. SOCIAL DETERMINANTS OVERLAY (PROXY)
+            # -------------------------------------------------
             if visual_key == "sdoh_overlay":
                 if not (c.get("facility") and c.get("flag")):
-                    raise ValueError
-    
-                sdoh = df.groupby(c["facility"])[c["flag"]].mean().nlargest(8)
-    
+                    raise ValueError("Facility or outcome flag missing")
+        
+                sdoh = (
+                    df[[c["facility"], c["flag"]]]
+                    .dropna()
+                    .groupby(c["facility"])[c["flag"]]
+                    .mean()
+                    .nlargest(8)
+                )
+        
+                if sdoh.empty:
+                    raise ValueError("No SDOH data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 sdoh.plot(kind="bar", ax=ax)
                 ax.set_title("Social Determinants Risk Overlay", fontweight="bold")
                 ax.set_ylabel("Outcome Rate")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_sdoh_overlay.png",
                     "Health outcome variation across socioeconomic regions.",
-                    importance=0.88,
-                    confidence=0.75,
+                    0.88,
+                    0.75,
                     sub_domain,
                 )
                 return
-    
+        
+            # -------------------------------------------------
             # 7. IMMUNIZATION / SCREENING RATE
+            # -------------------------------------------------
             if visual_key == "immunization_rate":
                 if not c.get("flag"):
-                    raise ValueError
-    
-                rate = df[c["flag"]].mean()
-    
+                    raise ValueError("Outcome flag missing")
+        
+                rate = pd.to_numeric(df[c["flag"]], errors="coerce").mean()
+                if pd.isna(rate):
+                    raise ValueError("Invalid coverage rate")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Coverage Rate"], [rate])
                 ax.set_ylim(0, 1)
                 ax.set_title("Immunization / Screening Coverage", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_immunization_rate.png",
                     "Population coverage of immunization or screening programs.",
-                    importance=0.91,
-                    confidence=0.85,
+                    0.91,
+                    0.85,
                     sub_domain,
                 )
                 return
