@@ -26,12 +26,12 @@ class BaseDomain(ABC):
     - Domain-specific KPI computation
     - Insights & recommendations
     - Visual intelligence
-    - Executive cognition hook
+    - Executive cognition
 
     MUST NOT:
     - Perform routing
     - Perform orchestration
-    - Perform file I/O outside visuals
+    - Perform report rendering
     """
 
     name: str = "generic"
