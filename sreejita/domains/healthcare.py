@@ -407,6 +407,7 @@ def infer_healthcare_subdomains(
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
 
+    @staticmethod
     def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
         return (
             kpis.get(f"{sub}_{key}")
