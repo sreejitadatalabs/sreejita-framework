@@ -1014,180 +1014,196 @@ class HealthcareDomain(BaseDomain):
                 )
                 return
     
-        # -------------------------------------------------
-        # NOT HANDLED
-        # -------------------------------------------------
-        raise ValueError(f"Unhandled visual key: {visual_key}")
-    
         # =================================================
         # CLINIC / AMBULATORY VISUALS
         # =================================================
         if sub_domain == "clinic":
-    
+        
             # 1. NO-SHOW RATE BY DAY
             if visual_key == "no_show_by_day":
                 if not (c.get("readmitted") and time_col):
-                    raise ValueError
-    
-                dow = df[time_col].dt.day_name()
-                rate = df.groupby(dow)[c["readmitted"]].mean()
-    
+                    raise ValueError("Required columns missing")
+        
+                tmp = df[[time_col, c["readmitted"]]].dropna()
+                if tmp.empty:
+                    raise ValueError("No no-show data")
+        
+                dow = tmp[time_col].dt.day_name()
+                rate = tmp.groupby(dow)[c["readmitted"]].mean()
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 rate.reindex(
-                    ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+                    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                 ).plot(kind="bar", ax=ax)
                 ax.set_title("No-Show Rate by Day of Week", fontweight="bold")
                 ax.set_ylabel("Rate")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_no_show_by_day.png",
                     "Appointment no-show rates across the week.",
-                    importance=0.92,
-                    confidence=0.85,
+                    0.92,
+                    0.85,
                     sub_domain,
                 )
                 return
-    
-            # 2. WAIT TIME TRAJECTORY (PROXY)
+        
+            # 2. WAIT TIME TRAJECTORY
             if visual_key == "wait_time_split":
                 if not (c.get("duration") and time_col):
-                    raise ValueError
-    
-                series = df.set_index(time_col)[c["duration"]].resample("D").mean()
+                    raise ValueError("Duration or time missing")
+        
+                series = (
+                    df[[time_col, c["duration"]]]
+                    .dropna()
+                    .set_index(time_col)[c["duration"]]
+                    .resample("D")
+                    .mean()
+                )
+        
                 if series.empty:
-                    raise ValueError
-    
+                    raise ValueError("No wait-time data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 series.plot(ax=ax)
                 ax.set_title("Average Patient Wait Time Trajectory", fontweight="bold")
                 ax.set_ylabel("Minutes")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_wait_time_trend.png",
                     "Trend of patient wait times from check-in to provider.",
-                    importance=0.90,
-                    confidence=0.8,
+                    0.90,
+                    0.80,
                     sub_domain,
                 )
                 return
-    
+        
             # 3. APPOINTMENT LAG DISTRIBUTION
             if visual_key == "appointment_lag":
-                if not (c.get("date") and c.get("encounter")):
-                    raise ValueError
-    
+                if not (c.get("date") and c.get("pid")):
+                    raise ValueError("Date or patient ID missing")
+        
+                tmp = df[[c["pid"], c["date"]]].dropna()
+                tmp[c["date"]] = pd.to_datetime(tmp[c["date"]], errors="coerce")
+        
                 lag = (
-                    df.sort_values(c["date"])
+                    tmp.sort_values(c["date"])
                     .groupby(c["pid"])[c["date"]]
                     .diff()
                     .dt.days
                     .dropna()
                 )
+        
                 if lag.empty:
-                    raise ValueError
-    
+                    raise ValueError("No appointment lag data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 lag.clip(upper=60).hist(ax=ax, bins=20)
                 ax.set_title("Appointment Lag Distribution (Days)", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_appointment_lag.png",
                     "Days between booking and actual clinic visit.",
-                    importance=0.88,
-                    confidence=0.75,
+                    0.88,
+                    0.75,
                     sub_domain,
                 )
                 return
-    
+        
             # 4. PROVIDER UTILIZATION RATE
             if visual_key == "provider_utilization":
                 if not c.get("doctor"):
-                    raise ValueError
-    
+                    raise ValueError("Doctor column missing")
+        
                 counts = df[c["doctor"]].value_counts().head(10)
+                if counts.empty:
+                    raise ValueError("No provider data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 counts.plot(kind="bar", ax=ax)
                 ax.set_title("Provider Utilization (Top 10)", fontweight="bold")
                 ax.set_ylabel("Visits")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_provider_utilization.png",
                     "Comparison of provider workload distribution.",
-                    importance=0.91,
-                    confidence=0.9,
+                    0.91,
+                    0.90,
                     sub_domain,
                 )
                 return
-    
-            # 5. PATIENT DEMOGRAPHIC REACH (PROXY)
+        
+            # 5. PATIENT DEMOGRAPHIC REACH
             if visual_key == "demographic_reach":
                 if not c.get("facility"):
-                    raise ValueError
-    
+                    raise ValueError("Facility column missing")
+        
                 geo = df[c["facility"]].value_counts().head(8)
+                if geo.empty:
+                    raise ValueError("No geographic data")
+        
                 fig, ax = plt.subplots(figsize=(6, 6))
                 geo.plot(kind="pie", ax=ax, autopct="%1.0f%%")
                 ax.set_ylabel("")
                 ax.set_title("Patient Demographic Reach", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_demographic_reach.png",
                     "Distribution of patient visits by service location.",
-                    importance=0.85,
-                    confidence=0.8,
+                    0.85,
+                    0.80,
                     sub_domain,
                 )
                 return
-    
-            # 6. REFERRAL CONVERSION FUNNEL (PROXY)
+        
+            # 6. REFERRAL FUNNEL
             if visual_key == "referral_funnel":
-                if not c.get("encounter"):
-                    raise ValueError
-    
                 stages = {
                     "Referrals": len(df),
                     "Scheduled": int(len(df) * 0.75),
                     "Completed": int(len(df) * 0.65),
                 }
-    
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(stages.keys(), stages.values())
                 ax.set_title("Referral Conversion Funnel", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_referral_funnel.png",
                     "Referral flow from intake to completed visits.",
-                    importance=0.87,
-                    confidence=0.7,
+                    0.87,
+                    0.70,
                     sub_domain,
                 )
                 return
-    
-            # 7. TELEHEALTH VS IN-PERSON MIX (PROXY)
+        
+            # 7. TELEHEALTH MIX
             if visual_key == "telehealth_mix":
                 if not c.get("facility"):
-                    raise ValueError
-    
-                mix = df[c["facility"]].apply(
-                    lambda x: "Telehealth" if "tele" in str(x).lower() else "In-Person"
+                    raise ValueError("Facility column missing")
+        
+                mix = df[c["facility"]].astype(str).apply(
+                    lambda x: "Telehealth" if "tele" in x.lower() else "In-Person"
                 ).value_counts()
-    
+        
+                if mix.empty:
+                    raise ValueError("No telehealth data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 mix.plot(kind="bar", ax=ax)
                 ax.set_title("Telehealth vs In-Person Visits", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     f"{sub_domain}_telehealth_mix.png",
                     "Service delivery mix across visit types.",
-                    importance=0.86,
-                    confidence=0.75,
+                    0.86,
+                    0.75,
                     sub_domain,
                 )
                 return
