@@ -563,18 +563,6 @@ class HealthcareDomain(BaseDomain):
             is_mixed = len(active_subs) > 1
 
         # -------------------------------------------------
-        # MIXED-DOMAIN KPI SAFETY (NAMESPACING HELPER)
-        # -------------------------------------------------
-        def tag_kpi(sub_domain: str, key: str) -> str:
-            """
-            Prevent KPI collisions in mixed-domain datasets.
-            Returns namespaced key if multi-domain, plain key if single domain.
-            """
-            if len(active_subs) > 1:
-                return f"{sub_domain}_{key}"
-            return key
-
-        # -------------------------------------------------
         # BASE KPI CONTEXT
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
@@ -627,18 +615,18 @@ class HealthcareDomain(BaseDomain):
                 total_cost = safe_mean(self.cols.get("cost"))
 
                 kpis.update({
-                    tag_kpi(sub,"avg_los"): avg_los,
-                    tag_kpi(sub,"readmission_rate"): safe_rate(self.cols.get("readmitted")),
-                    tag_kpi(sub,"mortality_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"long_stay_rate"): (
+                    "avg_los": avg_los,
+                    "readmission_rate": safe_rate(self.cols.get("readmitted")),
+                    "mortality_rate": safe_rate(self.cols.get("flag")),
+                    "long_stay_rate": (
                         (df[self.cols["los"]] > 7).mean()
                         if self.cols.get("los") in df.columns else None
                     ),
-                    tag_kpi(sub,"avg_cost_per_day"): (
+                    "avg_cost_per_day": (
                         total_cost / avg_los if avg_los and total_cost else None
                     ),
-                    tag_kpi(sub,"labor_cost_per_day"): total_cost,
-                    tag_kpi(sub,"er_boarding_time"): safe_mean(self.cols.get("duration")),
+                    "labor_cost_per_day": total_cost,
+                    "er_boarding_time": safe_mean(self.cols.get("duration")),
                 })
 
                 bed_col = self.cols.get("bed_id")
@@ -676,13 +664,13 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    tag_kpi(sub,"no_show_rate"): safe_rate(self.cols.get("readmitted")),
-                    tag_kpi(sub,"avg_wait_time"): safe_mean(self.cols.get("duration")),
-                    tag_kpi(sub,"provider_productivity"): (
+                    "no_show_rate": safe_rate(self.cols.get("readmitted")),
+                    "avg_wait_time": safe_mean(self.cols.get("duration")),
+                    "provider_productivity": (
                         visits / providers if providers and providers > 0 else None
                     ),
-                    tag_kpi(sub,"visit_cycle_time"): safe_mean(self.cols.get("duration")),
-                    tag_kpi(sub,"visits_per_provider"): (
+                    "visit_cycle_time": safe_mean(self.cols.get("duration")),
+                    "visits_per_provider": (
                         visits / providers if providers and providers > 0 else None
                     ),
                 })
@@ -697,13 +685,13 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    tag_kpi(sub,"avg_tat"): safe_mean(self.cols.get("duration")),
-                    tag_kpi(sub,"critical_alert_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"specimen_rejection_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"tests_per_fte"): (
+                    "avg_tat": safe_mean(self.cols.get("duration")),
+                    "critical_alert_rate": safe_rate(self.cols.get("flag")),
+                    "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
+                    "tests_per_fte": (
                         tests / staff if staff and staff > 0 else None
                     ),
-                    tag_kpi(sub,"cost_per_test"): safe_mean(self.cols.get("cost")),
+                    "cost_per_test": safe_mean(self.cols.get("cost")),
                 })
             
             # ---------------- PHARMACY ----------------
@@ -711,11 +699,11 @@ class HealthcareDomain(BaseDomain):
                 fills = volume
             
                 kpis.update({
-                    tag_kpi(sub,"days_supply_on_hand"): safe_mean(self.cols.get("supply")),
-                    tag_kpi(sub,"cost_per_rx"): safe_mean(self.cols.get("cost")),
-                    tag_kpi(sub,"med_error_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"rx_volume"): fills,
-                   tag_kpi(sub, "avg_patient_wait_time"): safe_mean(self.cols.get("duration")),
+                    "days_supply_on_hand": safe_mean(self.cols.get("supply")),
+                    "cost_per_rx": safe_mean(self.cols.get("cost")),
+                    "med_error_rate": safe_rate(self.cols.get("flag")),
+                    "rx_volume": fills,
+                    "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
                 })
             
             # ---------------- PUBLIC HEALTH ----------------
@@ -728,19 +716,19 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    tag_kpi(sub,"incidence_per_100k"): (
+                    "incidence_per_100k": (
                         (cases / pop) * 100_000 if pop and cases else None
                     ),
-                    tag_kpi(sub,"screening_coverage_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"chronic_readmission_rate"): safe_rate(self.cols.get("readmitted")),
-                    tag_kpi(sub,"immunization_rate"): safe_rate(self.cols.get("flag")),
-                    tag_kpi(sub,"cost_per_member"): safe_mean(self.cols.get("cost")),
+                    "screening_coverage_rate": safe_rate(self.cols.get("flag")),
+                    "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
+                    "immunization_rate": safe_rate(self.cols.get("flag")),
+                    "cost_per_member": safe_mean(self.cols.get("cost")),
                 })
             
-        # -------------------------------------------------
-        # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
-        # -------------------------------------------------
-        kpis["_kpi_capabilities"] = {
+            # -------------------------------------------------
+            # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
+            # -------------------------------------------------
+            kpis["_kpi_capabilities"] = {
             # Time / Flow
             "avg_los": Capability.TIME_FLOW.value,
             "avg_wait_time": Capability.TIME_FLOW.value,
@@ -773,30 +761,30 @@ class HealthcareDomain(BaseDomain):
             "long_stay_rate": Capability.VARIANCE.value,
         }
             
-        # -------------------------------------------------
-        # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
-        # -------------------------------------------------
-        kpis["_confidence"] = {}
+            # -------------------------------------------------
+            # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
+            # -------------------------------------------------
+            kpis["_confidence"] = {}
             
-        # weakest active sub-domain defines confidence ceiling
-        min_sub_conf = min(active_subs.values()) if active_subs else 0.3
+            # weakest active sub-domain defines confidence ceiling
+            min_sub_conf = min(active_subs.values()) if active_subs else 0.3
             
-        for key, value in kpis.items():
-            if key.startswith("_"):
-                continue
+            for key, value in kpis.items():
+                if key.startswith("_"):
+                    continue
             
-            if key.endswith("_placeholder_kpi"):
-                kpis["_confidence"][key] = 0.0
-                continue
+                if key.endswith("_placeholder_kpi"):
+                    kpis["_confidence"][key] = 0.0
+                    continue
             
-            if isinstance(value, (int, float)):
-                weighted = 0.85 * min_sub_conf
-                kpis["_confidence"][key] = round(
-                    min(0.95, max(0.3, weighted)),
-                    2
-                )
-            else:
-                kpis["_confidence"][key] = 0.4
+                if isinstance(value, (int, float)):
+                    weighted = 0.85 * min_sub_conf
+                    kpis["_confidence"][key] = round(
+                        min(0.95, max(0.3, weighted)),
+                        2
+                    )
+                else:
+                    kpis["_confidence"][key] = 0.4
 
         self._last_kpis = kpis
 
@@ -812,27 +800,7 @@ class HealthcareDomain(BaseDomain):
 
             for i in range(max(0, 5 - len(present))):
                 kpis[f"{sub}_placeholder_kpi_{i+1}"] = None
-        # -------------------------------------------------
-        # KPI EVIDENCE COVERAGE (EXECUTIVE TRUST SIGNAL)
-        # -------------------------------------------------
-        kpis["_evidence"] = {}
-        
-        for key in kpis:
-            if key.startswith("_"):
-                continue
-            
-            # Extract column name from KPI key
-            col = self.cols.get(
-                key.replace("avg_", "").replace("_rate", "").replace("_score", ""), 
-                None
-            )
-            
-            if col and col in df.columns:
-                coverage = round(float(df[col].notna().mean()), 2)
-                kpis["_evidence"][key] = coverage
-            else:
-                kpis["_evidence"][key] = 0.0
-        
+
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
@@ -909,7 +877,7 @@ class HealthcareDomain(BaseDomain):
             plt.close(fig)
     
             final_conf = round(
-                min(0.95, max(0.4, base_confidence * sub_domain_weight(sub_domain))),
+                min(0.95, base_confidence * sub_domain_weight(sub_domain)),
                 2
             )
     
@@ -2169,8 +2137,6 @@ class HealthcareDomain(BaseDomain):
         ]
     
         for sub, score in active_subs.items():
-            if score < 0.4:
-                continue
             sub_insights: List[Dict[str, Any]] = []
     
             # =================================================
