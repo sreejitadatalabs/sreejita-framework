@@ -368,7 +368,7 @@ def infer_healthcare_subdomains(
 
         HealthcareSubDomain.CLINIC.value: (
             min(0.85, 0.3 * clinic_signals)
-            if clinic_signals >= 2 else 0.0
+            if clinic_signals >= 2 and diagnostics_signals < 2 else 0.0
         ),
 
         HealthcareSubDomain.DIAGNOSTICS.value: (
@@ -615,7 +615,6 @@ class HealthcareDomain(BaseDomain):
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
         for sub in active_subs:
-            prefix = f"{sub}_" if is_mixed else ""
 
             # ---------------- HOSPITAL ----------------
             if sub == HealthcareSubDomain.HOSPITAL.value:
@@ -623,22 +622,22 @@ class HealthcareDomain(BaseDomain):
                 total_cost = safe_mean(self.cols.get("cost"))
 
                 kpis.update({
-                    f"{prefix}avg_los": avg_los,
-                    f"{prefix}readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    f"{prefix}mortality_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}long_stay_rate": (
+                    "avg_los": avg_los,
+                    "readmission_rate": safe_rate(self.cols.get("readmitted")),
+                    "mortality_rate": safe_rate(self.cols.get("flag")),
+                    "long_stay_rate": (
                         (df[self.cols["los"]] > 7).mean()
                         if self.cols.get("los") in df.columns else None
                     ),
-                    f"{prefix}avg_cost_per_day": (
+                    "avg_cost_per_day": (
                         total_cost / avg_los if avg_los and total_cost else None
                     ),
-                    f"{prefix}labor_cost_per_day": total_cost,
-                    f"{prefix}er_boarding_time": safe_mean(self.cols.get("duration")),
+                    "labor_cost_per_day": total_cost,
+                    "er_boarding_time": safe_mean(self.cols.get("duration")),
                 })
 
                 bed_col = self.cols.get("bed_id")
-                kpis[f"{prefix}bed_occupancy_rate"] = (
+                kpis["bed_occupancy_rate"] = (
                     df[bed_col].nunique() / volume
                     if bed_col and bed_col in df.columns and volume > 0
                     else None
@@ -654,13 +653,13 @@ class HealthcareDomain(BaseDomain):
                 ):
                     grouped = df.groupby(fac_col)[los_col].mean()
                     mean = grouped.mean()
-                    kpis[f"{prefix}facility_variance_score"] = (
+                    kpis["facility_variance_score"] = (
                         min(2.0, grouped.std() / mean)
                         if len(grouped) > 1 and mean > 1
                         else None
                     )
                 else:
-                    kpis[f"{prefix}facility_variance_score"] = None
+                    kpis["facility_variance_score"] = None
 
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
@@ -672,13 +671,13 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    f"{prefix}no_show_rate": safe_rate(self.cols.get("readmitted")),
-                    f"{prefix}avg_wait_time": safe_mean(self.cols.get("duration")),
-                    f"{prefix}provider_productivity": (
+                    "no_show_rate": safe_rate(self.cols.get("readmitted")),
+                    "avg_wait_time": safe_mean(self.cols.get("duration")),
+                    "provider_productivity": (
                         visits / providers if providers and providers > 0 else None
                     ),
-                    f"{prefix}visit_cycle_time": safe_mean(self.cols.get("duration")),
-                    f"{prefix}visits_per_provider": (
+                    "visit_cycle_time": safe_mean(self.cols.get("duration")),
+                    "visits_per_provider": (
                         visits / providers if providers and providers > 0 else None
                     ),
                 })
@@ -693,13 +692,13 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    f"{prefix}avg_tat": safe_mean(self.cols.get("duration")),
-                    f"{prefix}critical_alert_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}specimen_rejection_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}tests_per_fte": (
+                    "avg_tat": safe_mean(self.cols.get("duration")),
+                    "critical_alert_rate": safe_rate(self.cols.get("flag")),
+                    "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
+                    "tests_per_fte": (
                         tests / staff if staff and staff > 0 else None
                     ),
-                    f"{prefix}cost_per_test": safe_mean(self.cols.get("cost")),
+                    "cost_per_test": safe_mean(self.cols.get("cost")),
                 })
             
             # ---------------- PHARMACY ----------------
@@ -707,11 +706,11 @@ class HealthcareDomain(BaseDomain):
                 fills = volume
             
                 kpis.update({
-                    f"{prefix}days_supply_on_hand": safe_mean(self.cols.get("supply")),
-                    f"{prefix}cost_per_rx": safe_mean(self.cols.get("cost")),
-                    f"{prefix}med_error_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}rx_volume": fills,
-                    f"{prefix}avg_patient_wait_time": safe_mean(self.cols.get("duration")),
+                    "days_supply_on_hand": safe_mean(self.cols.get("supply")),
+                    "cost_per_rx": safe_mean(self.cols.get("cost")),
+                    "med_error_rate": safe_rate(self.cols.get("flag")),
+                    "rx_volume": fills,
+                    "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
                 })
             
             # ---------------- PUBLIC HEALTH ----------------
@@ -724,13 +723,13 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    f"{prefix}incidence_per_100k": (
+                    "incidence_per_100k": (
                         (cases / pop) * 100_000 if pop and cases else None
                     ),
-                    f"{prefix}screening_coverage_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
-                    f"{prefix}immunization_rate": safe_rate(self.cols.get("flag")),
-                    f"{prefix}cost_per_member": safe_mean(self.cols.get("cost")),
+                    "screening_coverage_rate": safe_rate(self.cols.get("flag")),
+                    "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
+                    "immunization_rate": safe_rate(self.cols.get("flag")),
+                    "cost_per_member": safe_mean(self.cols.get("cost")),
                 })
             
         # -------------------------------------------------
@@ -768,21 +767,7 @@ class HealthcareDomain(BaseDomain):
             "facility_variance_score": Capability.VARIANCE.value,
             "long_stay_rate": Capability.VARIANCE.value,
         }
-
-        # -------------------------------------------------
-        # EXPAND KPI CAPABILITIES FOR NAMESPACED KPIs
-        # -------------------------------------------------
-        expanded_caps = {}
-        
-        for k, cap in kpis["_kpi_capabilities"].items():
-            expanded_caps[k] = cap
-            for sub in active_subs:
-                namespaced = f"{sub}_{k}"
-                if namespaced in kpis:
-                    expanded_caps[namespaced] = cap
-        
-        kpis["_kpi_capabilities"] = expanded_caps
-
+            
         # -------------------------------------------------
         # KPI EVIDENCE COVERAGE (FORENSIC)
         # -------------------------------------------------
@@ -803,12 +788,7 @@ class HealthcareDomain(BaseDomain):
                 if c and c in df.columns
             ]
             if coverages:
-                val = round(float(max(coverages)), 2)
-                kpis["_evidence"][k] = val
-                for sub in active_subs:
-                    nk = f"{sub}_{k}"
-                    if nk in kpis:
-                        kpis["_evidence"][nk] = val
+                kpis["_evidence"][k] = round(float(max(coverages)), 2)
 
         # -------------------------------------------------
         # KPI INFERENCE TYPE (AUDIT-READY)
@@ -968,6 +948,7 @@ class HealthcareDomain(BaseDomain):
     
             for visual_key in visual_keys:
                 try:
+                    # isolate df per visual to prevent mutation bleed
                     self._render_visual_by_key(
                         visual_key=visual_key,
                         df=df.copy(deep=False),
@@ -975,7 +956,8 @@ class HealthcareDomain(BaseDomain):
                         sub_domain=sub,
                         register_visual=register_visual,
                     )
-                except ValueError:
+                except Exception:
+                    # HARD RULE: visuals must never crash pipeline
                     continue
     
         # -------------------------------------------------
@@ -2183,8 +2165,6 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-            
-            raise ValueError(f"Unhandled visual key: {visual_key}")
     
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
@@ -2401,7 +2381,7 @@ class HealthcareDomain(BaseDomain):
                         "Available indicators remain within expected ranges "
                         "with no statistically significant deviations observed."
                     ),
-                    "confidence": round(0.4 + 0.2 * score, 2),
+                    "confidence": 0.45,
                 })
                 filler_idx += 1
     
