@@ -1,5 +1,5 @@
 # =====================================================
-# BASE DOMAIN — UNIVERSAL (FINAL, FIXED)
+# BASE DOMAIN — UNIVERSAL (FINAL, GOVERNED)
 # Sreejita Framework v3.5.x
 # =====================================================
 
@@ -23,9 +23,10 @@ class BaseDomain(ABC):
     Universal BaseDomain contract.
 
     GUARANTEES:
-    - ≥2 visuals always (PDF-safe)
-    - Executive cognition always available
-    - Never crashes reporting
+    - Domain intelligence only (no orchestration)
+    - ≥2 visuals ALWAYS (PDF-safe)
+    - Executive cognition ALWAYS present
+    - Never crashes reporting layer
     """
 
     name: str = "generic"
@@ -35,22 +36,34 @@ class BaseDomain(ABC):
         self._last_kpis: Optional[Dict[str, Any]] = None
 
     # --------------------------------------------------
-    # OPTIONAL VALIDATION
+    # OPTIONAL VALIDATION (SAFE DEFAULT)
     # --------------------------------------------------
     def validate_data(self, df: pd.DataFrame) -> bool:
+        """
+        Optional schema validation.
+        Default: always valid.
+        """
         return True
 
     # --------------------------------------------------
     # OPTIONAL PREPROCESS
     # --------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Optional preprocessing hook.
+        Default: passthrough.
+        """
         return df
 
     # --------------------------------------------------
-    # REQUIRED CONTRACTS
+    # REQUIRED DOMAIN CONTRACTS
     # --------------------------------------------------
     @abstractmethod
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Core KPI computation.
+        MUST return a dictionary.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -61,6 +74,9 @@ class BaseDomain(ABC):
         *args,
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """
+        Generate insights from KPIs.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -72,6 +88,9 @@ class BaseDomain(ABC):
         *args,
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """
+        Generate recommendations.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -80,10 +99,13 @@ class BaseDomain(ABC):
         df: pd.DataFrame,
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
+        """
+        Generate visual intelligence.
+        """
         raise NotImplementedError
 
     # --------------------------------------------------
-    # 🔒 UNIVERSAL VISUAL SAFETY NET (PDF-GUARANTEED)
+    # 🔒 UNIVERSAL VISUAL SAFETY NET (PDF GUARANTEE)
     # --------------------------------------------------
     def ensure_minimum_visuals(
         self,
@@ -92,19 +114,27 @@ class BaseDomain(ABC):
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
-        HARD GUARANTEE:
-        - Always returns ≥2 visuals
+        HARD GOVERNANCE RULE:
+        - ALWAYS returns ≥2 visuals
         - Each visual has confidence ≥0.3
-        - PDF renderer will never reject
+        - PDF renderer will NEVER reject
+
+        This is the FINAL safety layer.
         """
 
         visuals = visuals if isinstance(visuals, list) else []
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        def add_fallback(index: int, title: str, y, caption: str):
+        def _register_fallback(
+            index: int,
+            labels,
+            values,
+            title: str,
+            caption: str,
+        ):
             fig, ax = plt.subplots(figsize=(6, 4))
-            ax.bar(title, y)
+            ax.bar(labels, values)
             ax.set_title(title, fontweight="bold")
 
             path = output_dir / f"{self.name}_fallback_{index}.png"
@@ -120,33 +150,44 @@ class BaseDomain(ABC):
             })
 
         try:
-            # Fallback #1 — Dataset size
+            # --------------------------------------------------
+            # Fallback #1 — Dataset Size
+            # --------------------------------------------------
             if len(visuals) < 1:
-                add_fallback(
-                    1,
-                    ["Records"],
-                    [len(df)],
-                    "Dataset size overview (fallback evidence).",
+                _register_fallback(
+                    index=1,
+                    labels=["Records"],
+                    values=[len(df)],
+                    title="Dataset Size Overview",
+                    caption="Total number of records (fallback evidence).",
                 )
 
-            # Fallback #2 — Column completeness
+            # --------------------------------------------------
+            # Fallback #2 — Data Completeness
+            # --------------------------------------------------
             if len(visuals) < 2:
-                completeness = df.notna().mean().mean()
-                add_fallback(
-                    2,
-                    ["Completeness"],
-                    [round(completeness, 2)],
-                    "Overall data completeness indicator (fallback evidence).",
+                completeness = (
+                    1 - df.isna().mean().mean()
+                    if not df.empty
+                    else 0.0
+                )
+
+                _register_fallback(
+                    index=2,
+                    labels=["Completeness"],
+                    values=[round(completeness, 2)],
+                    title="Data Completeness Indicator",
+                    caption="Overall data completeness ratio (fallback evidence).",
                 )
 
         except Exception:
-            # Absolute safety: never crash
+            # Absolute safety: BaseDomain must never crash execution
             pass
 
         return visuals[:6]
 
     # --------------------------------------------------
-    # 🧠 EXECUTIVE COGNITION
+    # 🧠 EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
     # --------------------------------------------------
     def build_executive(
         self,
@@ -154,13 +195,22 @@ class BaseDomain(ABC):
         insights: List[Dict[str, Any]],
         recommendations: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        """
+        Universal executive cognition builder.
 
+        GUARANTEES:
+        - Global executive payload
+        - Per-sub-domain executive payloads (if present)
+        """
+
+        # ---------------- GLOBAL EXECUTIVE ----------------
         executive = build_executive_payload(
             kpis=kpis,
             insights=insights or [],
             recommendations=recommendations or [],
         )
 
+        # ---------------- SUB-DOMAIN EXECUTIVES ----------------
         sub_domains = kpis.get("sub_domains")
 
         if isinstance(sub_domains, dict) and sub_domains:
@@ -175,3 +225,35 @@ class BaseDomain(ABC):
             executive["executive_by_sub_domain"] = {}
 
         return executive
+
+    # --------------------------------------------------
+    # OPTIONAL LEGACY PIPELINE
+    # --------------------------------------------------
+    def run(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Optional legacy execution pipeline.
+        Orchestrator may bypass this.
+        """
+
+        if not self.validate_data(df):
+            raise ValueError(f"Data validation failed for {self.name}")
+
+        df = self.preprocess(df)
+        kpis = self.calculate_kpis(df)
+        insights = self.generate_insights(df, kpis)
+        recommendations = self.generate_recommendations(df, kpis, insights)
+
+        executive = self.build_executive(
+            kpis=kpis,
+            insights=insights,
+            recommendations=recommendations,
+        )
+
+        return {
+            "domain": self.name,
+            "description": self.description,
+            "kpis": kpis,
+            "insights": insights,
+            "recommendations": recommendations,
+            "executive": executive,
+        }
