@@ -32,7 +32,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError("Invalid payload for PDF rendering")
 
-    executive = payload.get("executive", {})
+    executive = payload.get("executive")
     if not isinstance(executive, dict):
         executive = {}
 
@@ -50,7 +50,7 @@ def normalize_pdf_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =====================================================
-# FORMAT HELPERS
+# FORMAT HELPERS (BOARD SAFE)
 # =====================================================
 
 def format_value(v: Any) -> str:
@@ -74,10 +74,10 @@ def confidence_badge(conf: Optional[float]) -> str:
         return "—"
     conf = float(conf)
     if conf >= 0.85:
-        return "🟢 High"
+        return "High"
     if conf >= 0.70:
-        return "🟡 Medium"
-    return "🔴 Low"
+        return "Medium"
+    return "Low"
 
 
 def confidence_color(conf: Optional[float]):
@@ -101,7 +101,7 @@ class ExecutivePDFRenderer:
 
     GUARANTEES:
     - Board-safe formatting
-    - Minimum evidence enforcement
+    - Minimum visual evidence enforcement
     - Sub-domain executive cognition support
     - ZERO intelligence computation
     """
@@ -115,7 +115,6 @@ class ExecutivePDFRenderer:
     def render(self, payload: Dict[str, Any], output_path: Path) -> Path:
         data = normalize_pdf_payload(payload)
 
-        # ------------------ Visual filtering ------------------
         visuals = [
             v for v in data["visuals"]
             if isinstance(v, dict)
@@ -123,7 +122,7 @@ class ExecutivePDFRenderer:
             and float(v.get("confidence", 0)) >= 0.3
         ]
 
-        # 🔒 GOVERNANCE: PDF never hard-fails visuals
+        # 🔒 GOVERNANCE RULE
         if len(visuals) < 2:
             raise RuntimeError(
                 "PDF rejected: minimum 2 validated visuals required."
@@ -222,18 +221,18 @@ class ExecutivePDFRenderer:
             rows.append([
                 k.get("name", "—"),
                 format_value(k.get("value")),
-                f"{confidence_badge(conf)} ({int(conf*100)}%)",
+                f"{confidence_badge(conf)} ({int(conf * 100)}%)",
             ])
             bg_styles.append(
                 ("BACKGROUND", (0, idx), (-1, idx), confidence_color(conf))
             )
 
-        table = Table(rows, colWidths=[3.5*inch, 2*inch, 1.5*inch])
+        table = Table(rows, colWidths=[3.5 * inch, 2 * inch, 1.5 * inch])
         table.setStyle(TableStyle([
-            ("GRID", (0,0), (-1,-1), 0.5, self.BORDER),
-            ("BACKGROUND", (0,0), (-1,0), self.HEADER_BG),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-            ("PADDING", (0,0), (-1,-1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.5, self.BORDER),
+            ("BACKGROUND", (0, 0), (-1, 0), self.HEADER_BG),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("PADDING", (0, 0), (-1, -1), 8),
             *bg_styles,
         ]))
 
@@ -242,7 +241,7 @@ class ExecutivePDFRenderer:
         story.append(table)
 
         # =================================================
-        # SUB-DOMAIN EXECUTIVE SECTIONS
+        # SUB-DOMAIN EXECUTIVE SECTIONS (OPTIONAL)
         # =================================================
         sub_execs = data["executive_by_sub_domain"]
         if isinstance(sub_execs, dict) and sub_execs:
@@ -261,9 +260,10 @@ class ExecutivePDFRenderer:
                 story.append(
                     Paragraph(sub.replace("_", " ").title(), styles["SR_Section"])
                 )
-                story.append(
-                    Paragraph(payload.get("executive_brief", ""), styles["SR_Body"])
-                )
+
+                brief = payload.get("executive_brief")
+                if brief:
+                    story.append(Paragraph(brief, styles["SR_Body"]))
 
                 board = payload.get("board_readiness", {})
                 story.append(
@@ -283,7 +283,7 @@ class ExecutivePDFRenderer:
             story.append(PageBreak())
             story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
 
-            for v in visuals[i:i+2]:
+            for v in visuals[i:i + 2]:
                 img_path = Path(v["path"])
                 img = utils.ImageReader(str(img_path))
                 iw, ih = img.getSize()
@@ -323,7 +323,7 @@ class ExecutivePDFRenderer:
                     )
                 )
                 story.append(
-                    Paragraph(ins.get("so_what",""), styles["SR_Body"])
+                    Paragraph(ins.get("so_what", ""), styles["SR_Body"])
                 )
                 story.append(Spacer(1, 8))
 
