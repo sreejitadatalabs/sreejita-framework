@@ -291,18 +291,22 @@ HEALTHCARE_RECOMMENDATION_MAP: Dict[str, List[str]] = {
 # SAFE SIGNAL DETECTION (UNIVERSAL, DETERMINISTIC)
 # =====================================================
 
-def _has_signal(df: pd.DataFrame, col: Optional[str]) -> bool:
+def _has_signal(
+    df: pd.DataFrame,
+    col: Optional[str],
+    min_coverage: float = 0.2,
+) -> bool:
     """
-    Returns True if a resolved column exists and has at least one non-null value.
-    Strict, deterministic, side-effect free.
+    Column must exist AND meet minimum non-null coverage.
     """
-    return bool(
-        col
-        and isinstance(col, str)
-        and col in df.columns
-        and df[col].notna().any()
-    )
+    if not (col and isinstance(col, str) and col in df.columns):
+        return False
 
+    if len(df) == 0:
+        return False
+
+    coverage = df[col].notna().sum() / len(df)
+    return coverage >= min_coverage
 
 # =====================================================
 # UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE
@@ -725,46 +729,60 @@ class HealthcareDomain(BaseDomain):
             # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
             # -------------------------------------------------
             kpis["_kpi_capabilities"] = {
-                # Time
-                "avg_los": Capability.TIME_FLOW.value,
-                "avg_wait_time": Capability.TIME_FLOW.value,
-                "avg_tat": Capability.TIME_FLOW.value,
-                "visit_cycle_time": Capability.TIME_FLOW.value,
-            
-                # Cost
-                "cost_per_rx": Capability.COST.value,
-                "cost_per_test": Capability.COST.value,
-                "cost_per_member": Capability.COST.value,
-            
-                # Quality
-                "no_show_rate": Capability.QUALITY.value,
-                "readmission_rate": Capability.QUALITY.value,
-                "mortality_rate": Capability.QUALITY.value,
-                "specimen_rejection_rate": Capability.QUALITY.value,
-                "med_error_rate": Capability.QUALITY.value,
-            
-                # Volume / Access
-                "rx_volume": Capability.VOLUME.value,
-                "tests_per_fte": Capability.VOLUME.value,
-                "visits_per_provider": Capability.ACCESS.value,
-                "incidence_per_100k": Capability.VOLUME.value,
-            
-                # Variance
-                "facility_variance_score": Capability.VARIANCE.value,
-            }
+            # Time / Flow
+            "avg_los": Capability.TIME_FLOW.value,
+            "avg_wait_time": Capability.TIME_FLOW.value,
+            "avg_tat": Capability.TIME_FLOW.value,
+            "visit_cycle_time": Capability.TIME_FLOW.value,
+            "er_boarding_time": Capability.TIME_FLOW.value,
+        
+            # Cost
+            "cost_per_rx": Capability.COST.value,
+            "cost_per_test": Capability.COST.value,
+            "cost_per_member": Capability.COST.value,
+            "avg_cost_per_day": Capability.COST.value,
+            "labor_cost_per_day": Capability.COST.value,
+        
+            # Quality
+            "no_show_rate": Capability.QUALITY.value,
+            "readmission_rate": Capability.QUALITY.value,
+            "mortality_rate": Capability.QUALITY.value,
+            "specimen_rejection_rate": Capability.QUALITY.value,
+            "med_error_rate": Capability.QUALITY.value,
+        
+            # Volume / Access
+            "rx_volume": Capability.VOLUME.value,
+            "tests_per_fte": Capability.VOLUME.value,
+            "visits_per_provider": Capability.ACCESS.value,
+            "incidence_per_100k": Capability.VOLUME.value,
+        
+            # Variance
+            "facility_variance_score": Capability.VARIANCE.value,
+            "long_stay_rate": Capability.VARIANCE.value,
+        }
             
             # -------------------------------------------------
-            # KPI CONFIDENCE (PLACEHOLDER SAFE)
+            # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
             # -------------------------------------------------
             kpis["_confidence"] = {}
+            
+            # weakest active sub-domain defines confidence ceiling
+            min_sub_conf = min(active_subs.values()) if active_subs else 0.3
             
             for key, value in kpis.items():
                 if key.startswith("_"):
                     continue
+            
                 if key.endswith("_placeholder_kpi"):
                     kpis["_confidence"][key] = 0.0
-                elif isinstance(value, (int, float)):
-                    kpis["_confidence"][key] = 0.85
+                    continue
+            
+                if isinstance(value, (int, float)):
+                    weighted = 0.85 * min_sub_conf
+                    kpis["_confidence"][key] = round(
+                        min(0.95, max(0.3, weighted)),
+                        2
+                    )
                 else:
                     kpis["_confidence"][key] = 0.4
 
@@ -837,10 +855,8 @@ class HealthcareDomain(BaseDomain):
         # SUB-DOMAIN CONFIDENCE WEIGHTING
         # -------------------------------------------------
         def sub_domain_weight(sub: str) -> float:
-            return round(
-                min(1.0, max(0.4, float(sub_scores.get(sub, 0.5)))),
-                2
-            )
+            score = float(sub_scores.get(sub, 0.3))
+            return round(min(1.0, max(0.15, score)), 2)
     
         # -------------------------------------------------
         # VISUAL REGISTRATION (AUTHORITATIVE CONTRACT)
