@@ -368,7 +368,7 @@ def infer_healthcare_subdomains(
 
         HealthcareSubDomain.CLINIC.value: (
             min(0.85, 0.3 * clinic_signals)
-            if clinic_signals >= 2 and diagnostics_signals < 2 else 0.0
+            if clinic_signals >= 2 else 0.0
         ),
 
         HealthcareSubDomain.DIAGNOSTICS.value: (
@@ -660,7 +660,7 @@ class HealthcareDomain(BaseDomain):
                         else None
                     )
                 else:
-                    kpis["facility_variance_score"] = None
+                    kpis[f"{prefix}facility_variance_score"] = None
 
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
@@ -768,7 +768,21 @@ class HealthcareDomain(BaseDomain):
             "facility_variance_score": Capability.VARIANCE.value,
             "long_stay_rate": Capability.VARIANCE.value,
         }
-            
+
+        # -------------------------------------------------
+        # EXPAND KPI CAPABILITIES FOR NAMESPACED KPIs
+        # -------------------------------------------------
+        expanded_caps = {}
+        
+        for k, cap in kpis["_kpi_capabilities"].items():
+            expanded_caps[k] = cap
+            for sub in active_subs:
+                namespaced = f"{sub}_{k}"
+                if namespaced in kpis:
+                    expanded_caps[namespaced] = cap
+        
+        kpis["_kpi_capabilities"] = expanded_caps
+
         # -------------------------------------------------
         # KPI EVIDENCE COVERAGE (FORENSIC)
         # -------------------------------------------------
@@ -789,7 +803,12 @@ class HealthcareDomain(BaseDomain):
                 if c and c in df.columns
             ]
             if coverages:
-                kpis["_evidence"][k] = round(float(max(coverages)), 2)
+                val = round(float(max(coverages)), 2)
+                kpis["_evidence"][k] = val
+                for sub in active_subs:
+                    nk = f"{sub}_{k}"
+                    if nk in kpis:
+                        kpis["_evidence"][nk] = val
 
         # -------------------------------------------------
         # KPI INFERENCE TYPE (AUDIT-READY)
@@ -2382,7 +2401,7 @@ class HealthcareDomain(BaseDomain):
                         "Available indicators remain within expected ranges "
                         "with no statistically significant deviations observed."
                     ),
-                    "confidence": 0.45,
+                    "confidence": round(0.4 + 0.2 * score, 2),
                 })
                 filler_idx += 1
     
