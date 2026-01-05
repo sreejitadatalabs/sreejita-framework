@@ -448,7 +448,6 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
-    # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = len(df)
     
@@ -649,11 +648,23 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # KPI CONFIDENCE
         # -------------------------------------------------
-        kpis["_confidence"] = {
-            k: 0.9 if isinstance(v, (int, float)) and not pd.isna(v) else 0.4
-            for k, v in kpis.items()
-            if not k.startswith("_")
-        }
+        kpis["_confidence"] = {}
+        cap_map = kpis.get("_kpi_capabilities", {}) or {}
+        
+        for key, value in kpis.items():
+            if key.startswith("_"):
+                continue
+            if key.endswith("_placeholder_kpi"):
+                kpis["_confidence"][key] = 0.3
+            elif key in cap_map:
+                if isinstance(value, (int, float)) and not pd.isna(value):
+                    kpis["_confidence"][key] = 0.85
+                else:
+                    kpis["_confidence"][key] = 0.4
+            elif isinstance(value, (int, float)) and not pd.isna(value):
+                kpis["_confidence"][key] = 0.65
+            else:
+                kpis["_confidence"][key] = 0.4
     
         self._last_kpis = kpis
     
@@ -1659,7 +1670,7 @@ class HealthcareDomain(BaseDomain):
                 if isinstance(long_stay, (int, float)) and long_stay >= 0.2:
                     sub_insights.append({
                         "sub_domain": sub,
-                        "level": "WARNING",
+                        "level": "RISK",
                         "title": "Emerging Discharge Delays",
                         "so_what": (
                             f"{long_stay:.1%} of patients exceed acceptable stay thresholds, "
