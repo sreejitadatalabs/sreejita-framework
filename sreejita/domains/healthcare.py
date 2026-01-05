@@ -594,8 +594,12 @@ class HealthcareDomain(BaseDomain):
             return float(s.mean()) if s.notna().any() else None
 
         def safe_rate(col):
-            return safe_mean(col)
-
+            if not col or col not in df.columns:
+                return None
+            s = pd.to_numeric(df[col], errors="coerce")
+            if s.dropna().empty:
+                return None
+            return float((s > 0).mean())
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
@@ -639,8 +643,8 @@ class HealthcareDomain(BaseDomain):
                     grouped = df.groupby(fac_col)[los_col].mean()
                     mean = grouped.mean()
                     kpis["facility_variance_score"] = (
-                        grouped.std() / mean
-                        if len(grouped) > 1 and mean > 0.01
+                        min(2.0, grouped.std() / mean)
+                        if len(grouped) > 1 and mean > 1
                         else None
                     )
                 else:
@@ -1956,7 +1960,7 @@ class HealthcareDomain(BaseDomain):
                 register_visual(
                     fig,
                     f"{sub_domain}_prevalence_age.png",
-                    "Relative prevalence across demographic age groups (proxy).",
+                    "Prevalence by Demographic Group (Proxy).",
                     0.90,
                     0.75,
                     sub_domain,
@@ -2094,8 +2098,6 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-        # If visual key not handled
-        raise ValueError(f"Unhandled visual key: {visual_key}")
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
