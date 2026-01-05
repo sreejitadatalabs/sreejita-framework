@@ -122,31 +122,45 @@ def compute_board_readiness_score(kpis, insights):
     # Count ONLY high-confidence KPIs (exclude placeholders)
     high_conf_kpis = [
         v for k, v in conf_map.items() 
-        if isinstance(v, (int, float)) and v >= 0.7  # Changed from 0.6 to 0.7
-        and not k.endswith("_placeholder_kpi")  # ← EXCLUDE PLACEHOLDERS
+        if isinstance(v, (int, float)) 
+        and v >= 0.7
+        and not k.endswith("_placeholder_kpi")
     ]
     
-    evidence_score = (len(high_conf_kpis) / 6) * 40  # Changed divisor from 9 to 6
-    
-    # Coverage penalty: if < 3 real KPIs, cap score at 65
-    if len(high_conf_kpis) < 3:
-        coverage_score = 15  # Reduced from 25
-    else:
-        coverage_score = 25
-    
-    # Risk penalties (BOTH WARNING and RISK)
+    # Evidence strength (max 40)
+    evidence_score = (len(high_conf_kpis) / 6) * 40
+
+    # Coverage score
+    coverage_score = 25 if len(high_conf_kpis) >= 3 else 15
+
+    # Risk penalties
     warning_penalty = sum(5 for i in insights if i.get("level") == "WARNING")
     risk_penalty = sum(10 for i in insights if i.get("level") == "RISK")
-    
-    score = round(max(0, min(100, evidence_score + coverage_score + 20 - warning_penalty - risk_penalty)))
-    
+
+    score = round(
+        max(
+            0,
+            min(
+                100,
+                evidence_score + coverage_score + 20
+                - warning_penalty
+                - risk_penalty
+            ),
+        )
+    )
+
     # Data completeness cap
     if isinstance(kpis.get("data_completeness"), (int, float)):
         if kpis["data_completeness"] < 0.7:
             score = min(score, 60)
-    
-    return {"score": score, "band": band}
 
+    # ✅ FIX: derive band correctly
+    risk = derive_risk_level(score)
+
+    return {
+        "score": score,
+        "band": risk["label"],
+    }
 
 # =====================================================
 # 1-MINUTE EXECUTIVE BRIEF (CEO LEGIBLE)
