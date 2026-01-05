@@ -697,7 +697,7 @@ class HealthcareDomain(BaseDomain):
                 )
             
                 kpis.update({
-                    tag_kpi(sub,"avg_tat": safe_mean(self.cols.get("duration")),
+                    tag_kpi(sub,"avg_tat"): safe_mean(self.cols.get("duration")),
                     tag_kpi(sub,"critical_alert_rate"): safe_rate(self.cols.get("flag")),
                     tag_kpi(sub,"specimen_rejection_rate"): safe_rate(self.cols.get("flag")),
                     tag_kpi(sub,"tests_per_fte"): (
