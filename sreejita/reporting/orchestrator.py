@@ -186,7 +186,7 @@ def generate_report_payload(
     )[:6]
 
     # -------------------------------------------------
-    # ✅ UNIVERSAL VISUAL HARDENING
+    # ✅ UNIVERSAL VISUAL HARDENING (CRITICAL)
     # -------------------------------------------------
     if hasattr(engine, "ensure_minimum_visuals"):
         hardened = engine.ensure_minimum_visuals(
