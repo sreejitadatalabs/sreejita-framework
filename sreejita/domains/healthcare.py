@@ -1,6 +1,8 @@
 # =====================================================
-# UNIVERSAL HEALTHCARE DOMAIN — SREEJITA FRAMEWORK
+# UNIVERSAL HEALTHCARE DOMAIN — FOUNDATIONAL DEFINITIONS
+# Sreejita Framework v3.5.x
 # =====================================================
+
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -17,17 +19,22 @@ from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
 
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
+
+
 # =====================================================
 # CONSTANTS
 # =====================================================
 
 MIN_SAMPLE_SIZE = 30
 
-# NOTE: 'flag' is a generalized binary outcome proxy used across:
+# NOTE:
+# 'flag' is a generalized binary outcome proxy used across:
 # mortality, alerts, specimen rejection, screening, immunization, etc.
 # This is intentional for universal-domain support in v3.x.
+
+
 # =====================================================
-# SUB-DOMAINS
+# SUB-DOMAINS (CANONICAL ENUM)
 # =====================================================
 
 class HealthcareSubDomain(str, Enum):
@@ -39,71 +46,118 @@ class HealthcareSubDomain(str, Enum):
     MIXED = "mixed"
     UNKNOWN = "unknown"
 
+
 # =====================================================
-# VISUAL INTELLIGENCE MAP (LOCKED)
+# VISUAL INTELLIGENCE MAP (LOCKED CONTRACT)
 # =====================================================
 
-HEALTHCARE_VISUAL_MAP = {
-    "hospital": [
-        "avg_los_trend", "bed_turnover", "readmission_risk",
-        "discharge_hour", "acuity_vs_staffing",
-        "ed_boarding", "mortality_trend"
+HEALTHCARE_VISUAL_MAP: Dict[str, List[str]] = {
+    HealthcareSubDomain.HOSPITAL.value: [
+        "avg_los_trend",
+        "bed_turnover",
+        "readmission_risk",
+        "discharge_hour",
+        "acuity_vs_staffing",
+        "ed_boarding",
+        "mortality_trend",
     ],
-    "clinic": [
-        "no_show_by_day", "wait_time_split", "appointment_lag",
-        "provider_utilization", "demographic_reach",
-        "referral_funnel", "telehealth_mix"
+    HealthcareSubDomain.CLINIC.value: [
+        "no_show_by_day",
+        "wait_time_split",
+        "appointment_lag",
+        "provider_utilization",
+        "demographic_reach",
+        "referral_funnel",
+        "telehealth_mix",
     ],
-    "diagnostics": [
-        "tat_percentiles", "critical_alert_time", "specimen_rejection",
-        "device_downtime", "order_heatmap",
-        "repeat_scan", "ordering_variance"
+    HealthcareSubDomain.DIAGNOSTICS.value: [
+        "tat_percentiles",
+        "critical_alert_time",
+        "specimen_rejection",
+        "device_downtime",
+        "order_heatmap",
+        "repeat_scan",
+        "ordering_variance",
     ],
-    "pharmacy": [
-        "spend_velocity", "refill_gap", "therapeutic_spend",
-        "generic_rate", "prescribing_variance",
-        "inventory_turn", "drug_alerts"
+    HealthcareSubDomain.PHARMACY.value: [
+        "spend_velocity",
+        "refill_gap",
+        "therapeutic_spend",
+        "generic_rate",
+        "prescribing_variance",
+        "inventory_turn",
+        "drug_alerts",
     ],
-    "public_health": [
-        "incidence_geo", "cohort_growth", "prevalence_age",
-        "access_gap", "program_effect",
-        "sdoh_overlay", "immunization_rate"
-    ]
+    HealthcareSubDomain.PUBLIC_HEALTH.value: [
+        "incidence_geo",
+        "cohort_growth",
+        "prevalence_age",
+        "access_gap",
+        "program_effect",
+        "sdoh_overlay",
+        "immunization_rate",
+    ],
 }
+
+
 # =====================================================
-# HEALTHCARE KPI INTELLIGENCE MAP (LOCKED)
+# HEALTHCARE KPI INTELLIGENCE MAP (LOCKED CONTRACT)
 # =====================================================
-        
-HEALTHCARE_KPI_MAP = {
-    "hospital": [
-        "avg_los", "readmission_rate", "bed_occupancy_rate",
-        "case_mix_index", "hcahps_score", "mortality_rate",
-        "er_boarding_time", "labor_cost_per_day", "surgical_complication_rate",
+
+HEALTHCARE_KPI_MAP: Dict[str, List[str]] = {
+    HealthcareSubDomain.HOSPITAL.value: [
+        "avg_los",
+        "readmission_rate",
+        "bed_occupancy_rate",
+        "case_mix_index",
+        "hcahps_score",
+        "mortality_rate",
+        "er_boarding_time",
+        "labor_cost_per_day",
+        "surgical_complication_rate",
     ],
-    "clinic": [
-        "no_show_rate", "avg_wait_time", "provider_productivity",
-        "third_next_available", "referral_conversion_rate",
-        "visit_cycle_time", "patient_acquisition_cost",
-        "telehealth_mix", "net_collection_ratio",
+    HealthcareSubDomain.CLINIC.value: [
+        "no_show_rate",
+        "avg_wait_time",
+        "provider_productivity",
+        "third_next_available",
+        "referral_conversion_rate",
+        "visit_cycle_time",
+        "patient_acquisition_cost",
+        "telehealth_mix",
+        "net_collection_ratio",
     ],
-    "diagnostics": [
-        "avg_tat", "critical_alert_time", "specimen_rejection_rate",
-        "equipment_downtime_rate", "repeat_test_rate",
-        "tests_per_fte", "supply_cost_per_test",
-        "order_completeness_ratio", "outpatient_market_share",
+    HealthcareSubDomain.DIAGNOSTICS.value: [
+        "avg_tat",
+        "critical_alert_time",
+        "specimen_rejection_rate",
+        "equipment_downtime_rate",
+        "repeat_test_rate",
+        "tests_per_fte",
+        "supply_cost_per_test",
+        "order_completeness_ratio",
+        "outpatient_market_share",
     ],
-    "pharmacy": [
-        "days_supply_on_hand", "generic_dispensing_rate",
-        "refill_adherence_rate", "cost_per_rx",
-        "med_error_rate", "pharmacist_intervention_rate",
-        "inventory_turnover", "spend_velocity",
+    HealthcareSubDomain.PHARMACY.value: [
+        "days_supply_on_hand",
+        "generic_dispensing_rate",
+        "refill_adherence_rate",
+        "cost_per_rx",
+        "med_error_rate",
+        "pharmacist_intervention_rate",
+        "inventory_turnover",
+        "spend_velocity",
         "avg_patient_wait_time",
     ],
-    "public_health": [
-        "incidence_per_100k", "sdoh_risk_score",
-        "screening_coverage_rate", "chronic_readmission_rate",
-        "immunization_rate", "provider_access_gap",
-        "ed_visits_per_1k", "cost_per_member",
+    HealthcareSubDomain.PUBLIC_HEALTH.value: [
+        "incidence_per_100k",
+        "sdoh_risk_score",
+        "screening_coverage_rate",
+        "chronic_readmission_rate",
+        "immunization_rate",
+        "provider_access_gap",
+        "ed_visits_per_1k",
+        "cost_per_member",
         "healthy_days_index",
     ],
 }
@@ -112,8 +166,9 @@ HEALTHCARE_KPI_MAP = {
 # =====================================================
 # HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
 # =====================================================
-HEALTHCARE_INSIGHT_MAP = {
-    "hospital": [
+
+HEALTHCARE_INSIGHT_MAP: Dict[str, List[str]] = {
+    HealthcareSubDomain.HOSPITAL.value: [
         "throughput_bottleneck",
         "clinical_safety_alert",
         "bed_capacity_strain",
@@ -124,7 +179,7 @@ HEALTHCARE_INSIGHT_MAP = {
         "physician_variance",
         "supply_chain_variance",
     ],
-    "clinic": [
+    HealthcareSubDomain.CLINIC.value: [
         "access_barrier",
         "productivity_variance",
         "referral_leakage",
@@ -135,7 +190,7 @@ HEALTHCARE_INSIGHT_MAP = {
         "front_desk_variance",
         "financial_health",
     ],
-    "diagnostics": [
+    HealthcareSubDomain.DIAGNOSTICS.value: [
         "service_level_gap",
         "life_safety_risk",
         "technical_waste",
@@ -146,7 +201,7 @@ HEALTHCARE_INSIGHT_MAP = {
         "quality_variance",
         "market_opportunity",
     ],
-    "pharmacy": [
+    HealthcareSubDomain.PHARMACY.value: [
         "economic_pressure",
         "adherence_risk",
         "safety_barrier",
@@ -157,7 +212,7 @@ HEALTHCARE_INSIGHT_MAP = {
         "prescribing_variance",
         "inventory_waste",
     ],
-    "public_health": [
+    HealthcareSubDomain.PUBLIC_HEALTH.value: [
         "equity_gap",
         "prevention_failure",
         "access_desert",
@@ -170,12 +225,13 @@ HEALTHCARE_INSIGHT_MAP = {
     ],
 }
 
+
 # =====================================================
 # HEALTHCARE RECOMMENDATION MAP (LOCKED)
 # =====================================================
 
-HEALTHCARE_RECOMMENDATION_MAP = {
-    "hospital": [
+HEALTHCARE_RECOMMENDATION_MAP: Dict[str, List[str]] = {
+    HealthcareSubDomain.HOSPITAL.value: [
         "discharge_huddle",
         "clinical_pathway_standardization",
         "bed_assignment_automation",
@@ -186,7 +242,7 @@ HEALTHCARE_RECOMMENDATION_MAP = {
         "or_turnover_optimization",
         "implant_contract_review",
     ],
-    "clinic": [
+    HealthcareSubDomain.CLINIC.value: [
         "appointment_reminders",
         "open_access_scheduling",
         "telehealth_standardization",
@@ -197,7 +253,7 @@ HEALTHCARE_RECOMMENDATION_MAP = {
         "rooming_velocity_optimization",
         "targeted_marketing",
     ],
-    "diagnostics": [
+    HealthcareSubDomain.DIAGNOSTICS.value: [
         "analyzer_upgrade",
         "critical_alert_software",
         "specimen_training",
@@ -208,7 +264,7 @@ HEALTHCARE_RECOMMENDATION_MAP = {
         "barcode_chain",
         "physician_portal",
     ],
-    "pharmacy": [
+    HealthcareSubDomain.PHARMACY.value: [
         "refill_reminders",
         "meds_to_beds",
         "central_fill",
@@ -219,7 +275,7 @@ HEALTHCARE_RECOMMENDATION_MAP = {
         "manufacturer_contracts",
         "staffing_optimization",
     ],
-    "public_health": [
+    HealthcareSubDomain.PUBLIC_HEALTH.value: [
         "mobile_health_units",
         "screening_campaign",
         "food_programs",
@@ -232,13 +288,15 @@ HEALTHCARE_RECOMMENDATION_MAP = {
     ],
 }
 
+
 # =====================================================
-# SAFE SIGNAL DETECTION (UNIVERSAL)
+# SAFE SIGNAL DETECTION (UNIVERSAL, DETERMINISTIC)
 # =====================================================
+
 def _has_signal(df: pd.DataFrame, col: Optional[str]) -> bool:
     """
     Returns True if a resolved column exists and has at least one non-null value.
-    This function is intentionally strict and deterministic.
+    Strict, deterministic, side-effect free.
     """
     return bool(
         col
@@ -247,9 +305,11 @@ def _has_signal(df: pd.DataFrame, col: Optional[str]) -> bool:
         and df[col].notna().any()
     )
 
+
 # =====================================================
 # UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE
 # =====================================================
+
 def infer_healthcare_subdomains(
     df: pd.DataFrame,
     cols: Dict[str, Optional[str]],
@@ -263,7 +323,7 @@ def infer_healthcare_subdomains(
     """
 
     # -------------------------------
-    # HOSPITAL SIGNAL
+    # HOSPITAL SIGNALS
     # -------------------------------
     hospital_signal = any([
         _has_signal(df, cols.get("los")),
@@ -276,12 +336,10 @@ def infer_healthcare_subdomains(
     ])
 
     # -------------------------------
-    # RAW SUB-DOMAIN SCORES
+    # SUB-DOMAIN SCORING
     # -------------------------------
     scores: Dict[str, float] = {
-        HealthcareSubDomain.HOSPITAL.value: (
-            0.9 if hospital_signal else 0.0
-        ),
+        HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
 
         HealthcareSubDomain.CLINIC.value: (
             0.8
@@ -314,13 +372,11 @@ def infer_healthcare_subdomains(
     # -------------------------------
     # HARD SAFETY FALLBACK
     # -------------------------------
-    # If no sub-domain has meaningful signal, mark as UNKNOWN
-    if not any(v > 0 for v in scores.values()):
-        return {
-            HealthcareSubDomain.UNKNOWN.value: 1.0
-        }
+    if not any(score > 0 for score in scores.values()):
+        return {HealthcareSubDomain.UNKNOWN.value: 1.0}
 
     return scores
+    
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -339,82 +395,82 @@ class HealthcareDomain(BaseDomain):
         - Derives LOS when admission + discharge dates exist
         - Emits stable self.cols + self.time_col
         """
-    
+
+        df = df.copy()  # 🔒 NEVER mutate upstream dataframe
+
         # ---------------------------------------------
         # DATASET SHAPE (TRACEABILITY)
         # ---------------------------------------------
         self.shape_info = detect_dataset_shape(df)
-    
+
         # ---------------------------------------------
         # SEMANTIC COLUMN RESOLUTION (ORDER MATTERS)
         # ---------------------------------------------
         self.cols = {
             # Identity
             "pid": resolve_column(df, "patient_id"),
-            "encounter": resolve_column(df, "encounter_id") or resolve_column(df, "visit_id"),
-    
+            "encounter": resolve_column(df, "encounter_id")
+            or resolve_column(df, "visit_id"),
+
             # Time / Lifecycle
             "los": resolve_column(df, "length_of_stay"),
             "duration": resolve_column(df, "duration"),
             "date": resolve_column(df, "admission_date"),
             "discharge_date": resolve_column(df, "discharge_date"),
-    
+
             # Financial
             "cost": resolve_column(df, "cost"),
-    
+
             # Outcomes / Flags
             "readmitted": resolve_column(df, "readmitted"),
             "flag": resolve_column(df, "flag"),
-    
+
             # Clinical / Operational
             "facility": resolve_column(df, "facility"),
             "doctor": resolve_column(df, "doctor"),
             "diagnosis": resolve_column(df, "diagnosis"),
             "admit_type": resolve_column(df, "admission_type"),
             "bed_id": resolve_column(df, "bed_id"),
-    
+
             # Pharmacy / Population
             "fill_date": resolve_column(df, "fill_date"),
             "supply": resolve_column(df, "supply"),
             "population": resolve_column(df, "population"),
         }
-    
+
         # ---------------------------------------------
-        # NUMERIC COERCION (SAFE)
+        # NUMERIC COERCION (SAFE & IDP)
         # ---------------------------------------------
-        for key in ["los", "duration", "cost", "supply", "population"]:
+        for key in ("los", "duration", "cost", "supply", "population"):
             col = self.cols.get(key)
             if col and col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-    
+
         # ---------------------------------------------
         # DATE COERCION
         # ---------------------------------------------
-        for key in ["date", "discharge_date", "fill_date"]:
+        for key in ("date", "discharge_date", "fill_date"):
             col = self.cols.get(key)
             if col and col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
-    
+
         # ---------------------------------------------
-        # BOOLEAN / FLAG NORMALIZATION (YES / NO / TRUE)
+        # BOOLEAN / FLAG NORMALIZATION
         # ---------------------------------------------
-        for key in ["readmitted", "flag"]:
+        BOOL_MAP = {
+            "yes": 1, "y": 1, "true": 1, "1": 1,
+            "no": 0, "n": 0, "false": 0, "0": 0,
+        }
+
+        for key in ("readmitted", "flag"):
             col = self.cols.get(key)
             if col and col in df.columns:
-                mapped = (
-                    df[col]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .map({
-                        "yes": 1, "y": 1, "true": 1, "1": 1,
-                        "no": 0, "n": 0, "false": 0, "0": 0,
-                    })
-                )
+                s = df[col].astype(str).str.strip().str.lower()
+                mapped = s.map(BOOL_MAP)
                 df[col] = pd.to_numeric(mapped.fillna(df[col]), errors="coerce")
-    
+
         # ---------------------------------------------
-        # DERIVE LOS IF MISSING (CRITICAL FOR DATASET-2)
+        # DERIVE LOS IF MISSING
         # ---------------------------------------------
         if (
             not self.cols.get("los")
@@ -423,62 +479,61 @@ class HealthcareDomain(BaseDomain):
             and self.cols["date"] in df.columns
             and self.cols["discharge_date"] in df.columns
         ):
-            try:
-                los = (
-                    df[self.cols["discharge_date"]] -
-                    df[self.cols["date"]]
-                ).dt.days
-    
-                derived_col = "__derived_los"
-                df[derived_col] = pd.to_numeric(los, errors="coerce")
-                self.cols["los"] = derived_col
-                
-            except Exception:
-                pass  # absolute safety
-    
+            los = (
+                df[self.cols["discharge_date"]] -
+                df[self.cols["date"]]
+            ).dt.days
+
+            derived_col = "__derived_los"
+            df[derived_col] = pd.to_numeric(los, errors="coerce")
+            self.cols["los"] = derived_col
+
         # ---------------------------------------------
-        # CANONICAL TIME COLUMN
+        # CANONICAL TIME COLUMN (STABLE)
         # ---------------------------------------------
         self.time_col = (
             self.cols.get("date")
             or self.cols.get("fill_date")
             or self.cols.get("discharge_date")
         )
+
         return df
+
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        volume = len(df)
-    
+        volume = int(len(df))
+
         sub_scores = infer_healthcare_subdomains(df, self.cols)
-    
+
         active_subs = {
-            k: v for k, v in sub_scores.items()
-            if isinstance(v, (int, float)) and v >= 0.3
+            sub: score
+            for sub, score in sub_scores.items()
+            if isinstance(score, (int, float)) and score >= 0.3
         }
-    
+
         if not active_subs:
             primary_sub = HealthcareSubDomain.UNKNOWN.value
             is_mixed = False
         else:
             primary_sub = max(active_subs, key=active_subs.get)
             is_mixed = len(active_subs) > 1
-    
+
         # -------------------------------------------------
-        # BASE KPI CONTEXT (EXECUTIVE-SAFE)
+        # BASE KPI CONTEXT
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
             "primary_sub_domain": (
                 HealthcareSubDomain.MIXED.value if is_mixed else primary_sub
             ),
             "sub_domains": active_subs,
-            "sub_domain_signals": active_subs,  # 🔑 universal engine input
+            "sub_domain_signals": active_subs,
             "total_volume": volume,
             "record_count": volume,
             "data_completeness": round(1 - df.isna().mean().mean(), 3),
             "time_coverage_days": (
-                (df[self.time_col].max() - df[self.time_col].min()).days
+                int((df[self.time_col].max() - df[self.time_col].min()).days)
                 if (
                     self.time_col
                     and self.time_col in df.columns
@@ -487,13 +542,10 @@ class HealthcareDomain(BaseDomain):
                 else None
             ),
         }
-    
-        # -------------------------------------------------
-        # DATA GOVERNANCE WARNING
-        # -------------------------------------------------
+
         if volume < MIN_SAMPLE_SIZE:
             kpis["data_warning"] = "Sample size below recommended threshold"
-    
+
         # -------------------------------------------------
         # SAFE KPI HELPERS
         # -------------------------------------------------
@@ -502,23 +554,20 @@ class HealthcareDomain(BaseDomain):
                 return None
             s = pd.to_numeric(df[col], errors="coerce")
             return float(s.mean()) if s.notna().any() else None
-    
+
         def safe_rate(col):
-            if not col or col not in df.columns:
-                return None
-            s = pd.to_numeric(df[col], errors="coerce")
-            return float(s.mean()) if s.notna().any() else None
-    
+            return safe_mean(col)
+
         # -------------------------------------------------
         # SUB-DOMAIN KPI COMPUTATION
         # -------------------------------------------------
         for sub in active_subs:
-    
+
             # ---------------- HOSPITAL ----------------
             if sub == HealthcareSubDomain.HOSPITAL.value:
                 avg_los = safe_mean(self.cols.get("los"))
                 total_cost = safe_mean(self.cols.get("cost"))
-    
+
                 kpis.update({
                     "avg_los": avg_los,
                     "readmission_rate": safe_rate(self.cols.get("readmitted")),
@@ -531,35 +580,21 @@ class HealthcareDomain(BaseDomain):
                         total_cost / avg_los if avg_los and total_cost else None
                     ),
                     "labor_cost_per_day": total_cost,
+                    "er_boarding_time": safe_mean(self.cols.get("duration")),
                 })
-    
+
                 bed_col = self.cols.get("bed_id")
                 kpis["bed_occupancy_rate"] = (
                     df[bed_col].nunique() / volume
-                    # NOTE: Proxy metric (unique beds per record volume), not true occupancy
                     if bed_col and bed_col in df.columns and volume > 0
                     else None
                 )
-    
-                admit_col = self.cols.get("admit_type")
-                kpis["emergency_admission_rate"] = (
-                    df[admit_col]
-                    .astype(str)
-                    .str.lower()
-                    .str.contains("emergency")
-                    .mean()
-                    if admit_col and admit_col in df.columns
-                    else None
-                )
-    
+
                 fac_col = self.cols.get("facility")
                 los_col = self.cols.get("los")
-    
-                if volume < MIN_SAMPLE_SIZE:
-                    kpis["facility_variance_score"] = None
-                elif (
-                    fac_col
-                    and los_col
+
+                if (
+                    volume >= MIN_SAMPLE_SIZE
                     and fac_col in df.columns
                     and los_col in df.columns
                 ):
@@ -572,9 +607,7 @@ class HealthcareDomain(BaseDomain):
                     )
                 else:
                     kpis["facility_variance_score"] = None
-    
-                kpis["er_boarding_time"] = safe_mean(self.cols.get("duration"))
-    
+
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
                 kpis.update({
@@ -586,7 +619,7 @@ class HealthcareDomain(BaseDomain):
                     ),
                     "visit_cycle_time": safe_mean(self.cols.get("duration")),
                 })
-    
+
             # ---------------- DIAGNOSTICS ----------------
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
                 kpis.update({
@@ -599,7 +632,7 @@ class HealthcareDomain(BaseDomain):
                     ),
                     "supply_cost_per_test": safe_mean(self.cols.get("cost")),
                 })
-    
+
             # ---------------- PHARMACY ----------------
             if sub == HealthcareSubDomain.PHARMACY.value:
                 kpis.update({
@@ -609,7 +642,7 @@ class HealthcareDomain(BaseDomain):
                     "spend_velocity": safe_mean(self.cols.get("cost")),
                     "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
                 })
-    
+
             # ---------------- PUBLIC HEALTH ----------------
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 pop = safe_mean(self.cols.get("population"))
@@ -617,17 +650,17 @@ class HealthcareDomain(BaseDomain):
                     df[self.cols["flag"]].sum()
                     if self.cols.get("flag") in df.columns else None
                 )
-    
+
                 kpis.update({
                     "incidence_per_100k": (
-                        (cases / pop) * 100000 if pop and cases else None
+                        (cases / pop) * 100_000 if pop and cases else None
                     ),
                     "screening_coverage_rate": safe_rate(self.cols.get("flag")),
                     "chronic_readmission_rate": safe_rate(self.cols.get("readmitted")),
                     "immunization_rate": safe_rate(self.cols.get("flag")),
                     "cost_per_member": safe_mean(self.cols.get("cost")),
                 })
-    
+
         # -------------------------------------------------
         # KPI → CAPABILITY CONTRACT
         # -------------------------------------------------
@@ -644,45 +677,36 @@ class HealthcareDomain(BaseDomain):
             "facility_variance_score": Capability.VARIANCE.value,
             "incidence_per_100k": Capability.VOLUME.value,
         }
-    
+
         # -------------------------------------------------
         # KPI CONFIDENCE
         # -------------------------------------------------
         kpis["_confidence"] = {}
-        cap_map = kpis.get("_kpi_capabilities", {}) or {}
-        
+        cap_map = kpis["_kpi_capabilities"]
+
         for key, value in kpis.items():
             if key.startswith("_"):
                 continue
-            if key.endswith("_placeholder_kpi"):
-                kpis["_confidence"][key] = 0.3
-            elif key in cap_map:
-                if isinstance(value, (int, float)) and not pd.isna(value):
-                    kpis["_confidence"][key] = 0.85
-                else:
-                    kpis["_confidence"][key] = 0.4
-            elif isinstance(value, (int, float)) and not pd.isna(value):
-                kpis["_confidence"][key] = 0.65
+            if key in cap_map:
+                kpis["_confidence"][key] = 0.85 if value is not None else 0.4
             else:
-                kpis["_confidence"][key] = 0.4
-    
+                kpis["_confidence"][key] = 0.65 if value is not None else 0.4
+
         self._last_kpis = kpis
-    
+
         # -------------------------------------------------
         # HARD GUARANTEE: ≥5 KPIs PER SUB-DOMAIN
         # -------------------------------------------------
-        MIN_KPIS_PER_SUB = 5
-    
         for sub in active_subs:
             expected = HEALTHCARE_KPI_MAP.get(sub, [])
             present = [
                 k for k in expected
-                if isinstance(kpis.get(k), (int, float)) and not pd.isna(kpis.get(k)) and kpis.get(k) != 0
+                if isinstance(kpis.get(k), (int, float)) and not pd.isna(kpis.get(k))
             ]
-    
-            for i in range(max(0, MIN_KPIS_PER_SUB - len(present))):
+
+            for i in range(max(0, 5 - len(present))):
                 kpis[f"{sub}_placeholder_kpi_{i+1}"] = None
-    
+
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
