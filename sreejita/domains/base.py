@@ -1,5 +1,5 @@
 # =====================================================
-# BASE DOMAIN — UNIVERSAL (FINAL, GOVERNED)
+# BASE DOMAIN — UNIVERSAL (FINAL, AUTHORITATIVE)
 # Sreejita Framework v3.5.x
 # =====================================================
 
@@ -17,16 +17,25 @@ from sreejita.narrative.executive_cognition import (
     build_subdomain_executive_payloads,
 )
 
+# =====================================================
+# BASE DOMAIN
+# =====================================================
 
 class BaseDomain(ABC):
     """
     Universal BaseDomain contract.
 
-    GUARANTEES:
-    - Domain intelligence only (no orchestration)
-    - ≥2 visuals ALWAYS (PDF-safe)
-    - Executive cognition ALWAYS present
-    - Never crashes reporting layer
+    Responsibilities:
+    - KPI computation
+    - Insight generation
+    - Recommendation generation
+    - Visual intelligence
+    - Executive cognition assembly
+
+    MUST NOT:
+    - Perform routing
+    - Perform orchestration
+    - Import sub-domain engines
     """
 
     name: str = "generic"
@@ -40,8 +49,8 @@ class BaseDomain(ABC):
     # --------------------------------------------------
     def validate_data(self, df: pd.DataFrame) -> bool:
         """
-        Optional schema validation.
-        Default: always valid.
+        Optional domain-level validation.
+        Default = always valid.
         """
         return True
 
@@ -51,7 +60,7 @@ class BaseDomain(ABC):
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Optional preprocessing hook.
-        Default: passthrough.
+        Default = passthrough.
         """
         return df
 
@@ -61,7 +70,7 @@ class BaseDomain(ABC):
     @abstractmethod
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Core KPI computation.
+        Compute KPIs.
         MUST return a dictionary.
         """
         raise NotImplementedError
@@ -105,7 +114,7 @@ class BaseDomain(ABC):
         raise NotImplementedError
 
     # --------------------------------------------------
-    # 🔒 UNIVERSAL VISUAL SAFETY NET (PDF GUARANTEE)
+    # 🔒 UNIVERSAL VISUAL SAFETY NET (CRITICAL)
     # --------------------------------------------------
     def ensure_minimum_visuals(
         self,
@@ -114,77 +123,63 @@ class BaseDomain(ABC):
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
-        HARD GOVERNANCE RULE:
-        - ALWAYS returns ≥2 visuals
-        - Each visual has confidence ≥0.3
-        - PDF renderer will NEVER reject
-
-        This is the FINAL safety layer.
+        Guarantees at least 2 visuals exist.
+        Absolute last-resort fallback.
+        NEVER raises.
         """
 
         visuals = visuals if isinstance(visuals, list) else []
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
 
-        def _register_fallback(
-            index: int,
-            labels,
-            values,
-            title: str,
-            caption: str,
-        ):
+        if len(visuals) >= 2:
+            return visuals
+
+        try:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Fallback 1 — Dataset Size
             fig, ax = plt.subplots(figsize=(6, 4))
-            ax.bar(labels, values)
-            ax.set_title(title, fontweight="bold")
+            ax.bar(["Records"], [len(df)])
+            ax.set_title("Dataset Size Overview", fontweight="bold")
+            ax.set_ylabel("Record Count")
 
-            path = output_dir / f"{self.name}_fallback_{index}.png"
+            path = output_dir / f"{self.name}_fallback_records.png"
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
 
             visuals.append({
                 "path": str(path),
-                "caption": caption,
+                "caption": "Total number of records (fallback evidence).",
                 "importance": 0.3,
                 "confidence": 0.4,
                 "sub_domain": self.name,
             })
 
-        try:
-            # --------------------------------------------------
-            # Fallback #1 — Dataset Size
-            # --------------------------------------------------
-            if len(visuals) < 1:
-                _register_fallback(
-                    index=1,
-                    labels=["Records"],
-                    values=[len(df)],
-                    title="Dataset Size Overview",
-                    caption="Total number of records (fallback evidence).",
-                )
+            # Fallback 2 — Data Completeness
+            completeness = 1 - df.isna().mean().mean()
 
-            # --------------------------------------------------
-            # Fallback #2 — Data Completeness
-            # --------------------------------------------------
-            if len(visuals) < 2:
-                completeness = (
-                    1 - df.isna().mean().mean()
-                    if not df.empty
-                    else 0.0
-                )
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["Completeness"], [completeness])
+            ax.set_ylim(0, 1)
+            ax.set_title("Data Completeness Indicator", fontweight="bold")
 
-                _register_fallback(
-                    index=2,
-                    labels=["Completeness"],
-                    values=[round(completeness, 2)],
-                    title="Data Completeness Indicator",
-                    caption="Overall data completeness ratio (fallback evidence).",
-                )
+            path = output_dir / f"{self.name}_fallback_completeness.png"
+            fig.savefig(path, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+
+            visuals.append({
+                "path": str(path),
+                "caption": "Overall data completeness ratio (fallback evidence).",
+                "importance": 0.3,
+                "confidence": 0.4,
+                "sub_domain": self.name,
+            })
 
         except Exception:
-            # Absolute safety: BaseDomain must never crash execution
+            # Absolute safety: visuals must never crash execution
             pass
 
-        return visuals[:6]
+        return visuals
 
     # --------------------------------------------------
     # 🧠 EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
@@ -198,19 +193,17 @@ class BaseDomain(ABC):
         """
         Universal executive cognition builder.
 
-        GUARANTEES:
+        Guarantees:
         - Global executive payload
         - Per-sub-domain executive payloads (if present)
         """
 
-        # ---------------- GLOBAL EXECUTIVE ----------------
         executive = build_executive_payload(
             kpis=kpis,
             insights=insights or [],
             recommendations=recommendations or [],
         )
 
-        # ---------------- SUB-DOMAIN EXECUTIVES ----------------
         sub_domains = kpis.get("sub_domains")
 
         if isinstance(sub_domains, dict) and sub_domains:
@@ -227,16 +220,16 @@ class BaseDomain(ABC):
         return executive
 
     # --------------------------------------------------
-    # OPTIONAL LEGACY PIPELINE
+    # LEGACY PIPELINE (OPTIONAL, SAFE)
     # --------------------------------------------------
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Optional legacy execution pipeline.
+        Optional legacy pipeline.
         Orchestrator may bypass this.
         """
 
         if not self.validate_data(df):
-            raise ValueError(f"Data validation failed for {self.name}")
+            raise ValueError(f"Data validation failed for domain: {self.name}")
 
         df = self.preprocess(df)
         kpis = self.calculate_kpis(df)
