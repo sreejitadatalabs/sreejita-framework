@@ -287,8 +287,6 @@ HEALTHCARE_RECOMMENDATION_MAP: Dict[str, List[str]] = {
         "whole_person_platform",
     ],
 }
-
-
 # =====================================================
 # SAFE SIGNAL DETECTION (UNIVERSAL, DETERMINISTIC)
 # =====================================================
@@ -315,68 +313,89 @@ def infer_healthcare_subdomains(
     cols: Dict[str, Optional[str]],
 ) -> Dict[str, float]:
     """
-    Determines healthcare sub-domain confidence scores based on
-    presence of strong semantic signals.
+    Determines healthcare sub-domain confidence scores using
+    weighted semantic signal evidence.
 
     Returns:
         Dict[sub_domain: confidence_score]
     """
 
     # -------------------------------
-    # HOSPITAL SIGNALS
+    # SIGNAL COUNTS (NOT BOOLEAN)
     # -------------------------------
-    hospital_signal = any([
+    hospital_signals = sum([
         _has_signal(df, cols.get("los")),
-        (
-            _has_signal(df, cols.get("date"))
-            and _has_signal(df, cols.get("discharge_date"))
-        ),
         _has_signal(df, cols.get("bed_id")),
         _has_signal(df, cols.get("admit_type")),
+        _has_signal(df, cols.get("date")) and _has_signal(df, cols.get("discharge_date")),
+    ])
+
+    clinic_signals = sum([
+        _has_signal(df, cols.get("duration")),
+        _has_signal(df, cols.get("doctor")),
+        _has_signal(df, cols.get("facility")),
+    ])
+
+    diagnostics_signals = sum([
+        _has_signal(df, cols.get("duration")),
+        _has_signal(df, cols.get("flag")),
+        _has_signal(df, cols.get("encounter")),
+    ])
+
+    pharmacy_signals = sum([
+        _has_signal(df, cols.get("cost")),
+        _has_signal(df, cols.get("supply")),
+        _has_signal(df, cols.get("fill_date")),
+    ])
+
+    public_health_signals = sum([
+        _has_signal(df, cols.get("population")),
+        _has_signal(df, cols.get("flag")),
     ])
 
     # -------------------------------
-    # SUB-DOMAIN SCORING
+    # CONFIDENCE SCALING
     # -------------------------------
     scores: Dict[str, float] = {
-        HealthcareSubDomain.HOSPITAL.value: 0.9 if hospital_signal else 0.0,
+        HealthcareSubDomain.HOSPITAL.value: (
+            min(1.0, 0.25 * hospital_signals)
+            if hospital_signals >= 2 else 0.0
+        ),
 
         HealthcareSubDomain.CLINIC.value: (
-            0.8
-            if _has_signal(df, cols.get("duration"))
-            and not _has_signal(df, cols.get("supply"))
-            else 0.0
+            min(0.85, 0.3 * clinic_signals)
+            if clinic_signals >= 2 and diagnostics_signals < 2 else 0.0
         ),
 
         HealthcareSubDomain.DIAGNOSTICS.value: (
-            0.8
-            if _has_signal(df, cols.get("duration"))
-            and _has_signal(df, cols.get("flag"))
-            else 0.0
+            min(0.85, 0.3 * diagnostics_signals)
+            if diagnostics_signals >= 2 else 0.0
         ),
 
         HealthcareSubDomain.PHARMACY.value: (
-            0.7
-            if _has_signal(df, cols.get("cost"))
-            and _has_signal(df, cols.get("supply"))
-            else 0.0
+            min(0.8, 0.3 * pharmacy_signals)
+            if pharmacy_signals >= 2 else 0.0
         ),
 
         HealthcareSubDomain.PUBLIC_HEALTH.value: (
-            0.9
-            if _has_signal(df, cols.get("population"))
-            else 0.0
+            min(0.9, 0.45 * public_health_signals)
+            if public_health_signals >= 2 else 0.0
         ),
     }
 
     # -------------------------------
+    # REMOVE ZERO CONFIDENCE
+    # -------------------------------
+    scores = {k: round(v, 2) for k, v in scores.items() if v > 0}
+
+    # -------------------------------
     # HARD SAFETY FALLBACK
     # -------------------------------
-    if not any(score > 0 for score in scores.values()):
+    if not scores:
         return {HealthcareSubDomain.UNKNOWN.value: 1.0}
 
-    return scores
-    
+    return scores    
+
 # =====================================================
 # HEALTHCARE DOMAIN
 # =====================================================
@@ -389,41 +408,55 @@ class HealthcareDomain(BaseDomain):
     # -------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Healthcare domain preprocessing.
-        - Resolves semantic columns robustly
-        - Normalizes numeric / date / boolean fields
-        - Derives LOS when admission + discharge dates exist
-        - Emits stable self.cols + self.time_col
+        Healthcare domain preprocessing (authoritative).
+
+        Responsibilities:
+        - Resolve semantic columns robustly
+        - Normalize numeric / date / boolean fields
+        - Derive LOS safely when lifecycle exists
+        - Emit stable self.cols + self.time_col
         """
 
-        df = df.copy()  # 🔒 NEVER mutate upstream dataframe
+        # 🔒 NEVER mutate upstream dataframe
+        df = df.copy()
 
         # ---------------------------------------------
-        # DATASET SHAPE (TRACEABILITY)
+        # DATASET SHAPE (TRACEABILITY ONLY)
         # ---------------------------------------------
         self.shape_info = detect_dataset_shape(df)
 
         # ---------------------------------------------
-        # SEMANTIC COLUMN RESOLUTION (ORDER MATTERS)
+        # SEMANTIC COLUMN RESOLUTION (STRICT)
         # ---------------------------------------------
         self.cols = {
             # Identity
             "pid": resolve_column(df, "patient_id"),
-            "encounter": resolve_column(df, "encounter_id")
-            or resolve_column(df, "visit_id"),
+            "encounter": (
+                resolve_column(df, "encounter_id")
+                or resolve_column(df, "visit_id")
+                or resolve_column(df, "record_id")
+            ),
 
             # Time / Lifecycle
+            "date": (
+                resolve_column(df, "admission_date")
+                or resolve_column(df, "date")
+            ),
+            "discharge_date": resolve_column(df, "discharge_date"),
+            "fill_date": resolve_column(df, "fill_date"),
             "los": resolve_column(df, "length_of_stay"),
             "duration": resolve_column(df, "duration"),
-            "date": resolve_column(df, "admission_date"),
-            "discharge_date": resolve_column(df, "discharge_date"),
 
             # Financial
             "cost": resolve_column(df, "cost"),
 
-            # Outcomes / Flags
+            # Outcomes / Flags (GENERALIZED)
             "readmitted": resolve_column(df, "readmitted"),
-            "flag": resolve_column(df, "flag"),
+            "flag": (
+                resolve_column(df, "flag")
+                or resolve_column(df, "mortality")
+                or resolve_column(df, "no_show")
+            ),
 
             # Clinical / Operational
             "facility": resolve_column(df, "facility"),
@@ -433,13 +466,12 @@ class HealthcareDomain(BaseDomain):
             "bed_id": resolve_column(df, "bed_id"),
 
             # Pharmacy / Population
-            "fill_date": resolve_column(df, "fill_date"),
             "supply": resolve_column(df, "supply"),
             "population": resolve_column(df, "population"),
         }
 
         # ---------------------------------------------
-        # NUMERIC COERCION (SAFE & IDP)
+        # NUMERIC COERCION (STRICT, SAFE)
         # ---------------------------------------------
         for key in ("los", "duration", "cost", "supply", "population"):
             col = self.cols.get(key)
@@ -447,7 +479,7 @@ class HealthcareDomain(BaseDomain):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         # ---------------------------------------------
-        # DATE COERCION
+        # DATE COERCION (STRICT)
         # ---------------------------------------------
         for key in ("date", "discharge_date", "fill_date"):
             col = self.cols.get(key)
@@ -455,11 +487,11 @@ class HealthcareDomain(BaseDomain):
                 df[col] = pd.to_datetime(df[col], errors="coerce")
 
         # ---------------------------------------------
-        # BOOLEAN / FLAG NORMALIZATION
+        # BOOLEAN / FLAG NORMALIZATION (HARDENED)
         # ---------------------------------------------
         BOOL_MAP = {
-            "yes": 1, "y": 1, "true": 1, "1": 1,
-            "no": 0, "n": 0, "false": 0, "0": 0,
+            "yes": 1, "y": 1, "true": 1, "1": 1, "1.0": 1,
+            "no": 0, "n": 0, "false": 0, "0": 0, "0.0": 0,
         }
 
         for key in ("readmitted", "flag"):
@@ -467,10 +499,14 @@ class HealthcareDomain(BaseDomain):
             if col and col in df.columns:
                 s = df[col].astype(str).str.strip().str.lower()
                 mapped = s.map(BOOL_MAP)
-                df[col] = pd.to_numeric(mapped.fillna(df[col]), errors="coerce")
+
+                df[col] = pd.to_numeric(
+                    mapped.where(mapped.notna(), df[col]),
+                    errors="coerce"
+                )
 
         # ---------------------------------------------
-        # DERIVE LOS IF MISSING
+        # DERIVE LOS (SAFE & GUARDED)
         # ---------------------------------------------
         if (
             not self.cols.get("los")
@@ -479,17 +515,20 @@ class HealthcareDomain(BaseDomain):
             and self.cols["date"] in df.columns
             and self.cols["discharge_date"] in df.columns
         ):
-            los = (
+            delta = (
                 df[self.cols["discharge_date"]] -
                 df[self.cols["date"]]
             ).dt.days
 
+            # Guard against negative / insane LOS
+            delta = delta.where(delta.between(0, 365))
+
             derived_col = "__derived_los"
-            df[derived_col] = pd.to_numeric(los, errors="coerce")
+            df[derived_col] = pd.to_numeric(delta, errors="coerce")
             self.cols["los"] = derived_col
 
         # ---------------------------------------------
-        # CANONICAL TIME COLUMN (STABLE)
+        # CANONICAL TIME COLUMN (DETERMINISTIC)
         # ---------------------------------------------
         self.time_col = (
             self.cols.get("date")
@@ -497,8 +536,7 @@ class HealthcareDomain(BaseDomain):
             or self.cols.get("discharge_date")
         )
 
-        return df
-
+        return df    
     # -------------------------------------------------
     # KPI ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
     # -------------------------------------------------
@@ -610,47 +648,65 @@ class HealthcareDomain(BaseDomain):
 
             # ---------------- CLINIC ----------------
             if sub == HealthcareSubDomain.CLINIC.value:
+                visits = volume
+                providers = (
+                    df[self.cols["doctor"]].nunique()
+                    if self.cols.get("doctor") in df.columns
+                    else None
+                )
+            
                 kpis.update({
                     "no_show_rate": safe_rate(self.cols.get("readmitted")),
                     "avg_wait_time": safe_mean(self.cols.get("duration")),
                     "provider_productivity": (
-                        volume / max(df[self.cols["doctor"]].nunique(), 1)
-                        if self.cols.get("doctor") in df.columns else None
+                        visits / providers if providers and providers > 0 else None
                     ),
                     "visit_cycle_time": safe_mean(self.cols.get("duration")),
+                    "visits_per_provider": (
+                        visits / providers if providers and providers > 0 else None
+                    ),
                 })
-
+            
             # ---------------- DIAGNOSTICS ----------------
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
+                tests = volume
+                staff = (
+                    df[self.cols["doctor"]].nunique()
+                    if self.cols.get("doctor") in df.columns
+                    else None
+                )
+            
                 kpis.update({
                     "avg_tat": safe_mean(self.cols.get("duration")),
-                    "critical_alert_time": safe_mean(self.cols.get("duration")),
+                    "critical_alert_rate": safe_rate(self.cols.get("flag")),
                     "specimen_rejection_rate": safe_rate(self.cols.get("flag")),
                     "tests_per_fte": (
-                        volume / max(df[self.cols["doctor"]].nunique(), 1)
-                        if self.cols.get("doctor") in df.columns else None
+                        tests / staff if staff and staff > 0 else None
                     ),
-                    "supply_cost_per_test": safe_mean(self.cols.get("cost")),
+                    "cost_per_test": safe_mean(self.cols.get("cost")),
                 })
-
+            
             # ---------------- PHARMACY ----------------
             if sub == HealthcareSubDomain.PHARMACY.value:
+                fills = volume
+            
                 kpis.update({
                     "days_supply_on_hand": safe_mean(self.cols.get("supply")),
                     "cost_per_rx": safe_mean(self.cols.get("cost")),
                     "med_error_rate": safe_rate(self.cols.get("flag")),
-                    "spend_velocity": safe_mean(self.cols.get("cost")),
+                    "rx_volume": fills,
                     "avg_patient_wait_time": safe_mean(self.cols.get("duration")),
                 })
-
+            
             # ---------------- PUBLIC HEALTH ----------------
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 pop = safe_mean(self.cols.get("population"))
                 cases = (
-                    df[self.cols["flag"]].sum()
-                    if self.cols.get("flag") in df.columns else None
+                    pd.to_numeric(df[self.cols["flag"]], errors="coerce").sum()
+                    if self.cols.get("flag") in df.columns
+                    else None
                 )
-
+            
                 kpis.update({
                     "incidence_per_100k": (
                         (cases / pop) * 100_000 if pop and cases else None
@@ -660,37 +716,53 @@ class HealthcareDomain(BaseDomain):
                     "immunization_rate": safe_rate(self.cols.get("flag")),
                     "cost_per_member": safe_mean(self.cols.get("cost")),
                 })
-
-        # -------------------------------------------------
-        # KPI → CAPABILITY CONTRACT
-        # -------------------------------------------------
-        kpis["_kpi_capabilities"] = {
-            "avg_los": Capability.TIME_FLOW.value,
-            "avg_wait_time": Capability.TIME_FLOW.value,
-            "avg_tat": Capability.TIME_FLOW.value,
-            "er_boarding_time": Capability.TIME_FLOW.value,
-            "cost_per_rx": Capability.COST.value,
-            "labor_cost_per_day": Capability.COST.value,
-            "readmission_rate": Capability.QUALITY.value,
-            "mortality_rate": Capability.QUALITY.value,
-            "specimen_rejection_rate": Capability.QUALITY.value,
-            "facility_variance_score": Capability.VARIANCE.value,
-            "incidence_per_100k": Capability.VOLUME.value,
-        }
-
-        # -------------------------------------------------
-        # KPI CONFIDENCE
-        # -------------------------------------------------
-        kpis["_confidence"] = {}
-        cap_map = kpis["_kpi_capabilities"]
-
-        for key, value in kpis.items():
-            if key.startswith("_"):
-                continue
-            if key in cap_map:
-                kpis["_confidence"][key] = 0.85 if value is not None else 0.4
-            else:
-                kpis["_confidence"][key] = 0.65 if value is not None else 0.4
+            
+            # -------------------------------------------------
+            # KPI → CAPABILITY CONTRACT (EXPANDED & CORRECT)
+            # -------------------------------------------------
+            kpis["_kpi_capabilities"] = {
+                # Time
+                "avg_los": Capability.TIME_FLOW.value,
+                "avg_wait_time": Capability.TIME_FLOW.value,
+                "avg_tat": Capability.TIME_FLOW.value,
+                "visit_cycle_time": Capability.TIME_FLOW.value,
+            
+                # Cost
+                "cost_per_rx": Capability.COST.value,
+                "cost_per_test": Capability.COST.value,
+                "cost_per_member": Capability.COST.value,
+            
+                # Quality
+                "no_show_rate": Capability.QUALITY.value,
+                "readmission_rate": Capability.QUALITY.value,
+                "mortality_rate": Capability.QUALITY.value,
+                "specimen_rejection_rate": Capability.QUALITY.value,
+                "med_error_rate": Capability.QUALITY.value,
+            
+                # Volume / Access
+                "rx_volume": Capability.VOLUME.value,
+                "tests_per_fte": Capability.VOLUME.value,
+                "visits_per_provider": Capability.ACCESS.value,
+                "incidence_per_100k": Capability.VOLUME.value,
+            
+                # Variance
+                "facility_variance_score": Capability.VARIANCE.value,
+            }
+            
+            # -------------------------------------------------
+            # KPI CONFIDENCE (PLACEHOLDER SAFE)
+            # -------------------------------------------------
+            kpis["_confidence"] = {}
+            
+            for key, value in kpis.items():
+                if key.startswith("_"):
+                    continue
+                if key.endswith("_placeholder_kpi"):
+                    kpis["_confidence"][key] = 0.0
+                elif isinstance(value, (int, float)):
+                    kpis["_confidence"][key] = 0.85
+                else:
+                    kpis["_confidence"][key] = 0.4
 
         self._last_kpis = kpis
 
@@ -2050,7 +2122,7 @@ class HealthcareDomain(BaseDomain):
             sub_insights: List[Dict[str, Any]] = []
     
             # =================================================
-            # 1–2. STRENGTHS (ALWAYS AT LEAST ONE)
+            # STRENGTHS (EVIDENCE-BASED ONLY)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
                 avg_los = kpis.get("avg_los")
@@ -2060,102 +2132,128 @@ class HealthcareDomain(BaseDomain):
                         "level": "STRENGTH",
                         "title": "Inpatient Throughput Visibility",
                         "so_what": (
-                            f"Length of stay is measurable "
-                            f"(current avg: {avg_los:.1f} days), enabling operational control."
+                            f"Length of stay is consistently measured "
+                            f"(average {avg_los:.1f} days), enabling throughput governance."
+                        ),
+                        "confidence": conf(0.75, score),
+                    })
+    
+            if sub == HealthcareSubDomain.CLINIC.value:
+                wait = kpis.get("avg_wait_time")
+                if isinstance(wait, (int, float)):
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "STRENGTH",
+                        "title": "Clinic Access Transparency",
+                        "so_what": (
+                            f"Patient wait times are observable "
+                            f"(average {wait:.0f} minutes), supporting access optimization."
                         ),
                         "confidence": conf(0.72, score),
                     })
     
-            elif sub == HealthcareSubDomain.CLINIC.value:
-                sub_insights.append({
-                    "sub_domain": sub,
-                    "level": "STRENGTH",
-                    "title": "Appointment Flow Visibility",
-                    "so_what": (
-                        "Clinic data contains sufficient appointment signals "
-                        "to support access and scheduling optimization."
-                    ),
-                    "confidence": conf(0.70, score),
-                })
+            if sub == HealthcareSubDomain.DIAGNOSTICS.value:
+                tat = kpis.get("avg_tat")
+                if isinstance(tat, (int, float)):
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "STRENGTH",
+                        "title": "Diagnostic Turnaround Observability",
+                        "so_what": (
+                            f"Turnaround times are measurable "
+                            f"(average {tat:.0f} minutes), enabling SLA management."
+                        ),
+                        "confidence": conf(0.72, score),
+                    })
     
-            elif sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                sub_insights.append({
-                    "sub_domain": sub,
-                    "level": "STRENGTH",
-                    "title": "Diagnostic Process Observability",
-                    "so_what": (
-                        "Turnaround and alert timing signals are present, "
-                        "enabling diagnostic service performance monitoring."
-                    ),
-                    "confidence": conf(0.70, score),
-                })
+            if sub == HealthcareSubDomain.PHARMACY.value:
+                cost = kpis.get("cost_per_rx")
+                if isinstance(cost, (int, float)):
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "STRENGTH",
+                        "title": "Prescription Cost Visibility",
+                        "so_what": (
+                            f"Average prescription cost is tracked "
+                            f"(₹{cost:.0f}), supporting spend control."
+                        ),
+                        "confidence": conf(0.70, score),
+                    })
     
-            elif sub == HealthcareSubDomain.PHARMACY.value:
-                sub_insights.append({
-                    "sub_domain": sub,
-                    "level": "STRENGTH",
-                    "title": "Medication Flow Visibility",
-                    "so_what": (
-                        "Prescription and refill activity provides visibility "
-                        "into medication utilization and cost patterns."
-                    ),
-                    "confidence": conf(0.68, score),
-                })
-    
-            elif sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                sub_insights.append({
-                    "sub_domain": sub,
-                    "level": "STRENGTH",
-                    "title": "Population Signal Coverage",
-                    "so_what": (
-                        "Population-level indicators enable monitoring of "
-                        "disease incidence and prevention program reach."
-                    ),
-                    "confidence": conf(0.72, score),
-                })
+            if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
+                inc = kpis.get("incidence_per_100k")
+                if isinstance(inc, (int, float)):
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "STRENGTH",
+                        "title": "Population Health Signal Coverage",
+                        "so_what": (
+                            "Population-level indicators support monitoring "
+                            "of disease burden and prevention effectiveness."
+                        ),
+                        "confidence": conf(0.74, score),
+                    })
     
             # =================================================
-            # 3–6. RISKS (CONDITIONAL)
+            # WARNINGS (EARLY SIGNALS)
+            # =================================================
+            if sub == HealthcareSubDomain.CLINIC.value:
+                no_show = kpis.get("no_show_rate")
+                if isinstance(no_show, (int, float)) and no_show >= 0.10:
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "WARNING",
+                        "title": "Elevated Appointment No-Show Risk",
+                        "so_what": (
+                            f"No-show rate of {no_show:.1%} may reduce clinic throughput "
+                            "and revenue efficiency."
+                        ),
+                        "confidence": conf(0.75, score),
+                    })
+    
+            if sub == HealthcareSubDomain.PHARMACY.value:
+                med_err = kpis.get("med_error_rate")
+                if isinstance(med_err, (int, float)) and med_err >= 0.05:
+                    sub_insights.append({
+                        "sub_domain": sub,
+                        "level": "WARNING",
+                        "title": "Medication Safety Signals Detected",
+                        "so_what": (
+                            f"Observed intervention rate of {med_err:.1%} "
+                            "suggests need for tighter dispensing controls."
+                        ),
+                        "confidence": conf(0.75, score),
+                    })
+    
+            # =================================================
+            # RISKS (MATERIAL IMPACT)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
                 long_stay = kpis.get("long_stay_rate")
-                if isinstance(long_stay, (int, float)) and long_stay >= 0.2:
+                if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
                     sub_insights.append({
                         "sub_domain": sub,
                         "level": "RISK",
-                        "title": "Emerging Discharge Delays",
+                        "title": "Discharge Throughput Constraint",
                         "so_what": (
-                            f"{long_stay:.1%} of patients exceed acceptable stay thresholds, "
-                            "indicating discharge or bed-management friction."
-                        ),
-                        "confidence": conf(0.80, score),
-                    })
-    
-                fac_var = kpis.get("facility_variance_score")
-                if isinstance(fac_var, (int, float)) and fac_var > 0.5:
-                    sub_insights.append({
-                        "sub_domain": sub,
-                        "level": "RISK",
-                        "title": "High Facility Performance Variance",
-                        "so_what": (
-                            "Significant variation across facilities suggests "
-                            "inconsistent clinical or operational standards."
+                            f"{long_stay:.1%} of patients exceed acceptable LOS thresholds, "
+                            "indicating discharge bottlenecks."
                         ),
                         "confidence": conf(0.85, score),
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                avg_tat = kpis.get("avg_tat")
-                if isinstance(avg_tat, (int, float)) and avg_tat > 120:
+                tat = kpis.get("avg_tat")
+                if isinstance(tat, (int, float)) and tat > 120:
                     sub_insights.append({
                         "sub_domain": sub,
                         "level": "RISK",
-                        "title": "Turnaround Time Pressure",
+                        "title": "Diagnostic Turnaround Pressure",
                         "so_what": (
-                            f"Average turnaround time of {avg_tat:.0f} minutes may delay "
-                            "clinical decision-making during peak demand."
+                            f"Average turnaround time of {tat:.0f} minutes "
+                            "may delay clinical decision-making."
                         ),
-                        "confidence": conf(0.78, score),
+                        "confidence": conf(0.82, score),
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
@@ -2164,16 +2262,16 @@ class HealthcareDomain(BaseDomain):
                     sub_insights.append({
                         "sub_domain": sub,
                         "level": "RISK",
-                        "title": "Elevated Population Incidence",
+                        "title": "Elevated Disease Incidence",
                         "so_what": (
-                            f"Incidence rate of {inc:.0f} per 100k exceeds expected norms, "
-                            "indicating prevention or access gaps."
+                            f"Incidence rate of {inc:.0f} per 100k exceeds norms, "
+                            "indicating prevention gaps."
                         ),
-                        "confidence": conf(0.85, score),
+                        "confidence": conf(0.88, score),
                     })
     
             # =================================================
-            # HARD GUARANTEE: EXACTLY 9 INSIGHTS PER SUB-DOMAIN
+            # FILLERS (LOW CONFIDENCE ONLY)
             # =================================================
             filler_idx = 0
             while len(sub_insights) < 9:
@@ -2182,10 +2280,10 @@ class HealthcareDomain(BaseDomain):
                     "level": "INFO",
                     "title": filler_titles[filler_idx % len(filler_titles)],
                     "so_what": (
-                        "Current indicators remain within expected operating ranges "
-                        "with no statistically significant anomalies detected."
+                        "Available indicators remain within expected ranges "
+                        "with no statistically significant deviations observed."
                     ),
-                    "confidence": conf(0.65, score),
+                    "confidence": 0.45,
                 })
                 filler_idx += 1
     
@@ -2193,6 +2291,9 @@ class HealthcareDomain(BaseDomain):
     
         return insights
 
+    #--------------------------------
+    #-----Recommendations------------
+    #--------------------------------
     def generate_recommendations(
         self,
         df: pd.DataFrame,
@@ -2207,105 +2308,161 @@ class HealthcareDomain(BaseDomain):
         def conf(base: float, sub_score: float) -> float:
             return round(min(0.95, base + min(sub_score, 1.0) * 0.25), 2)
     
-        # Index insights by sub-domain for safe coupling
+        # -------------------------------------------------
+        # INDEX INSIGHTS BY SUB + LEVEL (CRITICAL)
+        # -------------------------------------------------
         insights_by_sub = {}
         for i in insights:
-            insights_by_sub.setdefault(i.get("sub_domain"), []).append(i.get("title"))
+            if not isinstance(i, dict):
+                continue
+            sub = i.get("sub_domain")
+            insights_by_sub.setdefault(sub, []).append(i)
     
         fallback_actions = [
             "Continue monitoring operational performance indicators",
             "Review trends during monthly governance meetings",
-            "Maintain current controls and escalation pathways",
+            "Maintain current escalation and governance controls",
         ]
     
         for sub, score in active_subs.items():
             sub_recs: List[Dict[str, Any]] = []
-            sub_insight_titles = set(insights_by_sub.get(sub, []))
     
-            # ---------------- HOSPITAL ----------------
+            sub_insights = insights_by_sub.get(sub, [])
+            levels = {i.get("level") for i in sub_insights}
+    
+            # =================================================
+            # HOSPITAL
+            # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
+    
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
-                    "action": "Maintain active inpatient flow monitoring",
+                    "action": "Maintain inpatient flow monitoring dashboards",
                     "owner": "Hospital Operations",
                     "timeline": "Ongoing",
-                    "goal": "Preserve throughput visibility and early warning detection",
-                    "confidence": conf(0.70, score),
+                    "goal": "Sustain throughput visibility and early bottleneck detection",
+                    "confidence": conf(0.72, score),
                 })
     
-                if "High Facility Performance Variance" in sub_insight_titles:
+                if "RISK" in levels:
+                    sub_recs.append({
+                        "sub_domain": sub,
+                        "priority": "HIGH",
+                        "action": "Implement centralized discharge command structure",
+                        "owner": "Hospital Operations",
+                        "timeline": "30–60 days",
+                        "goal": "Reduce prolonged length of stay and free inpatient capacity",
+                        "confidence": conf(0.88, score),
+                    })
+    
+                if any(i.get("title") == "High Facility Performance Variance" for i in sub_insights):
                     sub_recs.append({
                         "sub_domain": sub,
                         "priority": "HIGH",
                         "action": "Standardize clinical pathways across facilities",
                         "owner": "Clinical Governance",
                         "timeline": "60–90 days",
-                        "goal": "Reduce unwarranted LOS and outcome variability",
+                        "goal": "Reduce outcome and LOS variability",
                         "confidence": conf(0.85, score),
                     })
     
-                long_stay = kpis.get("long_stay_rate")
-                if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
-                    sub_recs.append({
-                        "sub_domain": sub,
-                        "priority": "HIGH",
-                        "action": "Establish centralized discharge command center",
-                        "owner": "Hospital Operations",
-                        "timeline": "30–60 days",
-                        "goal": "Improve throughput and free inpatient capacity",
-                        "confidence": conf(0.88, score),
-                    })
-    
-            # ---------------- CLINIC ----------------
+            # =================================================
+            # CLINIC
+            # =================================================
             if sub == HealthcareSubDomain.CLINIC.value:
+    
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
-                    "action": "Deploy automated appointment reminders",
+                    "action": "Deploy automated appointment reminders and confirmations",
                     "owner": "Ambulatory Operations",
                     "timeline": "30–60 days",
-                    "goal": "Reduce no-show driven revenue leakage",
+                    "goal": "Reduce missed appointments and access friction",
                     "confidence": conf(0.75, score),
                 })
     
-            # ---------------- DIAGNOSTICS ----------------
+                if "WARNING" in levels:
+                    sub_recs.append({
+                        "sub_domain": sub,
+                        "priority": "MEDIUM",
+                        "action": "Introduce no-show prediction and overbooking logic",
+                        "owner": "Clinic Operations",
+                        "timeline": "60–90 days",
+                        "goal": "Stabilize provider utilization and clinic throughput",
+                        "confidence": conf(0.78, score),
+                    })
+    
+            # =================================================
+            # DIAGNOSTICS
+            # =================================================
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
+    
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "MEDIUM",
-                    "action": "Optimize lab and imaging capacity during peak hours",
+                    "action": "Optimize lab and imaging capacity during peak demand",
                     "owner": "Diagnostics Leadership",
                     "timeline": "60–120 days",
                     "goal": "Stabilize turnaround times and clinician satisfaction",
                     "confidence": conf(0.78, score),
                 })
     
-            # ---------------- PHARMACY ----------------
+                if "RISK" in levels:
+                    sub_recs.append({
+                        "sub_domain": sub,
+                        "priority": "HIGH",
+                        "action": "Introduce STAT workflow and alert escalation protocols",
+                        "owner": "Diagnostics Leadership",
+                        "timeline": "30–60 days",
+                        "goal": "Prevent clinical decision delays",
+                        "confidence": conf(0.85, score),
+                    })
+    
+            # =================================================
+            # PHARMACY
+            # =================================================
             if sub == HealthcareSubDomain.PHARMACY.value:
+    
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "LOW",
-                    "action": "Increase generic substitution and formulary compliance",
+                    "action": "Increase generic substitution and formulary adherence",
                     "owner": "Pharmacy Leadership",
                     "timeline": "Ongoing",
-                    "goal": "Control medication spend while maintaining safety",
+                    "goal": "Control medication spend without compromising care",
                     "confidence": conf(0.70, score),
                 })
     
-            # ---------------- PUBLIC HEALTH ----------------
+                if "WARNING" in levels:
+                    sub_recs.append({
+                        "sub_domain": sub,
+                        "priority": "MEDIUM",
+                        "action": "Strengthen pharmacist double-check and alert review protocols",
+                        "owner": "Pharmacy Operations",
+                        "timeline": "30–60 days",
+                        "goal": "Reduce medication safety risk",
+                        "confidence": conf(0.80, score),
+                    })
+    
+            # =================================================
+            # PUBLIC HEALTH
+            # =================================================
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
+    
                 sub_recs.append({
                     "sub_domain": sub,
                     "priority": "HIGH",
                     "action": "Target high-incidence regions with preventive programs",
                     "owner": "Public Health Authority",
                     "timeline": "90–180 days",
-                    "goal": "Reduce population-level disease incidence",
+                    "goal": "Reduce disease incidence and population risk",
                     "confidence": conf(0.85, score),
                 })
     
-            # ---------------- HARD GUARANTEE: ≥5 ----------------
+            # =================================================
+            # FALLBACK (LOW CONFIDENCE ONLY)
+            # =================================================
             idx = 0
             while len(sub_recs) < 5:
                 sub_recs.append({
@@ -2314,13 +2471,16 @@ class HealthcareDomain(BaseDomain):
                     "action": fallback_actions[idx % len(fallback_actions)],
                     "owner": "Operations",
                     "timeline": "Ongoing",
-                    "goal": "Maintain stability and detect early deviations",
-                    "confidence": conf(0.60, score),
+                    "goal": "Maintain operational stability and signal monitoring",
+                    "confidence": 0.50,
                 })
                 idx += 1
     
             recommendations.extend(sub_recs[:5])
     
+        # -------------------------------------------------
+        # EXECUTIVE SORTING
+        # -------------------------------------------------
         priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         recommendations.sort(
             key=lambda r: (
