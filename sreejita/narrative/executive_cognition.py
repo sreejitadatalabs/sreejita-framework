@@ -116,54 +116,36 @@ def structure_insights(insights: List[Dict[str, Any]]) -> Dict[str, Any]:
 # BOARD READINESS SCORE (HONEST & GOVERNED)
 # =====================================================
 
-def compute_board_readiness_score(
-    kpis: Dict[str, Any],
-    insights: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-
+def compute_board_readiness_score(kpis, insights):
     conf_map = kpis.get("_confidence", {}) or {}
-
-    confident_kpis = [
-        v for v in conf_map.values()
-        if isinstance(v, (int, float)) and v >= 0.6
+    
+    # Count ONLY high-confidence KPIs (exclude placeholders)
+    high_conf_kpis = [
+        v for k, v in conf_map.items() 
+        if isinstance(v, (int, float)) and v >= 0.7  # Changed from 0.6 to 0.7
+        and not k.endswith("_placeholder_kpi")  # ← EXCLUDE PLACEHOLDERS
     ]
-
-    # Evidence strength (0–45)
-    evidence_score = (len(confident_kpis) / 9) * 45
-
-    # Coverage score (0–25)
-    coverage_keys = ["total_volume", "data_completeness"]
-    coverage_hits = sum(
-        1 for k in coverage_keys
-        if isinstance(kpis.get(k), (int, float))
-    )
-    coverage_score = (coverage_hits / len(coverage_keys)) * 25
-
-    # Risk penalty (−10 per RISK insight)
-    risk_penalty = sum(
-        10 for i in insights if i.get("level") == "RISK"
-    )
-
-    score = round(
-        max(0, min(100, evidence_score + coverage_score + 30 - risk_penalty))
-    )
-
-    # Governance cap for weak data
+    
+    evidence_score = (len(high_conf_kpis) / 6) * 40  # Changed divisor from 9 to 6
+    
+    # Coverage penalty: if < 3 real KPIs, cap score at 65
+    if len(high_conf_kpis) < 3:
+        coverage_score = 15  # Reduced from 25
+    else:
+        coverage_score = 25
+    
+    # Risk penalties (BOTH WARNING and RISK)
+    warning_penalty = sum(5 for i in insights if i.get("level") == "WARNING")
+    risk_penalty = sum(10 for i in insights if i.get("level") == "RISK")
+    
+    score = round(max(0, min(100, evidence_score + coverage_score + 20 - warning_penalty - risk_penalty)))
+    
+    # Data completeness cap
     if isinstance(kpis.get("data_completeness"), (int, float)):
         if kpis["data_completeness"] < 0.7:
             score = min(score, 60)
-
-    band = (
-        "BOARD READY" if score >= 85 else
-        "REVIEW WITH CAUTION" if score >= 70 else
-        "MANAGEMENT ONLY" if score >= 50 else
-        "NOT BOARD SAFE"
-    )
-
-    return {
-        "score": score,
-        "band": band,
-    }
+    
+    return {"score": score, "band": band}
 
 
 # =====================================================
@@ -265,34 +247,37 @@ def build_executive_payload(
 # PER-SUB-DOMAIN EXECUTIVE COGNITION (CRITICAL)
 # =====================================================
 
-def build_subdomain_executive_payloads(
-    kpis: Dict[str, Any],
-    insights: List[Dict[str, Any]],
-    recommendations: List[Dict[str, Any]],
-) -> Dict[str, Dict[str, Any]]:
-
+def build_subdomain_executive_payloads(kpis, insights, recommendations):
     sub_domains = kpis.get("sub_domains", {}) or {}
-    results: Dict[str, Dict[str, Any]] = {}
-
+    results = {}
+    
     for sub in sub_domains.keys():
-
+        # Filter insights to just this sub-domain
         sub_insights = [
-            i for i in (insights or [])
+            i for i in insights 
             if isinstance(i, dict) and i.get("sub_domain") == sub
         ]
-
+        
+        # Filter recommendations to just this sub-domain
         sub_recs = [
-            r for r in (recommendations or [])
+            r for r in recommendations 
             if isinstance(r, dict) and r.get("sub_domain") == sub
         ]
-
-        sub_kpis = dict(kpis)
+        
+        # Create sub-domain-specific KPI dict (NOT copy all!)
+        sub_kpis = {
+            k: v for k, v in kpis.items()
+            if k.startswith("_") or k in ["primary_sub_domain", "sub_domains", "total_volume"]
+            or (isinstance(k, str) and sub in k)  # Only KPIs for this sub-domain
+        }
+        
         sub_kpis["primary_sub_domain"] = sub
-
+        
         results[sub] = build_executive_payload(
             kpis=sub_kpis,
             insights=sub_insights,
             recommendations=sub_recs,
         )
-
+    
     return results
+
