@@ -2652,3 +2652,4 @@ def register(registry):
         HealthcareDomain,
         HealthcareDomainDetector,
     )
+    
