@@ -407,6 +407,12 @@ def infer_healthcare_subdomains(
 class HealthcareDomain(BaseDomain):
     name = "healthcare"
 
+    def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
+        return (
+            kpis.get(f"{sub}_{key}")
+            if f"{sub}_{key}" in kpis
+            else kpis.get(key)
+        )
     # -------------------------------------------------
     # PREPROCESS
     # -------------------------------------------------
@@ -805,7 +811,7 @@ class HealthcareDomain(BaseDomain):
         kpis["_confidence"] = {}
 
         min_sub_conf = min(active_subs.values()) if active_subs else 0.3
-        evidence = get_kpi(kpis, sub, "_evidence", {})
+        evidence = kpis.get("_evidence", {})
             
         for key, value in kpis.items():
             if key.startswith("_"):
@@ -2158,13 +2164,6 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-
-    def get_kpi(kpis: Dict[str, Any], sub: str, key: str):
-        return (
-            kpis.get(f"{sub}_{key}")
-            if f"{sub}_{key}" in kpis
-            else kpis.get(key)
-        )
     
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
@@ -2187,43 +2186,43 @@ class HealthcareDomain(BaseDomain):
             "Stable Performance Pattern",
             "No Material Risk Detected",
         ]
-    
+
+        # -------------------------------------------------
+        # CROSS-SUBDOMAIN INTELLIGENCE (EXECUTIVE-LEVEL)
+        # -------------------------------------------------
+        if (
+            "hospital" in active_subs
+            and "diagnostics" in active_subs
+            and isinstance(self.get_kpi(kpis, "diagnostics", "avg_tat"), (int, float))
+            and isinstance(self.get_kpi(kpis, "hospital", "avg_los"), (int, float))
+            and self.get_kpi(kpis, "diagnostics", "avg_tat") > 120
+        ):
+            cross_conf = min(
+                kpis.get("_confidence", {}).get("avg_tat", 0.6),
+                kpis.get("_confidence", {}).get("avg_los", 0.6),
+            )
+            
+            insights.append({
+                "sub_domain": "cross_domain",
+                "level": "RISK",
+                "title": "Diagnostic Delays Driving Inpatient Length of Stay",
+                "so_what": (
+                    f"Elevated diagnostic turnaround times "
+                    f"({self.get_kpi(kpis, 'diagnostics', 'avg_tat'):.0f} mins) "
+                    f"are likely contributing to prolonged inpatient stays "
+                    f"(avg LOS {self.get_kpi(kpis, 'hospital', 'avg_los'):.1f} days)."
+                ),
+                "confidence": round(min(0.95, cross_conf), 2),
+            })
+        
         for sub, score in active_subs.items():
             sub_insights: List[Dict[str, Any]] = []
-
-            # -------------------------------------------------
-            # CROSS-SUBDOMAIN INTELLIGENCE (EXECUTIVE-LEVEL)
-            # -------------------------------------------------
-            if (
-                "hospital" in active_subs
-                and "diagnostics" in active_subs
-                and isinstance(self.get_kpi(kpis, "diagnostics", "avg_tat"), (int, float))
-                and isinstance(self.get_kpi(kpis, "hospital", "avg_los"), (int, float))
-                and self.get_kpi(kpis, "diagnostics", "avg_tat") > 120
-            ):
-                cross_conf = min(
-                    kpis.get("_confidence", {}).get("avg_tat", 0.6),
-                    kpis.get("_confidence", {}).get("avg_los", 0.6),
-                )
-            
-                insights.append({
-                    "sub_domain": "cross_domain",
-                    "level": "RISK",
-                    "title": "Diagnostic Delays Driving Inpatient Length of Stay",
-                    "so_what": (
-                        f"Elevated diagnostic turnaround times "
-                        f"({self.get_kpi(kpis, 'diagnostics', 'avg_tat'):.0f} mins) "
-                        f"are likely contributing to prolonged inpatient stays "
-                        f"(avg LOS {self.get_kpi(kpis, 'hospital', 'avg_los'):.1f} days)."
-                    ),
-                    "confidence": round(min(0.95, cross_conf), 2),
-                })
     
             # =================================================
             # STRENGTHS (EVIDENCE-BASED ONLY)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                avg_los = get_kpi(kpis, sub, "avg_los")
+                avg_los = self.get_kpi(kpis, sub, "avg_los")
                 if isinstance(avg_los, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2237,7 +2236,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.CLINIC.value:
-                wait = get_kpi(kpis, sub, "avg_wait_time")
+                wait = self.get_kpi(kpis, sub, "avg_wait_time")
                 if isinstance(wait, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2251,7 +2250,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = get_kpi(kpis, sub, "avg_tat")
+                tat = self.get_kpi(kpis, sub, "avg_tat")
                 if isinstance(tat, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2265,7 +2264,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                cost = get_kpi(kpis, sub, "cost_per_rx")
+                cost = self.get_kpi(kpis, sub, "cost_per_rx")
                 if isinstance(cost, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2279,7 +2278,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = get_kpi(kpis, sub, "incidence_per_100k")
+                inc = self.get_kpi(kpis, sub, "incidence_per_100k")
                 if isinstance(inc, (int, float)):
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2296,7 +2295,7 @@ class HealthcareDomain(BaseDomain):
             # WARNINGS (EARLY SIGNALS)
             # =================================================
             if sub == HealthcareSubDomain.CLINIC.value:
-                no_show = get_kpi(kpis, sub, "no_show_rate")
+                no_show = self.get_kpi(kpis, sub, "no_show_rate")
                 if isinstance(no_show, (int, float)) and no_show >= 0.10:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2310,7 +2309,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PHARMACY.value:
-                med_err = get_kpi(kpis, sub, "med_error_rate")
+                med_err = self.get_kpi(kpis, sub, "med_error_rate")
                 if isinstance(med_err, (int, float)) and med_err >= 0.05:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2327,7 +2326,7 @@ class HealthcareDomain(BaseDomain):
             # RISKS (MATERIAL IMPACT)
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value:
-                long_stay = get_kpi(kpis, sub, "long_stay_rate")
+                long_stay = self.get_kpi(kpis, sub, "long_stay_rate")
                 if isinstance(long_stay, (int, float)) and long_stay >= 0.25:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2341,7 +2340,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.DIAGNOSTICS.value:
-                tat = get_kpi(kpis, sub, "avg_tat")
+                tat = self.get_kpi(kpis, sub, "avg_tat")
                 if isinstance(tat, (int, float)) and tat > 120:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2355,7 +2354,7 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
-                inc = get_kpi(kpis, sub, "incidence_per_100k")
+                inc = self.get_kpi(kpis, sub, "incidence_per_100k")
                 if isinstance(inc, (int, float)) and inc > 300:
                     sub_insights.append({
                         "sub_domain": sub,
@@ -2432,7 +2431,7 @@ class HealthcareDomain(BaseDomain):
             # HOSPITAL
             # =================================================
             if sub == HealthcareSubDomain.HOSPITAL.value and "RISK" in levels:
-                current_los = get_kpi(kpis, sub, "avg_los")
+                current_los = self.get_kpi(kpis, sub, "avg_los")
             
                 sub_recs.append({
                     "sub_domain": sub,
