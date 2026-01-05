@@ -762,6 +762,43 @@ class HealthcareDomain(BaseDomain):
         }
             
             # -------------------------------------------------
+            # KPI EVIDENCE COVERAGE (FORENSIC)
+            # -------------------------------------------------
+            kpis["_evidence"] = {}
+            
+            kpi_sources  = {
+                "avg_los": [self.cols.get("los")],
+                "readmission_rate": [self.cols.get("readmitted")],
+                "avg_wait_time": [self.cols.get("duration")],
+                "cost_per_rx": [self.cols.get("cost")],
+                "incidence_per_100k": [self.cols.get("population"), self.cols.get("flag")],
+            }
+            
+            for k, cols in kpi_sources.items():
+                coverages = [
+                    df[c].notna().mean()
+                    for c in cols
+                    if c and c in df.columns
+                ]
+                if coverages:
+                    kpis["_evidence"][k] = round(float(max(coverages)), 2)
+
+            # -------------------------------------------------
+            # KPI INFERENCE TYPE (AUDIT-READY)
+            # -------------------------------------------------
+            kpis["_inference_type"] = {}
+            
+            for key in kpis:
+                if key.startswith("_"):
+                    continue
+            
+                if "proxy" in key or "estimated" in key:
+                    kpis["_inference_type"][key] = "proxy"
+                elif key.startswith("__derived"):
+                    kpis["_inference_type"][key] = "derived"
+                else:
+                    kpis["_inference_type"][key] = "direct"
+            # -------------------------------------------------
             # KPI CONFIDENCE (HONEST & SUB-DOMAIN AWARE)
             # -------------------------------------------------
             kpis["_confidence"] = {}
@@ -887,6 +924,11 @@ class HealthcareDomain(BaseDomain):
                 "importance": float(importance),
                 "confidence": final_conf,
                 "sub_domain": sub_domain,
+                "inference_type": (
+                    "proxy" if "proxy" in caption.lower()
+                    else "derived" if "trend" in caption.lower()
+                    else "direct"
+                ),
             })
     
         # -------------------------------------------------
@@ -2557,13 +2599,13 @@ class HealthcareDomainDetector(BaseDomainDetector):
         # -------------------------------------------------
         weights = {
             "pid": 0.15,
-            "date": 0.15,
-            "discharge_date": 0.10,
-            "los": 0.20,
+            "date": 0.12,
+            "discharge_date": 0.08,
+            "los": 0.12,          # reduced
+            "facility": 0.15,     # increased
+            "cost": 0.12,         # pharmacy support
+            "population": 0.12,   # public health parity
             "diagnosis": 0.10,
-            "facility": 0.10,
-            "supply": 0.10,
-            "population": 0.10,
         }
 
         confidence = round(
