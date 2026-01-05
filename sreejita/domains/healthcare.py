@@ -708,12 +708,13 @@ class HealthcareDomain(BaseDomain):
     
         active_subs = [
             s for s, score in sub_scores.items()
-            if isinstance(score, (int, float)) and score > 0.15
+            if isinstance(score, (int, float)) and score >= 0.3
         ]
-        
+    
         if not active_subs:
             primary = kpis.get("primary_sub_domain")
-            active_subs = [primary] if primary in HEALTHCARE_VISUAL_MAP else []
+            if primary in HEALTHCARE_VISUAL_MAP:
+                active_subs = [primary]
     
         # -------------------------------------------------
         # SUB-DOMAIN CONFIDENCE WEIGHTING
@@ -725,7 +726,7 @@ class HealthcareDomain(BaseDomain):
             )
     
         # -------------------------------------------------
-        # VISUAL REGISTRATION (STRICT CONTRACT)
+        # VISUAL REGISTRATION (AUTHORITATIVE CONTRACT)
         # -------------------------------------------------
         def register_visual(
             fig,
@@ -733,14 +734,14 @@ class HealthcareDomain(BaseDomain):
             caption: str,
             importance: float,
             base_confidence: float,
-            sub: str,
+            sub_domain: str,
         ):
             path = output_dir / name
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
     
             final_conf = round(
-                min(0.95, base_confidence * sub_domain_weight(sub)),
+                min(0.95, base_confidence * sub_domain_weight(sub_domain)),
                 2
             )
     
@@ -749,11 +750,11 @@ class HealthcareDomain(BaseDomain):
                 "caption": caption,
                 "importance": float(importance),
                 "confidence": final_conf,
-                "sub_domain": sub,
+                "sub_domain": sub_domain,
             })
     
         # -------------------------------------------------
-        # MAIN VISUAL DISPATCH
+        # MAIN VISUAL DISPATCH (SAFE PER VISUAL)
         # -------------------------------------------------
         for sub in active_subs:
             for visual_key in HEALTHCARE_VISUAL_MAP.get(sub, []):
@@ -763,10 +764,10 @@ class HealthcareDomain(BaseDomain):
                         df=df,
                         output_dir=output_dir,
                         sub_domain=sub,
-                        # 🎯 FIX: Pass a partial or lambda to handle the 'sub' argument
-                        register_visual=lambda f, n, c, i, conf, s=sub: register_visual(f, n, c, i, conf, s),
+                        register_visual=register_visual,  # ✅ FIXED
                     )
                 except Exception:
+                    # Never let one visual kill the rest
                     continue
     
         # -------------------------------------------------
@@ -778,17 +779,16 @@ class HealthcareDomain(BaseDomain):
             and Path(v.get("path", "")).exists()
             and float(v.get("confidence", 0)) >= 0.3
         ]
-        
+    
         # -------------------------------------------------
         # FINAL SORT (EXECUTIVE PRIORITY)
         # -------------------------------------------------
-        visuals = sorted(
-            visuals,
+        visuals.sort(
             key=lambda v: float(v.get("importance", 0)) * float(v.get("confidence", 1)),
             reverse=True,
         )
-        
-        return visuals or []
+    
+        return visuals
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
@@ -832,6 +832,7 @@ class HealthcareDomain(BaseDomain):
                     "Monthly trend of inpatient length of stay.",
                     importance=0.95,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -850,7 +851,7 @@ class HealthcareDomain(BaseDomain):
                 
                 register_visual(fig, f"{sub_domain}_bed_velocity.png", 
                                "Utilization frequency of physical hospital beds.", 
-                               0.92, 0.88)
+                               0.92, 0.88, sub_domain,)
                 return
     
             # 3. Readmission Risk
@@ -869,6 +870,7 @@ class HealthcareDomain(BaseDomain):
                     "Distribution of 30-day readmissions.",
                     importance=0.93,
                     confidence=0.88,
+                    sundomain,
                 )
                 return
     
@@ -888,6 +890,7 @@ class HealthcareDomain(BaseDomain):
                     "Inpatient discharge timing pattern.",
                     importance=0.85,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -908,6 +911,7 @@ class HealthcareDomain(BaseDomain):
                     "Relationship between patient acuity and staffing intensity.",
                     importance=0.88,
                     confidence=0.82,
+                    sub_domain,
                 )
                 return
     
@@ -927,6 +931,7 @@ class HealthcareDomain(BaseDomain):
                     "Average emergency department boarding time.",
                     importance=0.92,
                     confidence=0.85,
+                    subdomain,
                 )
                 return
     
@@ -948,6 +953,7 @@ class HealthcareDomain(BaseDomain):
                     "Observed mortality proxy trend over time.",
                     importance=0.9,
                     confidence=0.8,
+                    subdomain,
                 )
                 return
     
@@ -977,6 +983,7 @@ class HealthcareDomain(BaseDomain):
                     "Appointment no-show rates across the week.",
                     importance=0.92,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1000,6 +1007,7 @@ class HealthcareDomain(BaseDomain):
                     "Trend of patient wait times from check-in to provider.",
                     importance=0.90,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1028,6 +1036,7 @@ class HealthcareDomain(BaseDomain):
                     "Days between booking and actual clinic visit.",
                     importance=0.88,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1048,6 +1057,7 @@ class HealthcareDomain(BaseDomain):
                     "Comparison of provider workload distribution.",
                     importance=0.91,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -1068,6 +1078,7 @@ class HealthcareDomain(BaseDomain):
                     "Distribution of patient visits by service location.",
                     importance=0.85,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1092,6 +1103,7 @@ class HealthcareDomain(BaseDomain):
                     "Referral flow from intake to completed visits.",
                     importance=0.87,
                     confidence=0.7,
+                    sub_domain,
                 )
                 return
     
@@ -1114,6 +1126,7 @@ class HealthcareDomain(BaseDomain):
                     "Service delivery mix across visit types.",
                     importance=0.86,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1150,6 +1163,7 @@ class HealthcareDomain(BaseDomain):
                     "Diagnostic turnaround time percentiles over time.",
                     importance=0.95,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -1173,6 +1187,7 @@ class HealthcareDomain(BaseDomain):
                     "Speed of notifying life-threatening diagnostic results.",
                     importance=0.93,
                     confidence=0.88,
+                    sub_domain,
                 )
                 return
     
@@ -1196,6 +1211,7 @@ class HealthcareDomain(BaseDomain):
                     "Primary causes of diagnostic specimen rejection.",
                     importance=0.90,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1215,6 +1231,7 @@ class HealthcareDomain(BaseDomain):
                     "Relative diagnostic equipment availability across facilities.",
                     importance=0.87,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1243,6 +1260,7 @@ class HealthcareDomain(BaseDomain):
                     "Hourly diagnostic order intensity by day.",
                     importance=0.92,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -1269,6 +1287,7 @@ class HealthcareDomain(BaseDomain):
                     "Rate of repeated diagnostic tests indicating waste.",
                     importance=0.89,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1289,6 +1308,7 @@ class HealthcareDomain(BaseDomain):
                     "Variation in diagnostic ordering behavior across providers.",
                     importance=0.88,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1317,6 +1337,7 @@ class HealthcareDomain(BaseDomain):
                     "Cumulative medication expenditure over time.",
                     importance=0.95,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -1342,6 +1363,7 @@ class HealthcareDomain(BaseDomain):
                     "Delay between expected and actual prescription refills.",
                     importance=0.92,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1365,6 +1387,7 @@ class HealthcareDomain(BaseDomain):
                     "Medication spend distribution by therapeutic class (proxy).",
                     importance=0.9,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1387,6 +1410,7 @@ class HealthcareDomain(BaseDomain):
                     "Share of prescriptions filled with generic alternatives.",
                     importance=0.88,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1410,6 +1434,7 @@ class HealthcareDomain(BaseDomain):
                     "Variation in average prescribing cost across providers.",
                     importance=0.91,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1429,6 +1454,7 @@ class HealthcareDomain(BaseDomain):
                     "Efficiency of medication inventory turnover.",
                     importance=0.87,
                     confidence=0.7,
+                    sub_domain,
                 )
                 return
     
@@ -1452,6 +1478,7 @@ class HealthcareDomain(BaseDomain):
                     "Frequency of pharmacist interventions for drug safety.",
                     importance=0.89,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1478,6 +1505,7 @@ class HealthcareDomain(BaseDomain):
                     "Observed disease incidence per 100,000 population.",
                     importance=0.95,
                     confidence=0.9,
+                    sub_domain,
                 )
                 return
     
@@ -1501,6 +1529,7 @@ class HealthcareDomain(BaseDomain):
                     "Growth of observed health cohort over time.",
                     importance=0.93,
                     confidence=0.88,
+                    sub_domain,
                 )
                 return
     
@@ -1528,6 +1557,7 @@ class HealthcareDomain(BaseDomain):
                     "Relative prevalence across demographic age groups.",
                     importance=0.9,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1550,6 +1580,7 @@ class HealthcareDomain(BaseDomain):
                     "Healthcare provider availability per 1,000 residents.",
                     importance=0.92,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
     
@@ -1571,6 +1602,7 @@ class HealthcareDomain(BaseDomain):
                     "Population outcome trends following interventions.",
                     importance=0.9,
                     confidence=0.8,
+                    sub_domain,
                 )
                 return
     
@@ -1592,6 +1624,7 @@ class HealthcareDomain(BaseDomain):
                     "Health outcome variation across socioeconomic regions.",
                     importance=0.88,
                     confidence=0.75,
+                    sub_domain,
                 )
                 return
     
@@ -1613,6 +1646,7 @@ class HealthcareDomain(BaseDomain):
                     "Population coverage of immunization or screening programs.",
                     importance=0.91,
                     confidence=0.85,
+                    sub_domain,
                 )
                 return
         # If visual key not handled
