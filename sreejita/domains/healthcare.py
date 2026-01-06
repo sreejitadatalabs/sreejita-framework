@@ -749,7 +749,7 @@ class HealthcareDomain(BaseDomain):
             "avg_wait_time": Capability.TIME_FLOW.value,
             "avg_tat": Capability.TIME_FLOW.value,
             "visit_cycle_time": Capability.TIME_FLOW.value,
-                "er_boarding_time": Capability.TIME_FLOW.value,
+            "er_boarding_time": Capability.TIME_FLOW.value,
             
             # Cost
             "cost_per_rx": Capability.COST.value,
