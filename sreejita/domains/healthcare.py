@@ -577,6 +577,30 @@ class HealthcareDomain(BaseDomain):
             is_mixed = len(active_subs) > 1
 
         # -------------------------------------------------
+        # EXECUTIVE PRIMARY KPI SELECTION (BOARD SAFE)
+        # -------------------------------------------------
+        kpis["_primary_kpis"] = []
+        
+        primary = kpis.get("primary_sub_domain")
+        
+        if primary in HEALTHCARE_KPI_MAP:
+            for k in HEALTHCARE_KPI_MAP[primary][:9]:
+                val = self.get_kpi(kpis, primary, k)
+                if isinstance(val, (int, float)):
+                    kpis["_primary_kpis"].append({
+                        "name": k.replace("_", " ").title(),
+                        "value": val,
+                        "confidence": self.get_kpi_confidence(kpis, primary, k),
+                    })
+        
+        # HARD GUARANTEE
+        while len(kpis["_primary_kpis"]) < 5:
+            kpis["_primary_kpis"].append({
+                "name": "Data Coverage",
+                "value": None,
+                "confidence": 0.4,
+            })
+        # -------------------------------------------------
         # BASE KPI CONTEXT
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
@@ -902,8 +926,13 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         active_subs = [
             s for s, score in sub_scores.items()
-            if isinstance(score, (int, float)) and score >= 0.3
+            if isinstance(score, (int, float)) and score >= 0.2
         ]
+        
+        # HARD FALLBACK — NEVER ZERO VISUALS
+        if not active_subs and sub_scores:
+            strongest = max(sub_scores, key=sub_scores.get)
+            active_subs = [strongest]
     
         # Fallback handling
         if not active_subs:
@@ -943,7 +972,8 @@ class HealthcareDomain(BaseDomain):
             sub_domain: str,
         ):
             # enforce unique, collision-safe naming
-            safe_name = f"{sub_domain}_{name}" if not name.startswith(sub_domain) else name
+            fname = name if name.endswith(".png") else f"{name}.png"
+            safe_name = f"{sub_domain}_{fname}" if not fname.startswith(sub_domain) else fname
             path = output_dir / safe_name
     
             fig.savefig(path, dpi=120, bbox_inches="tight")
