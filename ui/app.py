@@ -99,13 +99,13 @@ if st.button("🚀 Run Analysis"):
             temp_path = temp_dir / f"{uuid.uuid4().hex}_{uploaded_file.name}"
             temp_path.write_bytes(uploaded_file.getbuffer())
 
-                result = run_analysis_from_ui(
-                    input_path=str(temp_path),
-                    narrative_enabled=enable_narrative,
-                    narrative_provider=provider,
-                    generate_pdf=export_pdf,
-                    domain_hint=user_domain_hint,  # ✅ ADD THIS LINE
-                )
+            result = run_analysis_from_ui(
+                input_path=str(temp_path),
+                narrative_enabled=enable_narrative,
+                narrative_provider=provider,
+                generate_pdf=export_pdf,
+                domain_hint=user_domain_hint,  # ✅ ADD THIS LINE
+            )
 
 
     except Exception as e:
