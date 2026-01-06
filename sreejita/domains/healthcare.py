@@ -884,6 +884,11 @@ class HealthcareDomain(BaseDomain):
         kpis["_primary_kpis"] = []
         
         primary = kpis.get("primary_sub_domain")
+
+        if primary == HealthcareSubDomain.MIXED.value:
+            # pick strongest sub-domain
+            strongest = max(kpis["sub_domains"], key=kpis["sub_domains"].get)
+            primary = strongest
         
         if primary in HEALTHCARE_KPI_MAP:
             for k in HEALTHCARE_KPI_MAP[primary][:9]:
@@ -944,7 +949,7 @@ class HealthcareDomain(BaseDomain):
             elif kpis.get("primary_sub_domain") in HEALTHCARE_VISUAL_MAP:
                 active_subs = [kpis["primary_sub_domain"]]
             else:
-                return []  # true UNKNOWN only
+                return []
     
         # Fallback handling
         if not active_subs:
@@ -2263,7 +2268,10 @@ class HealthcareDomain(BaseDomain):
         if (
             "hospital" in active_subs
             and "diagnostics" in active_subs
-            and isinstance(self.get_kpi(kpis, "diagnostics", "avg_tat"), (int, float))
+            and any(
+                isinstance(self.get_kpi(kpis, sub, "avg_tat"), (int, float))
+                for sub in kpis.get("sub_domains", {})
+            )
             and isinstance(self.get_kpi(kpis, "hospital", "avg_los"), (int, float))
             and self.get_kpi(kpis, "diagnostics", "avg_tat") > 120
         ):
