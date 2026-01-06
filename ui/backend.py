@@ -10,8 +10,10 @@ def run_analysis_from_ui(
     input_path: str,
     narrative_enabled: bool = False,
     narrative_provider: str = "gemini",
-    generate_pdf: bool = True,  # PDF is DEFAULT in v3.5.1
+    generate_pdf: bool = True,
+    domain_hint: str = None,  # ✅ ADD THIS LINE
 ) -> Dict[str, Any]:
+
     """
     v3.5.1 UI-safe wrapper (STABLE)
 
@@ -52,7 +54,9 @@ def run_analysis_from_ui(
         input_path=input_path,
         config=config,
         generate_pdf=True,
+        domain_hint=domain_hint,  # ✅ ADD THIS LINE
     )
+
 
     # -------------------------------------------------
     # Stable contract for Streamlit
