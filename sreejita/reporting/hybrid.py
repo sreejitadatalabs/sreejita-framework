@@ -7,18 +7,19 @@ from sreejita.reporting.base import BaseReport
 
 
 # =====================================================
-# HYBRID REPORT ENGINE — UNIVERSAL (FINAL, HARDENED)
+# HYBRID REPORT ENGINE — UNIVERSAL (FINAL, LOCKED)
+# Sreejita Framework v3.6
 # =====================================================
 
 class HybridReport(BaseReport):
     """
     Hybrid Report Engine (Authoritative)
 
-    Responsibilities:
-    - Render executive-ready Markdown
-    - Enforce narrative ordering
-    - Render global + per-sub-domain executive cognition
-    - NEVER compute intelligence
+    GUARANTEES:
+    - Executive-safe Markdown
+    - Deterministic ordering
+    - No intelligence computation
+    - No empty or duplicated sections
     """
 
     name = "hybrid"
@@ -34,7 +35,7 @@ class HybridReport(BaseReport):
     ) -> Path:
 
         if not isinstance(domain_results, dict) or not domain_results:
-            raise RuntimeError("HybridReport.build expects non-empty domain_results dict")
+            raise RuntimeError("HybridReport requires non-empty domain_results")
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -55,11 +56,6 @@ class HybridReport(BaseReport):
             executive = primary_payload.get("executive")
             if isinstance(executive, dict):
                 self._write_global_executive(f, executive)
-
-            # =================================================
-            # PER-SUB-DOMAIN EXECUTIVE
-            # =================================================
-            if isinstance(executive, dict):
                 self._write_sub_domain_executives(f, executive)
 
             # =================================================
@@ -80,18 +76,18 @@ class HybridReport(BaseReport):
     def _write_global_executive(self, f, executive: Dict[str, Any]):
         brief = executive.get("executive_brief")
         board = executive.get("board_readiness") or {}
+        trend = executive.get("board_readiness_trend") or {}
 
         if isinstance(brief, str) and brief.strip():
             f.write("## Executive Summary\n\n")
             f.write(f"{brief.strip()}\n\n")
 
-        if isinstance(board, dict):
+        if board:
             f.write("### Board Readiness\n")
-            f.write(f"- **Score:** {board.get('score', '—')} / 100\n")
-            f.write(f"- **Status:** {board.get('band', '—')}\n")
+            f.write(f"- **Score:** {board.get('score','—')} / 100\n")
+            f.write(f"- **Status:** {board.get('band','—')}\n")
 
-        trend = executive.get("board_readiness_trend")
-        if isinstance(trend, dict):
+        if trend:
             f.write(
                 f"- **Trend:** {trend.get('trend','→')} "
                 f"(Prev: {trend.get('previous_score','—')}, "
@@ -115,15 +111,18 @@ class HybridReport(BaseReport):
             if not isinstance(payload, dict):
                 continue
 
-            f.write(f"### {sub.replace('_',' ').title()}\n\n")
-
             brief = payload.get("executive_brief")
             board = payload.get("board_readiness") or {}
+
+            if not brief and not board:
+                continue  # 🔒 avoid empty sections
+
+            f.write(f"### {sub.replace('_',' ').title()}\n\n")
 
             if isinstance(brief, str) and brief.strip():
                 f.write(f"{brief.strip()}\n\n")
 
-            if isinstance(board, dict):
+            if board:
                 f.write(
                     f"- **Board Readiness Score:** {board.get('score','—')} / 100  \n"
                     f"- **Status:** {board.get('band','—')}\n\n"
@@ -139,8 +138,6 @@ class HybridReport(BaseReport):
 
         # ---------------- KPIs ----------------
         raw_kpis = result.get("kpis") or {}
-
-        # Executive-safe KPIs only
         kpis = {
             k: v for k, v in raw_kpis.items()
             if isinstance(k, str)
@@ -159,41 +156,46 @@ class HybridReport(BaseReport):
                 f.write(
                     f"| {k.replace('_',' ').title()} | {self._format_value(k, v)} |\n"
                 )
-
             f.write("\n")
 
         # ---------------- VISUALS ----------------
-        visuals = result.get("visuals") or []
-        visuals = visuals[:6]
+        visuals = [
+            v for v in (result.get("visuals") or [])
+            if isinstance(v, dict) and v.get("path")
+        ][:6]
 
         if visuals:
             f.write("### Visual Evidence\n")
             for vis in visuals:
-                if not isinstance(vis, dict):
-                    continue
-
-                path = vis.get("path")
                 caption = vis.get("caption", "Visual evidence")
+                path = vis.get("path")
 
                 try:
-                    conf = float(vis.get("confidence", 0))
-                    conf_pct = int(max(0, min(conf, 1)) * 100)
+                    conf = int(float(vis.get("confidence", 0)) * 100)
                 except Exception:
-                    conf_pct = 0
+                    conf = 0
 
-                if path:
-                    f.write(f"![{caption}]({path})\n")
-                    f.write(f"> {caption} (Confidence: {conf_pct}%)\n\n")
+                f.write(f"![{caption}]({path})\n")
+                f.write(f"> {caption} (Confidence: {conf}%)\n\n")
 
         # ---------------- INSIGHTS ----------------
-        insights = result.get("insights") or []
-        insights = insights[:5]
+        raw_insights = result.get("insights") or []
+        insights: List[Dict[str, Any]] = []
+
+        if isinstance(raw_insights, list):
+            insights = raw_insights
+        elif isinstance(raw_insights, dict):
+            insights = (
+                raw_insights.get("risks", []) +
+                raw_insights.get("warnings", []) +
+                raw_insights.get("strengths", [])
+            )
+
+        insights = [i for i in insights if isinstance(i, dict)][:5]
 
         if insights:
             f.write("### Key Insights\n")
             for ins in insights:
-                if not isinstance(ins, dict):
-                    continue
                 f.write(
                     f"- **{ins.get('level','INFO')}** — "
                     f"{ins.get('title','')}: {ins.get('so_what','')}\n"
@@ -201,22 +203,18 @@ class HybridReport(BaseReport):
             f.write("\n")
 
         # ---------------- RECOMMENDATIONS ----------------
-        recs = result.get("recommendations") or []
-        recs = recs[:5]
+        recs = [
+            r for r in (result.get("recommendations") or [])
+            if isinstance(r, dict)
+        ][:5]
 
         if recs:
             f.write("### Recommendations\n")
             for r in recs:
-                if not isinstance(r, dict):
-                    continue
-
-                degraded = r.get("degraded") is True
-                suffix = " _(degraded)_ " if degraded else ""
-
                 f.write(
-                    f"- **{r.get('priority','')}** — {r.get('action','')}{suffix} "
-                    f"(Owner: {r.get('owner','-')}, "
-                    f"Timeline: {r.get('timeline','-')})\n"
+                    f"- **{r.get('priority','')}** — {r.get('action','')} "
+                    f"(Owner: {r.get('owner','—')}, "
+                    f"Timeline: {r.get('timeline','—')})\n"
                 )
             f.write("\n")
 
@@ -247,10 +245,7 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     def _sort_domains(self, domains: List[str]) -> List[str]:
         priority = ["healthcare", "finance", "retail", "marketing"]
-        return sorted(
-            domains,
-            key=lambda d: priority.index(d) if d in priority else 99
-        )
+        return sorted(domains, key=lambda d: priority.index(d) if d in priority else 99)
 
     def _format_value(self, key: str, v: Any) -> str:
         if isinstance(v, (int, float)):
@@ -269,10 +264,6 @@ class HybridReport(BaseReport):
 # =====================================================
 
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Stable public API for CLI / Batch / Scheduler
-    """
-
     from sreejita.reporting.orchestrator import generate_report_payload
 
     run_dir = Path(config.get("run_dir", "./runs"))
