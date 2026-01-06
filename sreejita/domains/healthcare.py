@@ -795,11 +795,13 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         kpis["_evidence"] = {}
             
-        kpi_sources  = {
+        kpi_sources = {
             "avg_los": [self.cols.get("los")],
             "readmission_rate": [self.cols.get("readmitted")],
             "avg_wait_time": [self.cols.get("duration")],
+            "avg_tat": [self.cols.get("duration")],
             "cost_per_rx": [self.cols.get("cost")],
+            "tests_per_fte": [self.cols.get("doctor")],
             "incidence_per_100k": [self.cols.get("population"), self.cols.get("flag")],
         }
             
@@ -840,22 +842,24 @@ class HealthcareDomain(BaseDomain):
 
         min_sub_conf = min(active_subs.values()) if active_subs else 0.3
         evidence = kpis.get("_evidence", {})
-            
+        
         for key, value in kpis.items():
             if key.startswith("_"):
                 continue
-            
-            if "_placeholder_kpi" in key:
-                kpis["_confidence"][key] = 0.0
-                continue
-            
-            coverage = evidence.get(key, 0.6)  # default conservative
-            
+        
+            # detect namespace
+            if "_" in key and key.split("_", 1)[0] in active_subs:
+                sub, base_key = key.split("_", 1)
+                coverage = evidence.get(key, evidence.get(base_key, 0.6))
+                sub_conf = active_subs.get(sub, min_sub_conf)
+            else:
+                coverage = evidence.get(key, 0.6)
+                sub_conf = min_sub_conf
+        
             if isinstance(value, (int, float)):
-                base = 0.85 * min_sub_conf
+                base = 0.85 * sub_conf
                 adjusted = base * coverage
-                kpis["_confidence"][key] = round(min(0.95, max(0.25, adjusted)), 2)
-                
+                kpis["_confidence"][key] = round(min(0.95, max(0.3, adjusted)), 2)
             else:
                 kpis["_confidence"][key] = round(0.3 * coverage, 2)
 
@@ -927,7 +931,7 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         active_subs = [
             s for s, score in sub_scores.items()
-            if isinstance(score, (int, float)) and score >= 0.15
+            if isinstance(score, (int, float)) and score >= 0.10
         ]
         
         # ==================================================
@@ -1020,7 +1024,7 @@ class HealthcareDomain(BaseDomain):
                         sub_domain=sub,
                         register_visual=register_visual,
                     )
-                except ValueError:
+                except ValueError as e:
                     continue
     
         # -------------------------------------------------
@@ -2229,7 +2233,7 @@ class HealthcareDomain(BaseDomain):
                 )
                 return
             
-            raise ValueError(f"Unhandled visual key: {visual_key}")
+        raise ValueError(f"Unhandled visual key: {visual_key}")
     
     # -------------------------------------------------
     # INSIGHTS ENGINE (UNIVERSAL, SUB-DOMAIN LOCKED)
