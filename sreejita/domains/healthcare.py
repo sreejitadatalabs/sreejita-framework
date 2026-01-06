@@ -872,7 +872,10 @@ class HealthcareDomain(BaseDomain):
             expected = HEALTHCARE_KPI_MAP.get(sub, [])
             present = [
                 k for k in expected
-                if isinstance(kpis.get(k), (int, float)) and not pd.isna(kpis.get(k))
+                if isinstance(
+                    self.get_kpi(kpis, sub, k),
+                    (int, float)
+                )
             ]
 
             for i in range(max(0, 5 - len(present))):
@@ -1039,7 +1042,7 @@ class HealthcareDomain(BaseDomain):
             v for v in visuals
             if isinstance(v, dict)
             and Path(v.get("path", "")).exists()
-            and float(v.get("confidence", 0)) >= 0.25
+            and float(v.get("confidence", 0)) >= 0.15
         ]
     
         # -------------------------------------------------
@@ -2290,7 +2293,7 @@ class HealthcareDomain(BaseDomain):
                     f"are likely contributing to prolonged inpatient stays "
                     f"(avg LOS {self.get_kpi(kpis, 'hospital', 'avg_los'):.1f} days)."
                 ),
-                "confidence": round(min(0.95, cross_conf), 2),
+                "confidence": round(min(0.95, cross_conf*1.05), 2),
             })
         
         for sub, score in active_subs.items():
