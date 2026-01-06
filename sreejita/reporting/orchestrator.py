@@ -10,7 +10,8 @@ from typing import Dict, Any, List, Optional
 
 import pandas as pd
 
-from sreejita.domains.router import decide_domain
+from sreejita.domains.router_v2 import detect_domain
+
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 from sreejita.core.fingerprint import dataframe_fingerprint
@@ -105,9 +106,20 @@ def generate_report_payload(
     # -------------------------------------------------
     # 3. DOMAIN DECISION (ENGINE ALWAYS ATTACHED)
     # -------------------------------------------------
-    decision = decide_domain(df)
-    engine = decision.engine
-    domain = decision.selected_domain
+    # Extract domain hint from config
+    domain_hint = config.get("domain_hint")
+    
+    # Detect domain with hint
+    detection_result = detect_domain(df, domain_hint=domain_hint, strict=False)
+    
+    # Get domain from result
+    domain = detection_result.domain
+    
+    # Get engine from registry
+    from sreejita.domains.registry import registry
+    engine = registry.get_domain(domain)
+    if engine is None:
+        raise RuntimeError(f"Domain '{domain}' not found in registry")
 
     if engine is None or not isinstance(domain, str):
         raise RuntimeError("Domain resolution failed")
