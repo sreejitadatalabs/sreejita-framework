@@ -1,5 +1,5 @@
 # =====================================================
-# EXECUTIVE PDF RENDERER — UNIVERSAL (FINAL, HARDENED)
+# EXECUTIVE PDF RENDERER — UNIVERSAL (FINAL, LOCKED)
 # Sreejita Framework v3.6
 # =====================================================
 
@@ -23,6 +23,7 @@ from reportlab.platypus import (
 from reportlab.lib.units import inch
 from reportlab.lib import utils
 
+
 # =====================================================
 # SAFE HELPERS (NEVER FAIL)
 # =====================================================
@@ -42,9 +43,9 @@ def format_value(v: Any) -> str:
             if 0 <= v <= 1:
                 return f"{v:.1%}"
             if abs(v) >= 1_000_000:
-                return f"{v/1_000_000:.1f}M"
+                return f"{v / 1_000_000:.1f}M"
             if abs(v) >= 1_000:
-                return f"{v/1_000:.1f}K"
+                return f"{v / 1_000:.1f}K"
             return f"{v:.2f}"
         return str(v)
     except Exception:
@@ -58,6 +59,7 @@ def confidence_badge(conf: float) -> str:
         return "Medium"
     return "Low"
 
+
 # =====================================================
 # EXECUTIVE PDF RENDERER
 # =====================================================
@@ -67,10 +69,10 @@ class ExecutivePDFRenderer:
     STRICTLY PRESENTATIONAL PDF RENDERER
 
     GUARANTEES:
-    - No intelligence computation
-    - No domain assumptions
-    - No crashes on weak data
-    - Executive & board safe
+    - Never computes intelligence
+    - Never assumes domain shape
+    - Never crashes on weak data
+    - Board / CXO safe output
     """
 
     BORDER = HexColor("#e5e7eb")
@@ -99,30 +101,33 @@ class ExecutivePDFRenderer:
         story: List[Any] = []
 
         # -------------------------------------------------
-        # STYLES
+        # STYLES (SAFE ADD)
         # -------------------------------------------------
-        styles.add(ParagraphStyle(
-            "SR_Title",
-            fontSize=22,
-            alignment=TA_CENTER,
-            spaceAfter=18,
-            fontName="Helvetica-Bold",
-        ))
+        if "SR_Title" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Title",
+                fontSize=22,
+                alignment=TA_CENTER,
+                spaceAfter=18,
+                fontName="Helvetica-Bold",
+            ))
 
-        styles.add(ParagraphStyle(
-            "SR_Section",
-            fontSize=15,
-            spaceBefore=18,
-            spaceAfter=10,
-            fontName="Helvetica-Bold",
-        ))
+        if "SR_Section" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Section",
+                fontSize=15,
+                spaceBefore=18,
+                spaceAfter=10,
+                fontName="Helvetica-Bold",
+            ))
 
-        styles.add(ParagraphStyle(
-            "SR_Body",
-            fontSize=11,
-            leading=15,
-            spaceAfter=6,
-        ))
+        if "SR_Body" not in styles:
+            styles.add(ParagraphStyle(
+                "SR_Body",
+                fontSize=11,
+                leading=15,
+                spaceAfter=6,
+            ))
 
         # -------------------------------------------------
         # SAFE EXTRACTION
@@ -134,7 +139,7 @@ class ExecutivePDFRenderer:
         raw_kpis = payload.get("kpis") or {}
 
         # -------------------------------------------------
-        # NORMALIZE INSIGHTS (CRITICAL FIX)
+        # NORMALIZE INSIGHTS
         # -------------------------------------------------
         insights: List[Dict[str, Any]] = []
 
@@ -175,18 +180,18 @@ class ExecutivePDFRenderer:
         if isinstance(brief, str) and brief.strip():
             story.append(Spacer(1, 12))
             story.append(Paragraph("Executive Brief", styles["SR_Section"]))
-            story.append(Paragraph(brief, styles["SR_Body"]))
+            story.append(Paragraph(brief.strip(), styles["SR_Body"]))
 
         # =================================================
-        # KPI TABLE (RAW, SAFE)
+        # KPI TABLE (EXECUTIVE SAFE)
         # =================================================
         kpi_items = [
             (k, v) for k, v in raw_kpis.items()
             if isinstance(k, str) and not k.startswith("_")
         ][:9]
 
-        while len(kpi_items) < 5:
-            kpi_items.append(("Data Coverage", None))
+        if not kpi_items:
+            kpi_items = [("Data Coverage", None)]
 
         rows = [["Metric", "Value"]]
         for k, v in kpi_items:
@@ -205,7 +210,7 @@ class ExecutivePDFRenderer:
         story.append(table)
 
         # =================================================
-        # VISUAL EVIDENCE (MAX 6, ORDERED)
+        # VISUAL EVIDENCE (MAX 6, SAFE LOAD)
         # =================================================
         valid_visuals = [
             v for v in visuals
@@ -217,22 +222,25 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Visual Evidence", styles["SR_Section"]))
 
             for v in valid_visuals[i:i + 2]:
-                img_path = Path(v["path"])
-                img = utils.ImageReader(str(img_path))
-                iw, ih = img.getSize()
+                try:
+                    img_path = Path(v["path"])
+                    img = utils.ImageReader(str(img_path))
+                    iw, ih = img.getSize()
 
-                w = 6 * inch
-                h = min(w * ih / iw, 4 * inch)
+                    w = 6 * inch
+                    h = min(w * ih / iw, 4 * inch)
 
-                conf = _safe_float(v.get("confidence"))
+                    conf = _safe_float(v.get("confidence"))
 
-                story.append(Image(str(img_path), width=w, height=h))
-                story.append(Paragraph(
-                    f"{v.get('caption','Visual evidence')} "
-                    f"<i>(Confidence: {confidence_badge(conf)})</i>",
-                    styles["SR_Body"],
-                ))
-                story.append(Spacer(1, 12))
+                    story.append(Image(str(img_path), width=w, height=h))
+                    story.append(Paragraph(
+                        f"{v.get('caption','Visual evidence')} "
+                        f"<i>(Confidence: {confidence_badge(conf)})</i>",
+                        styles["SR_Body"],
+                    ))
+                    story.append(Spacer(1, 12))
+                except Exception:
+                    continue
 
         # =================================================
         # INSIGHTS
