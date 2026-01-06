@@ -128,7 +128,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     "facility": {
         "aliases": [
             "facility", "hospital", "clinic",
-                    "location", "dept", "department", "branch", "hospital branch"
+                    "location", "dept", "department", "branch", "hospital branch"],
         "dtype": "object",
         "priority": 0.8,
     },
