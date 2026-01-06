@@ -1,5 +1,5 @@
 # =====================================================
-# DOMAIN ROUTER — UNIVERSAL (FINAL, ENFORCED)
+# DOMAIN ROUTER — UNIVERSAL (AUTHORITATIVE, FINAL)
 # Sreejita Framework v3.6
 # =====================================================
 
@@ -30,20 +30,11 @@ from sreejita.core.decision import DecisionExplanation
 from sreejita.observability.hooks import DecisionObserver
 from sreejita.core.fingerprint import dataframe_fingerprint
 
-from sreejita.domains.intelligence.detector_v2 import (
-    compute_domain_scores,
-    select_best_domain,
-)
-
 log = logging.getLogger("sreejita.router")
 
 # =====================================================
-# DOMAIN DETECTORS (ORDER MATTERS)
+# DOMAIN DETECTORS (ORDER MATTERS, GENERIC LAST)
 # =====================================================
-# NOTE:
-# - Deterministic
-# - GenericDetector MUST be LAST
-# - No dynamic discovery by design
 
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
@@ -54,7 +45,7 @@ DOMAIN_DETECTORS = [
     MarketingDomainDetector(),
     HRDomainDetector(),
     SupplyChainDomainDetector(),
-    GenericDomainDetector(),   # 🚑 LAST RESORT
+    GenericDomainDetector(),  # 🚑 ABSOLUTE LAST
 ]
 
 # =====================================================
@@ -70,7 +61,7 @@ DOMAIN_IMPLEMENTATIONS = {
     "marketing": MarketingDomain(),
     "hr": HRDomain(),
     "supply_chain": SupplyChainDomain(),
-    "generic": GenericDomain(),  # 🚑 GUARANTEED SAFE
+    "generic": GenericDomain(),
 }
 
 # =====================================================
@@ -98,15 +89,16 @@ def decide_domain(df) -> DecisionExplanation:
     Determine the most appropriate domain for a dataset.
 
     GUARANTEES:
+    - Detector confidence is authoritative
+    - No re-scoring / no re-weighting
+    - Generic is true last resort
     - Always returns DecisionExplanation
-    - Always attaches a valid engine
-    - Never raises for unknown datasets
     """
 
     rule_results: Dict[str, Dict[str, Any]] = {}
 
     # -------------------------------------------------
-    # Phase 1: Rule-Based Detection
+    # PHASE 1: RULE-BASED DETECTION (AUTHORITATIVE)
     # -------------------------------------------------
     for detector in DOMAIN_DETECTORS:
         try:
@@ -115,29 +107,40 @@ def decide_domain(df) -> DecisionExplanation:
             if not result or not result.domain:
                 continue
 
-            rule_results[result.domain] = {
-                "confidence": float(result.confidence or 0.0),
-                "signals": result.signals or {},
-            }
+            # Keep the BEST confidence per domain
+            prev = rule_results.get(result.domain)
+            if prev is None or result.confidence > prev["confidence"]:
+                rule_results[result.domain] = {
+                    "confidence": float(result.confidence or 0.0),
+                    "signals": result.signals or {},
+                    "detector": detector.__class__.__name__,
+                }
 
         except Exception as e:
             log.debug(
                 f"Detector {detector.__class__.__name__} failed: {e}"
             )
-            continue
 
     # -------------------------------------------------
-    # Phase 2: Weighted Scoring & Selection
+    # PHASE 2: AUTHORITATIVE SELECTION
     # -------------------------------------------------
-    domain_scores = compute_domain_scores(df, rule_results)
-    selected_domain, confidence, meta = select_best_domain(domain_scores)
+    if rule_results:
+        selected_domain, best = max(
+            rule_results.items(),
+            key=lambda x: x[1]["confidence"],
+        )
+        confidence = best["confidence"]
+        meta = best
+    else:
+        selected_domain = "generic"
+        confidence = 0.25
+        meta = {"signals": {"fallback": True}}
 
     # -------------------------------------------------
-    # 🚑 ABSOLUTE SAFETY FALLBACK
+    # HARD SAFETY CHECK
     # -------------------------------------------------
     if (
-        not selected_domain
-        or selected_domain not in DOMAIN_IMPLEMENTATIONS
+        selected_domain not in DOMAIN_IMPLEMENTATIONS
         or not isinstance(confidence, (int, float))
         or confidence < 0.25
     ):
@@ -149,51 +152,53 @@ def decide_domain(df) -> DecisionExplanation:
         meta = {"signals": {"fallback": True}}
 
     # -------------------------------------------------
-    # Build Alternatives (Explainability)
+    # BUILD ALTERNATIVES (EXPLAINABILITY)
     # -------------------------------------------------
     alternatives = [
         {
             "domain": d,
-            "confidence": round(info.get("confidence", 0.0), 2),
+            "confidence": round(info["confidence"], 2),
         }
         for d, info in sorted(
-            domain_scores.items(),
-            key=lambda x: x[1].get("confidence", 0.0),
+            rule_results.items(),
+            key=lambda x: x[1]["confidence"],
             reverse=True,
         )
         if d != selected_domain
     ]
 
     # -------------------------------------------------
-    # Decision Object (STRICT CONTRACT)
+    # DECISION OBJECT (STRICT CONTRACT)
     # -------------------------------------------------
     decision = DecisionExplanation(
         decision_type="domain_detection",
         selected_domain=selected_domain,
         confidence=round(confidence, 2),
         alternatives=alternatives,
-        signals=meta.get("signals", {}) if isinstance(meta, dict) else {},
+        signals=meta.get("signals", {}),
         rules_applied=[
-            "rule_based_domain_detection",
-            "intent_weighted_scoring",
-            "highest_confidence_selection",
-            "generic_domain_fallback",
+            "authoritative_detector_selection",
+            "highest_confidence_wins",
+            "generic_fallback_only_if_required",
         ],
-        domain_scores=domain_scores,
+        domain_scores={
+            k: {"confidence": v["confidence"]}
+            for k, v in rule_results.items()
+        },
     )
 
     # -------------------------------------------------
-    # Attach Engine (🚨 NEVER NULL)
+    # ATTACH ENGINE (NEVER NULL)
     # -------------------------------------------------
     decision.engine = DOMAIN_IMPLEMENTATIONS[selected_domain]
 
     # -------------------------------------------------
-    # Dataset Fingerprint (Traceability)
+    # DATASET FINGERPRINT (TRACEABILITY)
     # -------------------------------------------------
     decision.fingerprint = dataframe_fingerprint(df)
 
     # -------------------------------------------------
-    # Observability Hooks (NON-BLOCKING)
+    # OBSERVABILITY HOOKS (NON-BLOCKING)
     # -------------------------------------------------
     for observer in _OBSERVERS:
         try:
