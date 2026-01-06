@@ -50,7 +50,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
             "admission date", "admit date",
         ],
         "dtype": "datetime",
-        "priority": 1.0,,
+        "priority": 1.0,
     },
 
     "discharge_date": {
