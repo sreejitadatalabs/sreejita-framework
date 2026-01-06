@@ -50,7 +50,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
             "admission date", "admit date",
         ],
         "dtype": "datetime",
-        "priority": 1.0,
+        "priority": 1.0,,
     },
 
     "discharge_date": {
@@ -128,12 +128,10 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     "facility": {
         "aliases": [
             "facility", "hospital", "clinic",
-            "location", "dept", "department", "branch", "hospital branch", "hospital"
-        ],
+                    "location", "dept", "department", "branch", "hospital branch"
         "dtype": "object",
         "priority": 0.8,
     },
-
     "doctor": {
         "aliases": [
             "doctor", "physician", "provider"
