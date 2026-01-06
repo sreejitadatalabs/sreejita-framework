@@ -2417,11 +2417,10 @@ class HealthcareDomainDetector(BaseDomainDetector):
 
         if df is None or df.empty:
             return DomainDetectionResult(
-                domain="healthcare",
-                confidence=confidence,
-                signals=signals,
+                domain=None,
+                confidence=0.0,
+                signals={},
             )
-
         cols = {c.lower() for c in df.columns}
 
         def has_any(candidates):
