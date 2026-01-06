@@ -577,30 +577,6 @@ class HealthcareDomain(BaseDomain):
             is_mixed = len(active_subs) > 1
 
         # -------------------------------------------------
-        # EXECUTIVE PRIMARY KPI SELECTION (BOARD SAFE)
-        # -------------------------------------------------
-        kpis["_primary_kpis"] = []
-        
-        primary = kpis.get("primary_sub_domain")
-        
-        if primary in HEALTHCARE_KPI_MAP:
-            for k in HEALTHCARE_KPI_MAP[primary][:9]:
-                val = self.get_kpi(kpis, primary, k)
-                if isinstance(val, (int, float)):
-                    kpis["_primary_kpis"].append({
-                        "name": k.replace("_", " ").title(),
-                        "value": val,
-                        "confidence": self.get_kpi_confidence(kpis, primary, k),
-                    })
-        
-        # HARD GUARANTEE
-        while len(kpis["_primary_kpis"]) < 5:
-            kpis["_primary_kpis"].append({
-                "name": "Data Coverage",
-                "value": None,
-                "confidence": 0.4,
-            })
-        # -------------------------------------------------
         # BASE KPI CONTEXT
         # -------------------------------------------------
         kpis: Dict[str, Any] = {
@@ -898,6 +874,31 @@ class HealthcareDomain(BaseDomain):
             for i in range(max(0, 5 - len(present))):
                 kpis[f"{sub}_placeholder_kpi_{i+1}"] = None
 
+        # -------------------------------------------------
+        # EXECUTIVE PRIMARY KPI SELECTION (BOARD SAFE)
+        # -------------------------------------------------
+        kpis["_primary_kpis"] = []
+        
+        primary = kpis.get("primary_sub_domain")
+        
+        if primary in HEALTHCARE_KPI_MAP:
+            for k in HEALTHCARE_KPI_MAP[primary][:9]:
+                val = self.get_kpi(kpis, primary, k)
+                if isinstance(val, (int, float)):
+                    kpis["_primary_kpis"].append({
+                        "name": k.replace("_", " ").title(),
+                        "value": val,
+                        "confidence": self.get_kpi_confidence(kpis, primary, k),
+                    })
+        
+        # HARD GUARANTEE
+        while len(kpis["_primary_kpis"]) < 5:
+            kpis["_primary_kpis"].append({
+                "name": "Data Coverage",
+                "value": None,
+                "confidence": 0.4,
+            })
+
         return kpis
     # -------------------------------------------------
     # VISUAL INTELLIGENCE (ORCHESTRATOR)
@@ -926,13 +927,20 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         active_subs = [
             s for s, score in sub_scores.items()
-            if isinstance(score, (int, float)) and score >= 0.2
+            if isinstance(score, (int, float)) and score >= 0.15
         ]
         
-        # HARD FALLBACK — NEVER ZERO VISUALS
-        if not active_subs and sub_scores:
-            strongest = max(sub_scores, key=sub_scores.get)
-            active_subs = [strongest]
+        # ==================================================
+        # HARD FALLBACK — GUARANTEE AT LEAST 1 VISUAL DOMAIN
+        # ==================================================
+        if not active_subs:
+            if sub_scores:
+                strongest = max(sub_scores, key=sub_scores.get)
+                active_subs = [strongest]
+            elif kpis.get("primary_sub_domain") in HEALTHCARE_VISUAL_MAP:
+                active_subs = [kpis["primary_sub_domain"]]
+            else:
+                return []  # true UNKNOWN only
     
         # Fallback handling
         if not active_subs:
@@ -2637,7 +2645,19 @@ class HealthcareDomain(BaseDomain):
                 })
                 idx += 1
     
-            recommendations.extend(sub_recs[:5])
+            # ==================================================
+            # DEDUPLICATE RECOMMENDATIONS (EXECUTIVE TRUST FIX)
+            # ==================================================
+            seen = set()
+            unique_recs = []
+            
+            for r in sub_recs:
+                key = (r.get("action"), r.get("sub_domain"))
+                if key not in seen:
+                    seen.add(key)
+                    unique_recs.append(r)
+            
+            recommendations.extend(unique_recs[:5])
     
         # -------------------------------------------------
         # EXECUTIVE SORTING
