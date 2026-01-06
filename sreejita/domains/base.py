@@ -1,6 +1,6 @@
 # =====================================================
-# BASE DOMAIN — UNIVERSAL (FINAL, AUTHORITATIVE)
-# Sreejita Framework v3.5.x
+# BASE DOMAIN — UNIVERSAL (FINAL, LOCKED)
+# Sreejita Framework v3.6 STABILIZED
 # =====================================================
 
 from abc import ABC, abstractmethod
@@ -25,17 +25,16 @@ class BaseDomain(ABC):
     """
     Universal BaseDomain contract.
 
-    Responsibilities:
-    - KPI computation
-    - Insight generation
-    - Recommendation generation
-    - Visual intelligence
-    - Executive cognition assembly
+    HARD GUARANTEES:
+    - No shared DataFrame mutation
+    - Deterministic KPI lifecycle
+    - Visual safety
+    - Executive-safe cognition
 
     MUST NOT:
-    - Perform routing
-    - Perform orchestration
-    - Import sub-domain engines
+    - Route domains
+    - Orchestrate pipelines
+    - Guess sub-domains
     """
 
     name: str = "generic"
@@ -48,31 +47,25 @@ class BaseDomain(ABC):
     # OPTIONAL VALIDATION (SAFE DEFAULT)
     # --------------------------------------------------
     def validate_data(self, df: pd.DataFrame) -> bool:
-        """
-        Optional domain-level validation.
-        Default = always valid.
-        """
         return True
 
     # --------------------------------------------------
-    # OPTIONAL PREPROCESS
+    # OPTIONAL PREPROCESS (SAFE BY DEFAULT)
     # --------------------------------------------------
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Optional preprocessing hook.
-        Default = passthrough.
+        Default preprocess is COPY-ONLY.
+        Domains may override, but MUST return a new df.
         """
-        return df
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("preprocess expects a DataFrame")
+        return df.copy(deep=False)
 
     # --------------------------------------------------
     # REQUIRED DOMAIN CONTRACTS
     # --------------------------------------------------
     @abstractmethod
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Compute KPIs.
-        MUST return a dictionary.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -83,9 +76,6 @@ class BaseDomain(ABC):
         *args,
         **kwargs,
     ) -> List[Dict[str, Any]]:
-        """
-        Generate insights from KPIs.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -97,9 +87,6 @@ class BaseDomain(ABC):
         *args,
         **kwargs,
     ) -> List[Dict[str, Any]]:
-        """
-        Generate recommendations.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -108,13 +95,10 @@ class BaseDomain(ABC):
         df: pd.DataFrame,
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
-        """
-        Generate visual intelligence.
-        """
         raise NotImplementedError
 
     # --------------------------------------------------
-    # 🔒 UNIVERSAL VISUAL SAFETY NET (CRITICAL)
+    # 🔒 UNIVERSAL VISUAL SAFETY NET (LAST RESORT)
     # --------------------------------------------------
     def ensure_minimum_visuals(
         self,
@@ -123,8 +107,8 @@ class BaseDomain(ABC):
         output_dir: Path,
     ) -> List[Dict[str, Any]]:
         """
-        Guarantees at least 2 visuals exist.
-        Absolute last-resort fallback.
+        Guarantees at least 2 visuals.
+        Fallback visuals are explicitly marked as fallback.
         NEVER raises.
         """
 
@@ -137,7 +121,9 @@ class BaseDomain(ABC):
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # -----------------------------
             # Fallback 1 — Dataset Size
+            # -----------------------------
             fig, ax = plt.subplots(figsize=(6, 4))
             ax.bar(["Records"], [len(df)])
             ax.set_title("Dataset Size Overview", fontweight="bold")
@@ -150,12 +136,15 @@ class BaseDomain(ABC):
             visuals.append({
                 "path": str(path),
                 "caption": "Total number of records (fallback evidence).",
-                "importance": 0.3,
-                "confidence": 0.4,
+                "importance": 0.2,
+                "confidence": 0.3,
                 "sub_domain": self.name,
+                "inference_type": "fallback",
             })
 
+            # -----------------------------
             # Fallback 2 — Data Completeness
+            # -----------------------------
             completeness = 1 - df.isna().mean().mean()
 
             fig, ax = plt.subplots(figsize=(6, 4))
@@ -170,19 +159,19 @@ class BaseDomain(ABC):
             visuals.append({
                 "path": str(path),
                 "caption": "Overall data completeness ratio (fallback evidence).",
-                "importance": 0.3,
-                "confidence": 0.4,
+                "importance": 0.2,
+                "confidence": 0.3,
                 "sub_domain": self.name,
+                "inference_type": "fallback",
             })
 
         except Exception:
-            # Absolute safety: visuals must never crash execution
-            pass
+            pass  # absolute safety
 
         return visuals
 
     # --------------------------------------------------
-    # 🧠 EXECUTIVE COGNITION (GLOBAL + SUB-DOMAIN)
+    # 🧠 EXECUTIVE COGNITION (SAFE, NON-HALLUCINATING)
     # --------------------------------------------------
     def build_executive(
         self,
@@ -190,16 +179,9 @@ class BaseDomain(ABC):
         insights: List[Dict[str, Any]],
         recommendations: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """
-        Universal executive cognition builder.
-
-        Guarantees:
-        - Global executive payload
-        - Per-sub-domain executive payloads (if present)
-        """
 
         executive = build_executive_payload(
-            kpis=kpis,
+            kpis=kpis or {},
             insights=insights or [],
             recommendations=recommendations or [],
         )
@@ -220,19 +202,26 @@ class BaseDomain(ABC):
         return executive
 
     # --------------------------------------------------
-    # LEGACY PIPELINE (OPTIONAL, SAFE)
+    # 🔒 SAFE LEGACY PIPELINE (LOCKED)
     # --------------------------------------------------
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Optional legacy pipeline.
-        Orchestrator may bypass this.
+        Legacy pipeline.
+        SAFE, deterministic, non-bypassing.
         """
 
         if not self.validate_data(df):
             raise ValueError(f"Data validation failed for domain: {self.name}")
 
         df = self.preprocess(df)
+
+        # KPI lifecycle is authoritative
         kpis = self.calculate_kpis(df)
+        if not isinstance(kpis, dict):
+            raise TypeError("calculate_kpis must return a dict")
+
+        self._last_kpis = kpis
+
         insights = self.generate_insights(df, kpis)
         recommendations = self.generate_recommendations(df, kpis, insights)
 
