@@ -156,6 +156,15 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "priority": 0.9,
     },
 
+    "admission_type": {
+        "aliases": [
+            "admission_type", "admissiontype", "admit_type", "admittype",
+            "admission_class", "visit_type", "encounter_type"
+        ],
+        "dtype": "object",
+        "priority": 0.9,
+    },
+
     # ---------------- PHARMACY / POPULATION (HARD-GATED) ----------------
     # NOTE:
     # These columns NEVER imply pharmacy alone.
