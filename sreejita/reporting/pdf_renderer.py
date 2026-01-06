@@ -23,15 +23,13 @@ from reportlab.platypus import (
 from reportlab.lib.units import inch
 from reportlab.lib import utils
 
-
 # =====================================================
-# SAFE HELPERS
+# SAFE HELPERS (NEVER FAIL)
 # =====================================================
 
 def _safe_float(v, default=0.0):
     try:
-        v = float(v)
-        return max(0.0, min(v, 1.0))
+        return max(0.0, min(float(v), 1.0))
     except Exception:
         return default
 
@@ -60,7 +58,6 @@ def confidence_badge(conf: float) -> str:
         return "Medium"
     return "Low"
 
-
 # =====================================================
 # EXECUTIVE PDF RENDERER
 # =====================================================
@@ -70,9 +67,10 @@ class ExecutivePDFRenderer:
     STRICTLY PRESENTATIONAL PDF RENDERER
 
     GUARANTEES:
-    - Never crashes on weak or generic data
-    - Never assumes insight / KPI shape
-    - Never computes intelligence
+    - No intelligence computation
+    - No domain assumptions
+    - No crashes on weak data
+    - Executive & board safe
     """
 
     BORDER = HexColor("#e5e7eb")
@@ -151,31 +149,27 @@ class ExecutivePDFRenderer:
 
         insights = [i for i in insights if isinstance(i, dict)]
 
-        # -------------------------------------------------
+        # =================================================
         # PAGE 1 — EXECUTIVE OVERVIEW
-        # -------------------------------------------------
+        # =================================================
         board = executive.get("board_readiness", {}) or {}
         trend = executive.get("board_readiness_trend", {}) or {}
 
         domain = str(payload.get("domain", "—")).replace("_", " ").title()
 
-        story.append(
-            Paragraph(
-                "Sreejita Executive Intelligence Report",
-                styles["SR_Title"],
-            )
-        )
+        story.append(Paragraph(
+            "Sreejita Executive Intelligence Report",
+            styles["SR_Title"],
+        ))
 
-        story.append(
-            Paragraph(
-                f"<b>Domain:</b> {domain}<br/>"
-                f"<b>Board Readiness:</b> {board.get('score','—')} / 100 "
-                f"({board.get('band','—')})<br/>"
-                f"<b>Trend:</b> {trend.get('trend','→')}<br/>"
-                f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d}",
-                styles["SR_Body"],
-            )
-        )
+        story.append(Paragraph(
+            f"<b>Domain:</b> {domain}<br/>"
+            f"<b>Board Readiness:</b> {board.get('score','—')} / 100 "
+            f"({board.get('band','—')})<br/>"
+            f"<b>Trend:</b> {trend.get('trend','→')}<br/>"
+            f"<b>Generated:</b> {datetime.utcnow():%Y-%m-%d}",
+            styles["SR_Body"],
+        ))
 
         brief = executive.get("executive_brief")
         if isinstance(brief, str) and brief.strip():
@@ -183,9 +177,9 @@ class ExecutivePDFRenderer:
             story.append(Paragraph("Executive Brief", styles["SR_Section"]))
             story.append(Paragraph(brief, styles["SR_Body"]))
 
-        # -------------------------------------------------
+        # =================================================
         # KPI TABLE (RAW, SAFE)
-        # -------------------------------------------------
+        # =================================================
         kpi_items = [
             (k, v) for k, v in raw_kpis.items()
             if isinstance(k, str) and not k.startswith("_")
@@ -210,9 +204,9 @@ class ExecutivePDFRenderer:
         story.append(Paragraph("Key Performance Indicators", styles["SR_Section"]))
         story.append(table)
 
-        # -------------------------------------------------
-        # VISUAL EVIDENCE (BEST EFFORT)
-        # -------------------------------------------------
+        # =================================================
+        # VISUAL EVIDENCE (MAX 6, ORDERED)
+        # =================================================
         valid_visuals = [
             v for v in visuals
             if isinstance(v, dict) and Path(v.get("path", "")).exists()
@@ -233,37 +227,34 @@ class ExecutivePDFRenderer:
                 conf = _safe_float(v.get("confidence"))
 
                 story.append(Image(str(img_path), width=w, height=h))
-                story.append(
-                    Paragraph(
-                        f"{v.get('caption','Visual evidence')} "
-                        f"<i>(Confidence: {confidence_badge(conf)})</i>",
-                        styles["SR_Body"],
-                    )
-                )
+                story.append(Paragraph(
+                    f"{v.get('caption','Visual evidence')} "
+                    f"<i>(Confidence: {confidence_badge(conf)})</i>",
+                    styles["SR_Body"],
+                ))
                 story.append(Spacer(1, 12))
 
-        # -------------------------------------------------
+        # =================================================
         # INSIGHTS
-        # -------------------------------------------------
+        # =================================================
         if insights:
             story.append(PageBreak())
             story.append(Paragraph("Key Insights", styles["SR_Section"]))
 
             for ins in insights[:5]:
-                story.append(
-                    Paragraph(
-                        f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
-                        styles["SR_Body"],
-                    )
-                )
-                story.append(
-                    Paragraph(ins.get("so_what",""), styles["SR_Body"])
-                )
+                story.append(Paragraph(
+                    f"<b>{ins.get('level','INFO')}:</b> {ins.get('title','')}",
+                    styles["SR_Body"],
+                ))
+                story.append(Paragraph(
+                    ins.get("so_what",""),
+                    styles["SR_Body"],
+                ))
                 story.append(Spacer(1, 8))
 
-        # -------------------------------------------------
+        # =================================================
         # RECOMMENDATIONS
-        # -------------------------------------------------
+        # =================================================
         if recommendations:
             story.append(PageBreak())
             story.append(Paragraph("Recommendations", styles["SR_Section"]))
@@ -271,20 +262,19 @@ class ExecutivePDFRenderer:
             for rec in recommendations[:5]:
                 if not isinstance(rec, dict):
                     continue
-                story.append(
-                    Paragraph(
-                        f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
-                        styles["SR_Body"],
-                    )
-                )
-                story.append(
-                    Paragraph(
-                        f"<i>Owner:</i> {rec.get('owner','—')} | "
-                        f"<i>Timeline:</i> {rec.get('timeline','—')}<br/>"
-                        f"<i>Goal:</i> {rec.get('goal','—')}",
-                        styles["SR_Body"],
-                    )
-                )
+
+                story.append(Paragraph(
+                    f"<b>{rec.get('priority','')}:</b> {rec.get('action','')}",
+                    styles["SR_Body"],
+                ))
+
+                story.append(Paragraph(
+                    f"<i>Owner:</i> {rec.get('owner','—')} | "
+                    f"<i>Timeline:</i> {rec.get('timeline','—')}<br/>"
+                    f"<i>Goal:</i> {rec.get('goal','—')}",
+                    styles["SR_Body"],
+                ))
+
                 story.append(Spacer(1, 10))
 
         doc.build(story)
