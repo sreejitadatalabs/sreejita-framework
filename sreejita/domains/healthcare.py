@@ -545,6 +545,12 @@ class HealthcareDomain(BaseDomain):
                 if pop and cases_rate is not None:
                     kpis[f"{prefix}incidence_per_100k"] = min(cases_rate * 100_000, 100_000)
 
+        kpis["_confidence"] = {
+            k: round(min(0.85, v), 2)
+            for k, v in kpis.items()
+            if isinstance(v, (int, float)) and not k.startswith("_")
+        }
+
         # -------------------------------------------------
         # STEP 4: CACHE + RETURN
         # -------------------------------------------------
@@ -733,8 +739,8 @@ class HealthcareDomain(BaseDomain):
             # -------------------------------------------------
             if visual_key == "avg_los_trend":
                 time_axis = admit_col or discharge_col
-                if not (admit_col and los_col):
-                    raise ValueError("Admission date or LOS missing")
+                if not (time_axis and los_col):
+                    raise ValueError("Time axis or LOS missing")
         
                 series = (
                     df[[time_axis, los_col]]
@@ -2411,9 +2417,9 @@ class HealthcareDomainDetector(BaseDomainDetector):
 
         if df is None or df.empty:
             return DomainDetectionResult(
-                domain=None,
-                confidence=0.0,
-                signals={},
+                domain="healthcare",
+                confidence=confidence,
+                signals=signals,
             )
 
         cols = {c.lower() for c in df.columns}
