@@ -2466,30 +2466,32 @@ class HealthcareDomainDetector(BaseDomainDetector):
         }
 
         # -------------------------------------------------
-        # 🚑 HARD HEALTHCARE ACTIVATION RULE
+        # 🚑 HARD HEALTHCARE ACTIVATION RULE (IMPROVED)
         # -------------------------------------------------
+        # More flexible: Accept partial healthcare signals
         healthcare_anchor = any([
-            # Core hospital ops
+            # Core hospital ops (strongest signals)
             signals["los"],
             signals["discharge"],
-
-            # Patient + time
-            signals["pid"] and signals["admission"],
-
-            # Admission in facility
+            # Patient + any clinical signal
+            signals["pid"] and any([signals["admission"], signals["los"], signals["diagnosis"]]),
+            # Admission + facility (operations signal)
             signals["admission"] and signals["facility"],
-
-            # Clinical diagnosis (alone sufficient)
+            # Clinical diagnosis alone (sufficient)
             signals["diagnosis"],
+            # Patient + time, even without los
+            signals["pid"] and signals["admission"],
+            # Cost + admission (financial signals)
+            signals["admission"] and signals["cost"],
         ])
-
+        
         if not healthcare_anchor:
             return DomainDetectionResult(
                 domain=None,
                 confidence=0.0,
                 signals=signals,
             )
-
+            
         # -------------------------------------------------
         # CONFIDENCE SCORING (HONEST, NON-INFLATING)
         # -------------------------------------------------
@@ -2504,16 +2506,26 @@ class HealthcareDomainDetector(BaseDomainDetector):
             "population": 0.04,
         }
 
-        confidence = round(
-            min(
-                0.95,
-                sum(weights[k] for k, v in signals.items() if v)
-            ),
-            2,
-        )
+        # Calculate base confidence
+        base_confidence = sum(weights[k] for k, v in signals.items() if v)
+        
+        # Bonus: if healthcare anchor is strong, boost confidence
+        strong_signal_count = sum([
+            signals["los"],
+            signals["discharge"],
+            signals["diagnosis"],
+            signals["pid"] and signals["admission"],
+        ])
+        
+        if strong_signal_count >= 2:
+            base_confidence = min(0.95, base_confidence + 0.15)  # Boost for strong signals
+        elif strong_signal_count >= 1 and base_confidence > 0.25:
+            base_confidence = min(0.95, base_confidence + 0.10)  # Moderate boost
+        
+        confidence = round(base_confidence, 2)
 
         # Absolute safety floor
-        if confidence < 0.50:
+        if confidence < 0.35:
             return DomainDetectionResult(
                 domain=None,
                 confidence=confidence,
