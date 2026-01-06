@@ -543,8 +543,8 @@ class HealthcareDomain(BaseDomain):
                 cases_rate = safe_binary_rate(self.cols.get("flag"))
     
                 if pop and cases_rate is not None:
-                    kpis[f"{prefix}incidence_per_100k"] = cases_rate * 100_000
-    
+                    kpis[f"{prefix}incidence_per_100k"] = min(cases_rate * 100_000, 100_000)
+
         # -------------------------------------------------
         # STEP 4: CACHE + RETURN
         # -------------------------------------------------
@@ -1701,6 +1701,7 @@ class HealthcareDomain(BaseDomain):
                 if avg_supply < 1:
                     raise ValueError("Supply baseline too small for turnover")
 
+                turn = cost.sum() / avg_supply
         
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.bar(["Inventory Turn Ratio"], [turn])
@@ -2519,24 +2520,16 @@ class HealthcareDomainDetector(BaseDomainDetector):
         # -------------------------------------------------
         # SUB-DOMAIN HINTING (NON-BINDING, CONTEXT ONLY)
         # -------------------------------------------------
-        routing_context = {
-            k: v for k, v in presence.items() if v
-        }
-
         sub_domains = {}  # detector NEVER infers sub-domains
-        signals={
-            **presence,
-        }
+        signals = dict(presence)
+        if sub_domains:
+            signals["likely_subdomains"] = sub_domains
 
         return DomainDetectionResult(
             domain=self.domain_name,
             confidence=confidence,
-            signals={
-                **presence,
-                "likely_subdomains": sub_domains,
-            },
+            signals=signals,
         )
-
 
 # -----------------------------------------------------
 # REGISTRY HOOK
