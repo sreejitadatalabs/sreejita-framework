@@ -1,74 +1,84 @@
+# =====================================================
+# DOMAIN INTELLIGENCE — DETECTOR v2 (STABILIZED)
+# Sreejita Framework v3.6
+# =====================================================
+
 from .column_normalizer import normalize_columns
 from .intent_scoring import score_domain_intent
 
 # -------------------------------------------------
-# CONFIDENCE BOUNDS & HEURISTICS
+# SAFETY CONSTANTS
 # -------------------------------------------------
 
-MIN_CONFIDENCE_FLOOR = 0.30   # below this, domain is considered uncertain
+MIN_CONFIDENCE_FLOOR = 0.30     # below this → unknown
 MAX_CONFIDENCE_CAP = 1.0
 
-# Intent scores are normalized against an expected upper bound.
-# This is a heuristic, not a probabilistic guarantee.
+# Intent is SUPPORTING ONLY — never dominant
+INTENT_WEIGHT = 0.25
+RULE_WEIGHT = 0.75
+
+# Intent normalization guard
 INTENT_SCORE_MAX = 20.0
 
 
 # -------------------------------------------------
-# DOMAIN SCORING ENGINE (v2)
+# DOMAIN SCORING ENGINE (AUTHORITATIVE)
 # -------------------------------------------------
 
 def compute_domain_scores(df, rule_based_results):
     """
-    Combine rule-based detection confidence with intent-based signals.
+    Combine rule-based detection with intent signals.
 
-    Args:
-        df: pandas DataFrame
-        rule_based_results: dict
-            {
-              domain: {
-                "confidence": float,
-                "signals": dict
-              }
-            }
-
-    Returns:
-        dict:
-            domain -> {
-                confidence: float,
-                rule_confidence: float,
-                intent_confidence: float,
-                signals: {
-                    rule_based: dict,
-                    intent_based: dict
-                }
-            }
-
-    Notes:
-        - Domains without rule-based activation are intentionally excluded.
-        - Scores are deterministic and capped for safety.
+    RULES:
+    - Rule-based detection is authoritative
+    - Intent can ONLY reinforce, never override
+    - No new domains may be introduced by intent
+    - Healthcare-safe by design
     """
 
-    normalized_cols, mapping = normalize_columns(df.columns)
+    if not rule_based_results:
+        return {}
+
+    normalized_cols, _ = normalize_columns(df.columns)
     final_scores = {}
 
-    for domain, rb in (rule_based_results or {}).items():
-        rule_conf = float(rb.get("confidence", 0.0))
+    for domain, rb in rule_based_results.items():
 
-        # Intent scoring is based on semantic column matches
+        rule_conf = float(rb.get("confidence", 0.0))
+        rule_conf = max(0.0, min(rule_conf, 1.0))
+
+        # 🚫 HARD GATE: no rule confidence → skip domain
+        if rule_conf <= 0.0:
+            continue
+
+        # -------------------------------
+        # INTENT SCORING (SUPPORTING ONLY)
+        # -------------------------------
         intent_score, intent_signals = score_domain_intent(
             normalized_cols, domain
         )
 
-        # Normalize intent score to 0–1 using heuristic upper bound
-        intent_conf = min(intent_score / INTENT_SCORE_MAX, 1.0)
+        # Normalize intent conservatively
+        intent_conf = min(
+            max(intent_score / INTENT_SCORE_MAX, 0.0),
+            1.0,
+        )
 
-        # Weighted combination (rule-based dominance)
-        combined = (0.6 * rule_conf) + (0.4 * intent_conf)
+        # Penalize noisy intent
+        if intent_conf < 0.15:
+            intent_conf = 0.0
 
-        # Hard safety cap and rounding for stability
+        # -------------------------------
+        # COMBINED CONFIDENCE
+        # -------------------------------
+        combined = (
+            RULE_WEIGHT * rule_conf +
+            INTENT_WEIGHT * intent_conf
+        )
+
         combined = round(
-            max(0.0, min(combined, MAX_CONFIDENCE_CAP)),
-            3
+            min(MAX_CONFIDENCE_CAP, max(combined, 0.0)),
+            3,
         )
 
         final_scores[domain] = {
@@ -77,7 +87,7 @@ def compute_domain_scores(df, rule_based_results):
             "intent_confidence": round(intent_conf, 3),
             "signals": {
                 "rule_based": rb.get("signals", {}),
-                "intent_based": intent_signals,
+                "intent_based": intent_signals or {},
             },
         }
 
@@ -85,19 +95,16 @@ def compute_domain_scores(df, rule_based_results):
 
 
 # -------------------------------------------------
-# DOMAIN SELECTION LOGIC
+# DOMAIN SELECTION LOGIC (CONSERVATIVE)
 # -------------------------------------------------
 
 def select_best_domain(domain_scores):
     """
     Select the highest-confidence domain.
 
-    Returns:
-        (domain_name, confidence, metadata)
-
-    Notes:
-        - If no domain exceeds the minimum confidence floor,
-          'unknown' is returned to prevent false positives.
+    GUARANTEES:
+    - Never forces a domain
+    - UNKNOWN preferred over false positives
     """
 
     if not domain_scores:
@@ -105,10 +112,13 @@ def select_best_domain(domain_scores):
 
     domain, meta = max(
         domain_scores.items(),
-        key=lambda x: x[1]["confidence"]
+        key=lambda x: x[1].get("confidence", 0.0),
     )
 
-    if meta["confidence"] < MIN_CONFIDENCE_FLOOR:
-        return "unknown", meta["confidence"], meta
+    confidence = meta.get("confidence", 0.0)
 
-    return domain, meta["confidence"], meta
+    # 🚫 HARD FLOOR
+    if confidence < MIN_CONFIDENCE_FLOOR:
+        return "unknown", confidence, meta
+
+    return domain, confidence, meta
