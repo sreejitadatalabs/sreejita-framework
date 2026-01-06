@@ -1,73 +1,42 @@
-# sreejita/domains/intelligence/domain_intents.py
+# =====================================================
+# DOMAIN INTENTS — CANONICAL & NORMALIZATION-ALIGNED
+# Sreejita Framework v3.6 (STABLE)
+# =====================================================
 
 DOMAIN_INTENTS = {
 
     # =====================================================
-    # SUPPLY CHAIN 🚚 (Logistics, Inventory, Procurement)
+    # SUPPLY CHAIN 🚚
     # =====================================================
     "supply_chain": {
         "high": {
-            # Logistics
             "warehouse", "carrier", "shipping_mode", "freight",
             "delivery_status", "tracking_number", "route",
-            
-            # Inventory
-            "inventory_level", "stock_on_hand", "restock", 
-            "safety_stock", "reorder_point",
-            
-            # Suppliers
-            "supplier", "vendor", "procurement",
-            
-            # Performance
+            "inventory_level", "stock_on_hand", "safety_stock",
+            "reorder_point", "supplier", "vendor", "procurement",
             "lead_time", "cycle_time", "on_time_delivery",
-            "fill_rate", "backorder"
+            "fill_rate", "backorder", "sku"
         },
         "ambiguous": {
-            "ship_date", "order_id", "quantity", "location", 
-            "return", "sku", "item", "weight"
+            "order_id", "quantity", "location", "date"
         }
     },
 
     # =====================================================
-    # MANUFACTURING 🏭 (Machines, IoT, Production)
-    # =====================================================
-    "manufacturing": {
-        "high": {
-            "machine_id", "production_line", "batch_number",
-            "defect_rate", "yield", "uptime", "downtime",
-            "maintenance", "sensor", "temperature", "pressure",
-            "vibration", "factory", "plant", "shift_id",
-            "scrap", "rework"
-        },
-        "ambiguous": {
-            "date", "status", "operator", "output", "count", "quality"
-        }
-    },
-
-    # =====================================================
-    # HR / WORKFORCE 👥
+    # HR 👥
     # =====================================================
     "hr": {
         "high": {
-            # Identity
-            "employee", "employee_id", "staff", "personnel",
-
-            # Org structure
+            "employee_id", "employee_name", "staff_id",
             "department", "designation", "role", "manager",
-
-            # Compensation
             "salary", "compensation", "ctc", "payroll", "bonus",
-
-            # Lifecycle
-            "attrition", "termination", "resignation", "hire_date",
-            "joining_date", "exit_date",
-
-            # Performance & attendance
-            "performance_score", "rating", "leave_balance", "timesheet"
+            "attrition", "termination", "resignation",
+            "hire_date", "joining_date", "exit_date",
+            "performance_score", "rating",
+            "leave_balance", "attendance", "timesheet"
         },
         "ambiguous": {
-            "id", "date", "status", "gender", "age", "location", 
-            "name", "email"
+            "id", "date", "gender", "age", "location"
         }
     },
 
@@ -76,14 +45,13 @@ DOMAIN_INTENTS = {
     # =====================================================
     "marketing": {
         "high": {
-            "campaign", "ad_group", "creative", "audience",
+            "campaign_id", "ad_group", "creative_id",
             "impressions", "clicks", "ctr", "cpc", "cpm",
             "roas", "ad_spend", "cost_per_acquisition",
-            "campaign_id", "utm_source"
+            "utm_source", "utm_medium"
         },
         "ambiguous": {
-            "channel", "source", "conversion", "cost", 
-            "revenue", "keyword", "budget"
+            "channel", "cost", "revenue", "date"
         }
     },
 
@@ -92,13 +60,13 @@ DOMAIN_INTENTS = {
     # =====================================================
     "retail": {
         "high": {
-            "store_id", "store_location", "cashier", "pos_id",
-            "shelf", "aisle", "zone", "markdown", "promotion",
-            "loyalty_card", "foot_traffic", "basket_size"
+            "store_id", "store_location", "pos_id",
+            "cashier", "shelf", "aisle", "zone",
+            "promotion", "markdown", "loyalty_card",
+            "foot_traffic", "basket_size"
         },
         "ambiguous": {
-            "store", "sales", "category", "item", 
-            "quantity", "profit", "price", "sku"
+            "sales", "quantity", "price", "sku", "date"
         }
     },
 
@@ -107,100 +75,81 @@ DOMAIN_INTENTS = {
     # =====================================================
     "ecommerce": {
         "high": {
-            "cart_abandonment", "add_to_cart", "checkout",
-            "conversion_rate", "aov", "cac", "session_duration",
-            "bounce_rate", "pageviews", "unique_visitors",
-            "payment_gateway", "shipping_method"
+            "cart_abandonment", "add_to_cart",
+            "checkout", "conversion_rate",
+            "aov", "cac", "session_duration",
+            "bounce_rate", "pageviews",
+            "unique_visitors", "payment_gateway",
+            "shipping_method"
         },
         "ambiguous": {
-            "session_id", "referrer", "ip_address", "discount_code",
-            "user_id", "order_date", "product_view"
+            "user_id", "order_date", "discount_code", "amount"
         }
     },
 
     # =====================================================
-    # CUSTOMER (CRM) 🤝
+    # CUSTOMER 🤝
     # =====================================================
     "customer": {
         "high": {
-            "customer_id", "customer_name", "segment", 
-            "recency", "frequency", "monetary", "rfm",
+            "customer_id", "customer_name", "segment",
+            "rfm", "recency", "frequency", "monetary",
             "lifetime_value", "churn", "nps", "csat",
             "support_ticket"
         },
         "ambiguous": {
-            "purchase_date", "location", "device", "channel",
-            "transaction_id", "amount", "email", "phone"
+            "email", "phone", "transaction_id", "amount", "date"
         }
     },
 
     # =====================================================
-    # FINANCE 💰 (Corporate + Market)
+    # FINANCE 💰
     # =====================================================
     "finance": {
         "high": {
-            # Corporate Finance
-            "portfolio", "asset", "liability", "equity",
-            "dividend", "interest_rate", "ticker",
-            "transaction_type", "balance", "net_income", 
-            "cash_flow", "ebitda", "volatility", "beta",
-
-            # Market Data (OHLCV - Essential for Yahoo/Stock Data)
+            "revenue", "expense", "profit", "loss",
+            "asset", "liability", "equity",
+            "cash_flow", "net_income", "ebitda",
+            "interest_rate", "balance",
             "open", "close", "high", "low",
-            "adj_close", "adjusted_close",
-            "volume", "market_cap",
-            "returns", "ask", "bid"
+            "adjusted_close", "volume", "market_cap"
         },
         "ambiguous": {
-            "date", "value", "amount", "price", "currency", 
-            "revenue", "profit"
+            "price", "amount", "currency", "date"
         }
     },
 
     # =====================================================
-    # SALES (B2B) 💼
-    # =====================================================
-    "sales": {
-        "high": {
-            "opportunity", "pipeline", "deal_stage", "quota",
-            "account_executive", "lead_source", "prospect",
-            "win_rate", "sales_rep", "closing_date",
-            "contract_value", "arr", "mrr", "bookings"
-        },
-        "ambiguous": {
-            "amount", "probability", "status", "owner", 
-            "account", "territory", "contact"
-        }
-    },
-
-    # =====================================================
-    # HEALTHCARE 🏥
+    # HEALTHCARE 🏥 (CRITICAL FIX)
     # =====================================================
     "healthcare": {
         "high": {
-            "diagnosis", "patient", "treatment", "admission",
-            "discharge", "doctor", "hospital", "clinical",
-            "readmission", "mortality", "insurance_provider", 
-            "blood_type", "systolic", "diastolic", "bmi"
+            # Identity & encounter
+            "patient_id", "encounter", "visit_id",
+
+            # Dates
+            "admission_date", "discharge_date", "fill_date",
+
+            # Clinical
+            "diagnosis", "treatment", "doctor", "bed_id",
+
+            # Operations
+            "length_of_stay", "los", "duration",
+
+            # Outcomes
+            "readmitted", "mortality", "flag",
+
+            # Pharmacy
+            "days_supply", "supply", "rx_volume",
+
+            # Financial healthcare
+            "billing_amount", "cost",
+
+            # Population health
+            "population"
         },
         "ambiguous": {
-            "id", "date", "gender", "age", "status", 
-            "weight", "height", "visit"
+            "id", "date", "age", "gender", "facility", "status"
         }
     },
-
-    # =====================================================
-    # EDUCATION 🎓
-    # =====================================================
-    "education": {
-        "high": {
-            "student_id", "gpa", "course_id", "semester",
-            "grade", "faculty", "enrollment", "major",
-            "exam_score", "attendance_rate", "graduation_year"
-        },
-        "ambiguous": {
-            "name", "age", "gender", "subject", "class", "score"
-        }
-    }
 }
-
