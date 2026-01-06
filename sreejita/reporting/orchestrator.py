@@ -1,6 +1,6 @@
 # =====================================================
-# ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE)
-# Sreejita Framework v3.6 (LOCKED)
+# ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE, LOCKED)
+# Sreejita Framework v3.6 STABILIZED
 # =====================================================
 
 import logging
@@ -17,9 +17,8 @@ from sreejita.core.fingerprint import dataframe_fingerprint
 
 log = logging.getLogger("sreejita.orchestrator")
 
-
 # =====================================================
-# SAFE FILE LOADER
+# SAFE FILE LOADER (NEVER CRASH)
 # =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
@@ -39,9 +38,8 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
     raise RuntimeError(f"Unsupported file type: {path.suffix}")
 
-
 # =====================================================
-# BOARD READINESS HISTORY
+# BOARD READINESS HISTORY (SAFE)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -73,9 +71,8 @@ def _trend(prev: Optional[int], curr: Optional[int]) -> str:
         return "↓"
     return "→"
 
-
 # =====================================================
-# CANONICAL ENTRY POINT
+# CANONICAL ENTRY POINT (ONLY ENTRY)
 # =====================================================
 
 def generate_report_payload(
@@ -91,44 +88,46 @@ def generate_report_payload(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA
+    # 1. LOAD DATA (IMMUTABLE SOURCE)
     # -------------------------------------------------
-    df = _read_tabular_file_safe(input_path)
-    if df.empty:
+    raw_df = _read_tabular_file_safe(input_path)
+    if raw_df.empty:
         raise RuntimeError("Dataset is empty")
 
+    df = raw_df.copy(deep=False)
     dataset_key = dataframe_fingerprint(df)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY)
+    # 2. DATASET SHAPE (CONTEXT ONLY — NEVER DRIVES LOGIC)
     # -------------------------------------------------
     shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
-    # 3. DOMAIN DECISION (NEVER NULL)
+    # 3. DOMAIN DECISION (ENGINE ALWAYS ATTACHED)
     # -------------------------------------------------
     decision = decide_domain(df)
     engine = decision.engine
     domain = decision.selected_domain
 
-    if engine is None or not domain:
+    if engine is None or not isinstance(domain, str):
         raise RuntimeError("Domain resolution failed")
 
-    # 🔒 HARD RESET DOMAIN STATE (CRITICAL)
+    # 🔒 CRITICAL: RESET DOMAIN STATE (NO LEAKAGE)
     if hasattr(engine, "_last_kpis"):
         engine._last_kpis = None
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT PIPELINE)
+    # 4. DOMAIN EXECUTION (STRICT ORDER — NEVER CHANGE)
     # -------------------------------------------------
     try:
-        # Preprocess
+        # PREPROCESS (COPY SAFE)
         df = engine.preprocess(df)
 
-        # KPIs (authoritative)
+        # KPIs — SINGLE SOURCE OF TRUTH
         kpis = engine.calculate_kpis(df)
+        engine._last_kpis = kpis
 
-        # Visuals (raw, unsliced)
+        # VISUALS — MUST COME AFTER KPIs
         try:
             visuals = engine.generate_visuals(
                 df=df,
@@ -137,14 +136,14 @@ def generate_report_payload(
         except Exception:
             visuals = []
 
-        # Insights (single contract)
+        # INSIGHTS — KPI BOUND
         insights = engine.generate_insights(df, kpis)
 
-        # Recommendations (single contract)
+        # RECOMMENDATIONS — INSIGHT BOUND
         raw_recs = engine.generate_recommendations(df, kpis, insights)
         recommendations = enrich_recommendations(raw_recs)
 
-        # Executive cognition
+        # EXECUTIVE COGNITION — LAST
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -158,7 +157,7 @@ def generate_report_payload(
         raise RuntimeError(f"{domain} execution failed: {e}")
 
     # -------------------------------------------------
-    # 5. VISUAL VALIDATION (BEFORE HARDENING)
+    # 5. VISUAL VALIDATION (PATH + CONFIDENCE)
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
@@ -166,13 +165,13 @@ def generate_report_payload(
         try:
             path = Path(v.get("path", ""))
             conf = float(v.get("confidence", 0))
-            if path.exists() and conf >= 0.3:
+            if path.exists() and conf >= 0.30:
                 valid_visuals.append(v)
         except Exception:
             continue
 
     # -------------------------------------------------
-    # 6. UNIVERSAL VISUAL HARDENING (CRITICAL)
+    # 6. UNIVERSAL VISUAL SAFETY NET (FINAL GUARD)
     # -------------------------------------------------
     valid_visuals = engine.ensure_minimum_visuals(
         valid_visuals,
@@ -181,16 +180,16 @@ def generate_report_payload(
     )
 
     # -------------------------------------------------
-    # 7. EXECUTIVE SAFE SLICING (MAX 6)
+    # 7. EXECUTIVE SAFE SELECTION (MAX 6)
     # -------------------------------------------------
     valid_visuals = sorted(
         valid_visuals,
-        key=lambda x: float(x.get("importance", 0)) * float(x.get("confidence", 1)),
+        key=lambda v: float(v.get("importance", 0)) * float(v.get("confidence", 1)),
         reverse=True,
     )[:6]
 
     # -------------------------------------------------
-    # 8. BOARD READINESS HISTORY
+    # 8. BOARD READINESS TREND (NON-BLOCKING)
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -209,7 +208,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 9. FINAL PAYLOAD (STRICT, STABLE)
+    # 9. FINAL PAYLOAD (STRICT CONTRACT)
     # -------------------------------------------------
     return {
         domain: {
