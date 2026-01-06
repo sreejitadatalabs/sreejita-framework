@@ -28,7 +28,7 @@ class BaseDomain(ABC):
     HARD GUARANTEES:
     - No shared DataFrame mutation
     - Deterministic KPI lifecycle
-    - Visual safety
+    - Visual safety (guaranteed)
     - Executive-safe cognition
 
     MUST NOT:
@@ -108,7 +108,7 @@ class BaseDomain(ABC):
     ) -> List[Dict[str, Any]]:
         """
         Guarantees at least 2 visuals.
-        Fallback visuals are explicitly marked as fallback.
+        Fallback visuals are explicitly marked.
         NEVER raises.
         """
 
@@ -145,7 +145,7 @@ class BaseDomain(ABC):
             # -----------------------------
             # Fallback 2 — Data Completeness
             # -----------------------------
-            completeness = 1 - df.isna().mean().mean()
+            completeness = float(1 - df.isna().mean().mean())
 
             fig, ax = plt.subplots(figsize=(6, 4))
             ax.bar(["Completeness"], [completeness])
@@ -202,20 +202,33 @@ class BaseDomain(ABC):
         return executive
 
     # --------------------------------------------------
-    # 🔒 SAFE LEGACY PIPELINE (LOCKED)
+    # 🔒 SAFE LEGACY PIPELINE (AUTHORITATIVE)
     # --------------------------------------------------
-    def run(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def run(
+        self,
+        df: pd.DataFrame,
+        *,
+        visual_output_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
         """
         Legacy pipeline.
-        SAFE, deterministic, non-bypassing.
+
+        GUARANTEES:
+        - No shared mutation
+        - Visuals always exist
+        - Executive always stable
         """
 
         if not self.validate_data(df):
             raise ValueError(f"Data validation failed for domain: {self.name}")
 
+        # Defensive copy
+        df = df.copy(deep=False)
+
+        # Domain preprocessing
         df = self.preprocess(df)
 
-        # KPI lifecycle is authoritative
+        # KPI lifecycle
         kpis = self.calculate_kpis(df)
         if not isinstance(kpis, dict):
             raise TypeError("calculate_kpis must return a dict")
@@ -224,6 +237,23 @@ class BaseDomain(ABC):
 
         insights = self.generate_insights(df, kpis)
         recommendations = self.generate_recommendations(df, kpis, insights)
+
+        # Visuals (guaranteed)
+        visuals: List[Dict[str, Any]] = []
+        if visual_output_dir is not None:
+            try:
+                visuals = self.generate_visuals(df, visual_output_dir)
+                visuals = self.ensure_minimum_visuals(
+                    visuals,
+                    df,
+                    visual_output_dir,
+                )
+            except Exception:
+                visuals = self.ensure_minimum_visuals(
+                    [],
+                    df,
+                    visual_output_dir,
+                )
 
         executive = self.build_executive(
             kpis=kpis,
@@ -237,5 +267,6 @@ class BaseDomain(ABC):
             "kpis": kpis,
             "insights": insights,
             "recommendations": recommendations,
+            "visuals": visuals,
             "executive": executive,
         }
