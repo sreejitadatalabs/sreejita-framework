@@ -27,33 +27,47 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
     "encounter": {
         "aliases": [
-            "encounter_id", "visit_id", "case_id"
+            "encounter_id", "visit_id", "case_id",
+        "appointment_id", "appt_id", "claim_id",
+        "test_id", "order_id", "transaction_id",
+        "service_id", "record_id"
         ],
         "dtype": "object",
+        "priority": 0.85,
     },
 
     # ---------------- TIME (STRICT) ----------------
     # ⚠ DO NOT add generic "time" here
     "admission_date": {
         "aliases": [
-            "admission_date", "admit_date",
-            "date_of_admission"
+            "admission_date", "admit_date", "admission_datetime", "date_of_admission", "admitted_on", "admitted_date",
+        # Generic (hospital context)
+        "visit_date", "visitdate", "encounter_date",
+        "check_in_date", "checkin_date", "start_date"
         ],
         "dtype": "datetime",
+        "priority": 0.95,
     },
 
     "discharge_date": {
         "aliases": [
-            "discharge_date", "discharged_at"
+            "discharge_date", "discharged_at", "discharged_date",
+        "discharge_datetime", "date_of_discharge", "checkout_date",
+        "end_date", "completion_date"
         ],
         "dtype": "datetime",
+        "priority": 0.92,
     },
 
     "fill_date": {
         "aliases": [
-            "fill_date", "dispense_date", "rx_filled_date"
+            "fill_date", "dispense_date", "rx_filled_date",
+        "dispensed_date", "medication_fill_date", "refill_date",
+        "prescription_fill_date", "filled_on", "dispensed_on",
+        "pickup_date", "drug_fill_date"
         ],
         "dtype": "datetime",
+        "priority": 0.90,
     },
 
     # ---------------- DURATIONS ----------------
@@ -66,9 +80,16 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
     "duration": {
         "aliases": [
-            "duration", "wait_time", "turnaround_time", "tat"
+            "duration", "duration_minutes", "duration_hours",
+        # Clinical-specific
+        "wait_time", "waiting_time", "patient_wait_time",
+        "turnaround_time", "tat", "turnaround_minutes",
+        # Clinic/pharmacy
+        "appointment_duration", "visit_duration", "service_time",
+        "checkout_time", "time_in_clinic", "chair_time"
         ],
         "dtype": "numeric",
+        "priority": 0.85,
     },
 
     # ---------------- COST (NEUTRAL) ----------------
@@ -89,9 +110,24 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
     "flag": {
         "aliases": [
-            "flag", "outcome", "event_flag"
+            "flag", "outcome", "event_flag",
+        "mortality", "no_show", "readmission",
+        "critical_result", "alert_flag", "result_flag",
+        "specimen_rejection", "device_alert", "safety_event",
+        "yes_no_flag", "binary_outcome"
         ],
         "dtype": "binary",
+        "priority": 0.80,
+    },
+
+    "diagnosis": {
+        "aliases": [
+            "diagnosis", "diagnoses", "primary_diagnosis",
+            "diagnosis_code", "icd_code", "icd9", "icd10",
+            "disease_code", "condition_code", "condition"
+        ],
+        "dtype": "object",
+        "priority": 0.88,
     },
 
     # ---------------- STRUCTURE ----------------
@@ -119,9 +155,13 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     # ---------------- PHARMACY / POPULATION ----------------
     "supply": {
         "aliases": [
-            "days_supply", "supply"
+            "days_supply", "supply", "days_on_hand",
+        "quantity_dispensed", "quantity", "qty",
+        "quantity_supplied", "refill_days", "pill_count",
+        "dose_count", "num_units"
         ],
         "dtype": "numeric",
+        "priority": 0.82,
     },
 
     "population": {
@@ -137,15 +177,28 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 # =====================================================
 
 def _normalize(name: str) -> str:
+    """Normalize column names for fuzzy matching"""
     name = str(name).lower().strip()
+    # Remove special characters but preserve structure
     name = re.sub(r"[^\w\s]", "", name)
+    # Collapse spaces to underscores
     name = re.sub(r"\s+", "_", name)
+    # Remove common prefixes/suffixes
+    name = re.sub(r"^(col_|column_)", "", name)
+    name = re.sub(r"(_col|_column)$", "", name)
+    # Remove redundant underscores
+    name = re.sub(r"_+", "_", name)
     return name
 
-
 def _similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
-
+    """Enhanced similarity with substring matching"""
+    ratio = SequenceMatcher(None, a, b).ratio()
+    
+    # Bonus for exact substring matches
+    if a in b or b in a:
+        ratio = max(ratio, 0.85)
+    
+    return ratio
 
 def _coverage(series: pd.Series) -> float:
     return float(series.notna().mean())
@@ -205,11 +258,15 @@ def resolve_column_with_confidence(
 
             dtype_score = _dtype_score(series, expected_dtype)
 
+            # Get priority multiplier from semantic map (default 1.0)
+            priority = spec.get("priority", 1.0)
+            
+            # Name score is domain-critical
             final_score = (
-                name_score * 0.55 +
+                name_score * 0.55 * priority +
                 dtype_score * 0.30 +
                 coverage * 0.15
-            )
+            ) / priority  # Normalize back
 
             if final_score > best_score:
                 best_score = final_score
