@@ -8,146 +8,136 @@ from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple, Any
 
 import pandas as pd
-
+import numpy as np
 
 # =====================================================
-# SEMANTIC COLUMN MAP (AUTHORITATIVE)
+# SEMANTIC COLUMN MAP (AUTHORITATIVE, NON-OVERLAPPING)
 # =====================================================
 
 SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
-    # ---------- Identity ----------
+    # ---------------- IDENTITY ----------------
     "patient_id": {
         "aliases": [
-            "patient_id", "patientid", "pid", "ptid", "pt_id",
-            "patient", "mrn", "uhid", "medical_record_number", "member_id"
+            "patient_id", "patientid", "pid", "ptid",
+            "mrn", "uhid", "medical_record_number"
         ],
         "dtype": "object",
     },
 
-    # ---------- Dates ----------
-    "date": {
+    "encounter": {
         "aliases": [
-            "date", "created_date", "event_date",
-            "timestamp", "datetime", "time"
+            "encounter_id", "visit_id", "case_id"
         ],
-        "dtype": "datetime",
+        "dtype": "object",
     },
 
+    # ---------------- TIME (STRICT) ----------------
+    # ⚠ DO NOT add generic "time" here
     "admission_date": {
         "aliases": [
             "admission_date", "admit_date",
-            "admitted_at", "date_of_admission"
+            "date_of_admission"
         ],
         "dtype": "datetime",
     },
 
     "discharge_date": {
         "aliases": [
-            "discharge_date", "discharged_at", "discharge"
+            "discharge_date", "discharged_at"
         ],
         "dtype": "datetime",
     },
 
     "fill_date": {
         "aliases": [
-            "fill_date", "dispense_date", "rx_date", "prescribed_date"
+            "fill_date", "dispense_date", "rx_filled_date"
         ],
         "dtype": "datetime",
     },
 
-    # ---------- Time / Flow ----------
+    # ---------------- DURATIONS ----------------
     "length_of_stay": {
         "aliases": [
-            "length_of_stay", "los", "stay_length",
-            "lengthofstay", "days_in_hospital"
+            "length_of_stay", "los", "stay_length"
         ],
         "dtype": "numeric",
     },
 
     "duration": {
         "aliases": [
-            "duration", "wait_time", "tat",
-            "turnaround", "cycle_time", "delay"
+            "duration", "wait_time", "turnaround_time", "tat"
         ],
         "dtype": "numeric",
     },
 
-    # ---------- Financial ----------
+    # ---------------- COST (NEUTRAL) ----------------
     "cost": {
         "aliases": [
-            "cost", "charges", "charge", "billing",
-            "bill_amount", "expense", "amount", "total_cost"
+            "cost", "billing_amount", "total_charges", "charges"
         ],
         "dtype": "numeric",
     },
 
-    # ---------- Outcomes / Flags ----------
+    # ---------------- FLAGS ----------------
     "readmitted": {
         "aliases": [
-            "readmitted", "readmit", "re_admitted", "is_readmission"
+            "readmitted", "readmission_flag"
         ],
         "dtype": "binary",
     },
 
     "flag": {
         "aliases": [
-            "flag", "indicator", "event", "outcome", "status_flag"
+            "flag", "outcome", "event_flag"
         ],
         "dtype": "binary",
     },
 
-    # ---------- Structural ----------
+    # ---------------- STRUCTURE ----------------
     "facility": {
         "aliases": [
-            "facility", "hospital", "site",
-            "location", "center", "clinic", "ward"
+            "facility", "hospital", "clinic", "location", "branch"
         ],
         "dtype": "object",
     },
 
     "doctor": {
         "aliases": [
-            "doctor", "physician", "provider",
-            "consultant", "clinician"
+            "doctor", "physician", "provider"
         ],
         "dtype": "object",
     },
 
     "bed_id": {
         "aliases": [
-            "bed_id", "bed_no", "room_no",
-            "room_number", "unit_id"
+            "bed_id", "bed", "room_no"
         ],
         "dtype": "object",
     },
 
+    # ---------------- PHARMACY / POPULATION ----------------
     "supply": {
         "aliases": [
-            "days_supply", "supply",
-            "inventory_days", "qty_on_hand"
+            "days_supply", "supply"
         ],
         "dtype": "numeric",
     },
 
     "population": {
         "aliases": [
-            "population", "members",
-            "covered_lives", "census"
+            "population", "covered_lives"
         ],
         "dtype": "numeric",
     },
 }
-
 
 # =====================================================
 # NORMALIZATION HELPERS
 # =====================================================
 
 def _normalize(name: str) -> str:
-    if not isinstance(name, str):
-        return str(name)
-    name = name.lower().strip()
+    name = str(name).lower().strip()
     name = re.sub(r"[^\w\s]", "", name)
     name = re.sub(r"\s+", "_", name)
     return name
@@ -157,50 +147,38 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+def _coverage(series: pd.Series) -> float:
+    return float(series.notna().mean())
+
+
 def _dtype_score(series: pd.Series, expected: str) -> float:
-    """
-    Penalize incorrect dtypes.
-    """
     try:
         if expected == "numeric":
-            return 1.0 if pd.to_numeric(series, errors="coerce").notna().mean() > 0.6 else 0.5
+            return 1.0 if pd.to_numeric(series, errors="coerce").notna().mean() > 0.7 else 0.0
+
         if expected == "datetime":
-            return 1.0 if pd.to_datetime(series, errors="coerce").notna().mean() > 0.6 else 0.5
+            return 1.0 if pd.to_datetime(series, errors="coerce").notna().mean() > 0.7 else 0.0
+
         if expected == "binary":
-            uniq = series.dropna().unique()
-            return 1.0 if len(uniq) <= 3 else 0.6
+            uniq = pd.to_numeric(series, errors="coerce").dropna().unique()
+            return 1.0 if set(uniq).issubset({0, 1}) else 0.0
+
         return 1.0
     except Exception:
-        return 0.5
-
-
-def _coverage_score(series: pd.Series) -> float:
-    """
-    Penalize sparse columns.
-    """
-    non_null = series.notna().mean()
-    if non_null >= 0.8:
-        return 1.0
-    if non_null >= 0.5:
-        return 0.7
-    return 0.4
+        return 0.0
 
 
 # =====================================================
-# CORE RESOLVER
+# CORE RESOLVER (CONFIDENCE-AWARE)
 # =====================================================
 
 def resolve_column_with_confidence(
     df: pd.DataFrame,
     semantic_key: str,
-    cutoff: float = 0.65,
+    cutoff: float = 0.70,
 ) -> Tuple[Optional[str], float]:
 
-    if (
-        df is None
-        or df.empty
-        or semantic_key not in SEMANTIC_COLUMN_MAP
-    ):
+    if df is None or df.empty or semantic_key not in SEMANTIC_COLUMN_MAP:
         return None, 0.0
 
     spec = SEMANTIC_COLUMN_MAP[semantic_key]
@@ -217,19 +195,20 @@ def resolve_column_with_confidence(
 
         for norm_col, original_col in norm_cols.items():
             name_score = _similarity(alias_norm, norm_col)
-
-            if name_score < 0.5:
+            if name_score < 0.65:
                 continue
 
             series = df[original_col]
+            coverage = _coverage(series)
+            if coverage < 0.30:
+                continue
 
             dtype_score = _dtype_score(series, expected_dtype)
-            coverage_score = _coverage_score(series)
 
             final_score = (
-                name_score * 0.6 +
-                dtype_score * 0.25 +
-                coverage_score * 0.15
+                name_score * 0.55 +
+                dtype_score * 0.30 +
+                coverage * 0.15
             )
 
             if final_score > best_score:
@@ -242,10 +221,14 @@ def resolve_column_with_confidence(
     return None, 0.0
 
 
+# =====================================================
+# BACKWARD COMPATIBLE API
+# =====================================================
+
 def resolve_column(
     df: pd.DataFrame,
     semantic_key: str,
-    cutoff: float = 0.65,
+    cutoff: float = 0.70,
 ) -> Optional[str]:
     col, _ = resolve_column_with_confidence(df, semantic_key, cutoff)
     return col
@@ -259,42 +242,17 @@ def bulk_resolve(
 
 
 # =====================================================
-# SEMANTIC CAPABILITY SIGNALS (NO KPIs)
+# SEMANTIC CAPABILITY SIGNALS (DOMAIN-SAFE)
 # =====================================================
 
-def has_date_range(df: pd.DataFrame) -> bool:
-    return bool(
-        resolve_column(df, "admission_date")
-        and resolve_column(df, "discharge_date")
-    )
-
-
-def can_derive_los(df: pd.DataFrame) -> bool:
-    admit = resolve_column(df, "admission_date")
-    discharge = resolve_column(df, "discharge_date")
-
-    if not (admit and discharge):
-        return False
-
-    try:
-        return (
-            pd.to_datetime(df[admit], errors="coerce").notna().any()
-            and pd.to_datetime(df[discharge], errors="coerce").notna().any()
-        )
-    except Exception:
-        return False
-
-
-def resolve_semantics(df: pd.DataFrame) -> Dict[str, Any]:
-    """
-    Dataset capability signals (used for sub-domain detection).
-    """
+def resolve_semantics(df: pd.DataFrame) -> Dict[str, bool]:
     return {
         "has_patient_id": bool(resolve_column(df, "patient_id")),
-        "has_facility": bool(resolve_column(df, "facility")),
-        "has_admission_discharge": has_date_range(df),
-        "can_derive_los": can_derive_los(df),
-        "has_bed_id": bool(resolve_column(df, "bed_id")),
+        "has_admission_date": bool(resolve_column(df, "admission_date")),
+        "has_discharge_date": bool(resolve_column(df, "discharge_date")),
+        "has_los": bool(resolve_column(df, "length_of_stay")),
         "has_duration": bool(resolve_column(df, "duration")),
         "has_cost": bool(resolve_column(df, "cost")),
+        "has_supply": bool(resolve_column(df, "supply")),
+        "has_population": bool(resolve_column(df, "population")),
     }
