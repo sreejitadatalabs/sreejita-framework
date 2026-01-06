@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
 
@@ -33,10 +33,8 @@ class HybridReport(BaseReport):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
 
-        if not isinstance(domain_results, dict):
-            raise RuntimeError(
-                f"HybridReport.build expected dict, got {type(domain_results)}"
-            )
+        if not isinstance(domain_results, dict) or not domain_results:
+            raise RuntimeError("HybridReport.build expects non-empty domain_results dict")
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -44,33 +42,30 @@ class HybridReport(BaseReport):
         run_id = f"SR-{datetime.utcnow():%Y%m%d}-{uuid.uuid4().hex[:6]}"
         report_path = output_dir / f"Sreejita_Executive_Report_{run_id}.md"
 
+        domains = self._sort_domains(list(domain_results.keys()))
+        primary_domain = domains[0]
+        primary_payload = domain_results.get(primary_domain) or {}
+
         with open(report_path, "w", encoding="utf-8") as f:
             self._write_header(f, run_id, metadata)
 
-            domains = list(domain_results.keys())
-            if not domains:
-                raise RuntimeError("No domains returned by orchestrator")
-
-            sorted_domains = self._sort_domains(domains)
-            primary_domain = sorted_domains[0]
-            primary = domain_results.get(primary_domain) or {}
-
             # =================================================
-            # GLOBAL EXECUTIVE SUMMARY (PRIMARY DOMAIN)
+            # GLOBAL EXECUTIVE SUMMARY
             # =================================================
-            executive = primary.get("executive") or {}
+            executive = primary_payload.get("executive")
             if isinstance(executive, dict):
                 self._write_global_executive(f, executive)
 
             # =================================================
-            # PER-SUB-DOMAIN EXECUTIVE SECTIONS
+            # PER-SUB-DOMAIN EXECUTIVE
             # =================================================
-            self._write_sub_domain_executives(f, executive)
+            if isinstance(executive, dict):
+                self._write_sub_domain_executives(f, executive)
 
             # =================================================
             # DOMAIN DEEP DIVES
             # =================================================
-            for domain in sorted_domains:
+            for domain in domains:
                 payload = domain_results.get(domain)
                 if isinstance(payload, dict):
                     self._write_domain_section(f, domain, payload)
@@ -88,12 +83,12 @@ class HybridReport(BaseReport):
 
         if isinstance(brief, str) and brief.strip():
             f.write("## Executive Summary\n\n")
-            f.write(f"{brief}\n\n")
+            f.write(f"{brief.strip()}\n\n")
 
-        if isinstance(board, dict) and board:
+        if isinstance(board, dict):
             f.write("### Board Readiness\n")
-            f.write(f"- **Score:** {board.get('score', '-')} / 100\n")
-            f.write(f"- **Status:** {board.get('band', '-')}\n")
+            f.write(f"- **Score:** {board.get('score', '—')} / 100\n")
+            f.write(f"- **Status:** {board.get('band', '—')}\n")
 
         trend = executive.get("board_readiness_trend")
         if isinstance(trend, dict):
@@ -106,7 +101,7 @@ class HybridReport(BaseReport):
         f.write("\n---\n\n")
 
     # -------------------------------------------------
-    # SUB-DOMAIN EXECUTIVE SECTIONS
+    # SUB-DOMAIN EXECUTIVE
     # -------------------------------------------------
     def _write_sub_domain_executives(self, f, executive: Dict[str, Any]):
         exec_by_sub = executive.get("executive_by_sub_domain")
@@ -120,18 +115,18 @@ class HybridReport(BaseReport):
             if not isinstance(payload, dict):
                 continue
 
+            f.write(f"### {sub.replace('_',' ').title()}\n\n")
+
             brief = payload.get("executive_brief")
             board = payload.get("board_readiness") or {}
 
-            f.write(f"### {sub.replace('_',' ').title()}\n\n")
-
             if isinstance(brief, str) and brief.strip():
-                f.write(f"{brief}\n\n")
+                f.write(f"{brief.strip()}\n\n")
 
             if isinstance(board, dict):
                 f.write(
-                    f"- **Board Readiness Score:** {board.get('score','-')} / 100  \n"
-                    f"- **Status:** {board.get('band','-')}\n\n"
+                    f"- **Board Readiness Score:** {board.get('score','—')} / 100  \n"
+                    f"- **Status:** {board.get('band','—')}\n\n"
                 )
 
         f.write("---\n\n")
@@ -144,9 +139,13 @@ class HybridReport(BaseReport):
 
         # ---------------- KPIs ----------------
         raw_kpis = result.get("kpis") or {}
+
+        # Executive-safe KPIs only
         kpis = {
             k: v for k, v in raw_kpis.items()
-            if isinstance(k, str) and not k.startswith("_")
+            if isinstance(k, str)
+            and not k.startswith("_")
+            and k not in {"sub_domains", "primary_sub_domain"}
         }
 
         if kpis:
@@ -154,43 +153,45 @@ class HybridReport(BaseReport):
             f.write("| Metric | Value |\n")
             f.write("| :--- | :--- |\n")
 
-            shown = 0
-            for k, v in kpis.items():
-                if shown >= 9:
+            for i, (k, v) in enumerate(kpis.items()):
+                if i >= 9:
                     break
                 f.write(
                     f"| {k.replace('_',' ').title()} | {self._format_value(k, v)} |\n"
                 )
-                shown += 1
-
-            while shown < 5:
-                f.write("| Data Coverage | Insufficient signal |\n")
-                shown += 1
 
             f.write("\n")
 
         # ---------------- VISUALS ----------------
         visuals = result.get("visuals") or []
-        if isinstance(visuals, list) and visuals:
+        visuals = visuals[:6]
+
+        if visuals:
             f.write("### Visual Evidence\n")
-            for vis in visuals[:6]:
+            for vis in visuals:
                 if not isinstance(vis, dict):
                     continue
+
                 path = vis.get("path")
-                if not path:
-                    continue
-
                 caption = vis.get("caption", "Visual evidence")
-                confidence = int(float(vis.get("confidence", 0)) * 100)
 
-                f.write(f"![{caption}]({path})\n")
-                f.write(f"> {caption} (Confidence: {confidence}%)\n\n")
+                try:
+                    conf = float(vis.get("confidence", 0))
+                    conf_pct = int(max(0, min(conf, 1)) * 100)
+                except Exception:
+                    conf_pct = 0
+
+                if path:
+                    f.write(f"![{caption}]({path})\n")
+                    f.write(f"> {caption} (Confidence: {conf_pct}%)\n\n")
 
         # ---------------- INSIGHTS ----------------
         insights = result.get("insights") or []
-        if isinstance(insights, list) and insights:
+        insights = insights[:5]
+
+        if insights:
             f.write("### Key Insights\n")
-            for ins in insights[:5]:
+            for ins in insights:
                 if not isinstance(ins, dict):
                     continue
                 f.write(
@@ -201,13 +202,19 @@ class HybridReport(BaseReport):
 
         # ---------------- RECOMMENDATIONS ----------------
         recs = result.get("recommendations") or []
-        if isinstance(recs, list) and recs:
+        recs = recs[:5]
+
+        if recs:
             f.write("### Recommendations\n")
-            for r in recs[:5]:
+            for r in recs:
                 if not isinstance(r, dict):
                     continue
+
+                degraded = r.get("degraded") is True
+                suffix = " _(degraded)_ " if degraded else ""
+
                 f.write(
-                    f"- **{r.get('priority','')}** — {r.get('action','')} "
+                    f"- **{r.get('priority','')}** — {r.get('action','')}{suffix} "
                     f"(Owner: {r.get('owner','-')}, "
                     f"Timeline: {r.get('timeline','-')})\n"
                 )
@@ -238,14 +245,14 @@ class HybridReport(BaseReport):
     # -------------------------------------------------
     # HELPERS
     # -------------------------------------------------
-    def _sort_domains(self, domains):
+    def _sort_domains(self, domains: List[str]) -> List[str]:
         priority = ["healthcare", "finance", "retail", "marketing"]
         return sorted(
             domains,
             key=lambda d: priority.index(d) if d in priority else 99
         )
 
-    def _format_value(self, key: str, v: Any):
+    def _format_value(self, key: str, v: Any) -> str:
         if isinstance(v, (int, float)):
             if "rate" in key:
                 return f"{v:.1%}"
@@ -263,11 +270,7 @@ class HybridReport(BaseReport):
 
 def run(input_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Stable public API for:
-    - CLI
-    - Batch runner
-    - Scheduler
-    - Tests
+    Stable public API for CLI / Batch / Scheduler
     """
 
     from sreejita.reporting.orchestrator import generate_report_payload
