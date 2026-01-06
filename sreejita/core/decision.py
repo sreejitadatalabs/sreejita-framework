@@ -1,6 +1,6 @@
 # =====================================================
-# DECISION EXPLANATION — UNIVERSAL (FINAL, HARDENED)
-# Sreejita Framework v3.6
+# DECISION EXPLANATION — UNIVERSAL (FINAL, LOCKED)
+# Sreejita Framework v3.6 STABILIZED
 # =====================================================
 
 from dataclasses import dataclass, field
@@ -15,16 +15,17 @@ class DecisionExplanation:
     Canonical decision explanation object.
 
     Used by:
-    - Router
+    - Domain Router
     - Orchestrator
     - Streamlit UI
-    - Observability
-    - Debugging & audit
+    - Observability / Audit
+    - Debugging
 
-    GUARANTEES:
+    HARD GUARANTEES:
     - Always serializable
-    - Always engine-attached
-    - Always explainable
+    - Never crashes on missing fields
+    - Engine is attached lazily & safely
+    - Confidence is bounded
     """
 
     # -------------------------------------------------
@@ -48,7 +49,7 @@ class DecisionExplanation:
     fingerprint: Optional[str] = None
 
     # -------------------------------------------------
-    # EXECUTION CONTEXT (ATTACHED LATER)
+    # EXECUTION CONTEXT (NEVER SERIALIZED)
     # -------------------------------------------------
     engine: Any = field(default=None, repr=False)
 
@@ -67,7 +68,9 @@ class DecisionExplanation:
     # SAFETY & NORMALIZATION
     # =================================================
     def __post_init__(self):
-        # Confidence must be numeric and bounded
+        # -----------------------------
+        # Confidence normalization
+        # -----------------------------
         try:
             self.confidence = float(self.confidence)
         except Exception:
@@ -75,15 +78,29 @@ class DecisionExplanation:
 
         self.confidence = max(0.0, min(self.confidence, 1.0))
 
-        # Normalize containers
-        if self.alternatives is None:
+        # -----------------------------
+        # Container normalization
+        # -----------------------------
+        if not isinstance(self.alternatives, list):
             self.alternatives = []
 
-        if self.signals is None:
+        if not isinstance(self.signals, dict):
             self.signals = {}
 
-        if self.rules_applied is None:
+        if not isinstance(self.rules_applied, list):
             self.rules_applied = []
+
+        if self.domain_scores is not None and not isinstance(self.domain_scores, dict):
+            self.domain_scores = None
+
+        # -----------------------------
+        # Core field safety
+        # -----------------------------
+        if not isinstance(self.decision_type, str):
+            self.decision_type = "unknown_decision"
+
+        if not isinstance(self.selected_domain, str):
+            self.selected_domain = "generic"
 
     # =================================================
     # SERIALIZATION (STREAMLIT / JSON SAFE)
@@ -91,7 +108,10 @@ class DecisionExplanation:
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert decision into a JSON-safe dictionary.
-        Engine is intentionally excluded.
+
+        NOTE:
+        - `engine` is intentionally excluded
+        - All values are UI-safe
         """
         return {
             "decision_id": self.decision_id,
@@ -107,7 +127,16 @@ class DecisionExplanation:
         }
 
     # =================================================
-    # DEBUG FRIENDLY STRING
+    # SAFE ENGINE ATTACHMENT
+    # =================================================
+    def attach_engine(self, engine: Any) -> None:
+        """
+        Attach domain execution engine safely.
+        """
+        self.engine = engine
+
+    # =================================================
+    # DEBUG / LOGGING
     # =================================================
     def __str__(self) -> str:
         return (
@@ -115,3 +144,5 @@ class DecisionExplanation:
             f"{self.decision_type} → {self.selected_domain} "
             f"(confidence={self.confidence:.2f})"
         )
+
+    __repr__ = __str__
