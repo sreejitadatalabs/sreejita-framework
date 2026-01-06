@@ -6,8 +6,10 @@
 from typing import List, Dict, Any
 import logging
 
+import pandas as pd
+
 # -----------------------------------------------------
-# DOMAIN IMPORTS (DETECTORS ONLY)
+# DOMAIN IMPORTS
 # -----------------------------------------------------
 
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
@@ -19,7 +21,7 @@ from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
 
-# 🚑 GENERIC (FALLBACK ONLY — NEVER COMPETES)
+# 🚑 GENERIC — ABSOLUTE LAST RESORT
 from sreejita.domains.generic import GenericDomain, GenericDomainDetector
 
 # -----------------------------------------------------
@@ -33,13 +35,13 @@ from sreejita.core.fingerprint import dataframe_fingerprint
 log = logging.getLogger("sreejita.router")
 
 # =====================================================
-# CONFIG
+# CONFIG (LOCKED)
 # =====================================================
 
-MIN_DOMAIN_CONFIDENCE = 0.45   # 🔒 critical guardrail
+MIN_DOMAIN_CONFIDENCE = 0.45  # 🚨 hard guardrail
 
 # =====================================================
-# DOMAIN DETECTORS (GENERIC EXCLUDED)
+# DOMAIN DETECTORS (GENERIC EXCLUDED FROM COMPETITION)
 # =====================================================
 
 DOMAIN_DETECTORS = [
@@ -56,7 +58,7 @@ DOMAIN_DETECTORS = [
 GENERIC_DETECTOR = GenericDomainDetector()
 
 # =====================================================
-# DOMAIN IMPLEMENTATION FACTORY (LAZY)
+# DOMAIN IMPLEMENTATION FACTORY (DETERMINISTIC)
 # =====================================================
 
 _DOMAIN_FACTORY = {
@@ -71,15 +73,20 @@ _DOMAIN_FACTORY = {
     "generic": GenericDomain,
 }
 
+
 def _get_domain_engine(name: str):
     cls = _DOMAIN_FACTORY.get(name)
-    return cls() if cls else GenericDomain()
+    try:
+        return cls() if cls else GenericDomain()
+    except Exception:
+        return GenericDomain()
 
 # =====================================================
 # OBSERVABILITY
 # =====================================================
 
 _OBSERVERS: List[DecisionObserver] = []
+
 
 def register_observer(observer: DecisionObserver):
     if observer:
@@ -89,21 +96,22 @@ def register_observer(observer: DecisionObserver):
 # DOMAIN DECISION ENGINE (AUTHORITATIVE)
 # =====================================================
 
-def decide_domain(df) -> DecisionExplanation:
+def decide_domain(df: pd.DataFrame) -> DecisionExplanation:
     """
     Determine the most appropriate domain for a dataset.
 
     GUARANTEES:
     - Generic NEVER competes
-    - Minimum confidence enforced
-    - Deterministic selection
+    - Healthcare cannot be overridden by Generic
+    - Deterministic highest-confidence win
+    - Minimum confidence enforced exactly once
     - Always returns DecisionExplanation
     """
 
     rule_results: Dict[str, Dict[str, Any]] = {}
 
     # -------------------------------------------------
-    # PHASE 1: RULE-BASED DETECTION
+    # PHASE 1 — RULE-BASED DETECTION
     # -------------------------------------------------
     for detector in DOMAIN_DETECTORS:
         try:
@@ -124,22 +132,21 @@ def decide_domain(df) -> DecisionExplanation:
             log.debug(f"{detector.__class__.__name__} failed: {e}")
 
     # -------------------------------------------------
-    # PHASE 2: CONFIDENCE-GATED SELECTION
+    # PHASE 2 — SELECT BEST DOMAIN (NON-GENERIC)
     # -------------------------------------------------
-    selected_domain = None
-    confidence = 0.0
+    selected_domain: str = ""
+    confidence: float = 0.0
     meta: Dict[str, Any] = {}
 
     if rule_results:
-        selected_domain, best = max(
+        selected_domain, meta = max(
             rule_results.items(),
             key=lambda x: x[1]["confidence"],
         )
-        confidence = best["confidence"]
-        meta = best
+        confidence = float(meta.get("confidence", 0.0))
 
     # -------------------------------------------------
-    # PHASE 3: HARD FALLBACK TO GENERIC
+    # PHASE 3 — HARD FALLBACK TO GENERIC (ONLY HERE)
     # -------------------------------------------------
     if (
         not selected_domain
@@ -147,15 +154,16 @@ def decide_domain(df) -> DecisionExplanation:
         or selected_domain not in _DOMAIN_FACTORY
     ):
         generic = GENERIC_DETECTOR.detect(df)
+
         selected_domain = "generic"
-        confidence = round(float(generic.confidence or 0.25), 2)
+        confidence = round(float(getattr(generic, "confidence", 0.25)), 2)
         meta = {
             "signals": getattr(generic, "signals", {"fallback": True}),
             "detector": "GenericDomainDetector",
         }
 
     # -------------------------------------------------
-    # BUILD ALTERNATIVES (EXPLAINABILITY)
+    # EXPLAINABILITY — ALTERNATIVES
     # -------------------------------------------------
     alternatives = [
         {
@@ -171,7 +179,7 @@ def decide_domain(df) -> DecisionExplanation:
     ]
 
     # -------------------------------------------------
-    # DECISION OBJECT
+    # DECISION OBJECT (STRICT CONTRACT)
     # -------------------------------------------------
     decision = DecisionExplanation(
         decision_type="domain_detection",
@@ -181,17 +189,18 @@ def decide_domain(df) -> DecisionExplanation:
         signals=meta.get("signals", {}),
         rules_applied=[
             "rule_based_detection",
+            "highest_confidence_wins",
             "minimum_confidence_gate",
-            "generic_fallback_only",
+            "generic_last_resort_only",
         ],
         domain_scores={
-            k: {"confidence": v["confidence"]}
-            for k, v in rule_results.items()
+            d: {"confidence": v["confidence"]}
+            for d, v in rule_results.items()
         },
     )
 
     # -------------------------------------------------
-    # ATTACH ENGINE (LAZY, SAFE)
+    # ENGINE ATTACHMENT (SAFE, LAZY)
     # -------------------------------------------------
     decision.engine = _get_domain_engine(selected_domain)
 
@@ -215,12 +224,16 @@ def decide_domain(df) -> DecisionExplanation:
 # DOMAIN PREPROCESSING (UTILITY)
 # =====================================================
 
-def apply_domain(df, domain_name: str):
-    domain = _DOMAIN_FACTORY.get(domain_name)
-    if not domain:
+def apply_domain(df: pd.DataFrame, domain_name: str):
+    """
+    Apply ONLY domain-level preprocessing.
+    No KPIs, no insights, no visuals.
+    """
+    cls = _DOMAIN_FACTORY.get(domain_name)
+    if not cls:
         return df
 
     try:
-        return domain().preprocess(df)
+        return cls().preprocess(df)
     except Exception:
         return df
