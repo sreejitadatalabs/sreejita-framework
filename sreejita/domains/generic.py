@@ -1,6 +1,6 @@
 # =====================================================
-# GENERIC FALLBACK DOMAIN — UNIVERSAL (FINAL)
-# Sreejita Framework v3.5.x
+# GENERIC FALLBACK DOMAIN — UNIVERSAL (FINAL, HARDENED)
+# Sreejita Framework v3.6
 # =====================================================
 
 import pandas as pd
@@ -16,42 +16,39 @@ from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
 
 # =====================================================
-# GENERIC DOMAIN
+# GENERIC DOMAIN (ABSOLUTE FALLBACK)
 # =====================================================
 
 class GenericDomain(BaseDomain):
     """
     Universal fallback domain.
 
-    Guarantees:
-    - Never fails orchestration
-    - Never hallucinates domain logic
-    - Always returns executive-safe output
+    DESIGN PRINCIPLES:
+    - Never competes with real domains
+    - Never infers business meaning
+    - Never blocks reporting
+    - Always executive-safe
     """
 
     name = "generic"
-    description = "Generic dataset analysis (fallback domain)"
+    description = "Generic dataset analysis (fallback mode)"
 
     # -------------------------------------------------
-    # PREPROCESS (SAFE PASS-THROUGH)
+    # PREPROCESS (PASS-THROUGH)
     # -------------------------------------------------
-
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     # -------------------------------------------------
-    # KPI ENGINE (MINIMAL, GOVERNANCE-SAFE)
+    # KPI ENGINE (MINIMAL & FLAT)
     # -------------------------------------------------
-
     def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
         volume = int(len(df))
 
         kpis: Dict[str, Any] = {
             "primary_sub_domain": "generic",
             "sub_domains": {"generic": 1.0},
-            "sub_domain_signals": {"generic": 1.0},  # 🔑 REQUIRED BY EXECUTIVE LAYER
             "record_count": volume,
-            "total_volume": volume,
             "column_count": int(len(df.columns)),
             "numeric_column_count": int(
                 df.select_dtypes(include="number").shape[1]
@@ -64,24 +61,22 @@ class GenericDomain(BaseDomain):
             ),
         }
 
-        # Governance warning
         if volume < 20:
-            kpis["data_warning"] = "Very small dataset — insights are indicative only"
+            kpis["data_warning"] = (
+                "Very small dataset — results are indicative only"
+            )
 
-        # KPI confidence (uniform, conservative)
+        # 🔒 EXECUTIVE-SAFE CONFIDENCE (FLAT & CONSERVATIVE)
         kpis["_confidence"] = {
-            k: 0.4 for k in kpis if not k.startswith("_")
+            k: 0.35 for k in kpis.keys()
         }
 
-        # Cache for visuals
         self._last_kpis = kpis
-
         return kpis
 
     # -------------------------------------------------
-    # VISUAL INTELLIGENCE (GUARANTEED)
+    # VISUALS (GUARANTEED, LOW PRIORITY)
     # -------------------------------------------------
-
     def generate_visuals(
         self,
         df: pd.DataFrame,
@@ -97,7 +92,7 @@ class GenericDomain(BaseDomain):
         try:
             fig, ax = plt.subplots(figsize=(6, 4))
             ax.bar(["Records"], [len(df)])
-            ax.set_title("Dataset Size Overview", fontweight="bold")
+            ax.set_title("Dataset Size", fontweight="bold")
             ax.set_ylabel("Record Count")
 
             path = output_dir / "generic_dataset_size.png"
@@ -106,9 +101,9 @@ class GenericDomain(BaseDomain):
 
             visuals.append({
                 "path": str(path),
-                "caption": "Total number of records in the dataset.",
-                "importance": 0.6,
-                "confidence": 0.5,
+                "caption": "Dataset record count (fallback evidence).",
+                "importance": 0.25,   # 🔒 always lowest
+                "confidence": 0.4,
                 "sub_domain": "generic",
             })
         except Exception:
@@ -127,7 +122,7 @@ class GenericDomain(BaseDomain):
             fig, ax = plt.subplots(figsize=(8, 4))
             completeness.plot(kind="bar", ax=ax)
             ax.set_ylim(0, 1)
-            ax.set_title("Top Column Completeness", fontweight="bold")
+            ax.set_title("Column Completeness (Top Fields)", fontweight="bold")
             ax.set_ylabel("Completeness Ratio")
 
             path = output_dir / "generic_column_completeness.png"
@@ -136,20 +131,19 @@ class GenericDomain(BaseDomain):
 
             visuals.append({
                 "path": str(path),
-                "caption": "Data completeness of the most populated columns.",
-                "importance": 0.55,
-                "confidence": 0.5,
+                "caption": "Data completeness overview (fallback evidence).",
+                "importance": 0.25,
+                "confidence": 0.4,
                 "sub_domain": "generic",
             })
         except Exception:
             pass
 
-        return visuals or []
+        return visuals
 
     # -------------------------------------------------
-    # INSIGHTS (NON-HALLUCINATING)
+    # INSIGHTS (DISCLAIMER-FIRST)
     # -------------------------------------------------
-
     def generate_insights(
         self,
         df: pd.DataFrame,
@@ -157,49 +151,47 @@ class GenericDomain(BaseDomain):
         *_,
     ) -> List[Dict[str, Any]]:
 
-        insights: List[Dict[str, Any]] = []
-
-        insights.append({
-            "sub_domain": "generic",
-            "level": "INFO",
-            "title": "Unclassified Dataset Structure",
-            "so_what": (
-                "The dataset does not strongly align with a supported business domain. "
-                "Analysis is limited to structural and statistical signals."
-            ),
-            "confidence": 0.5,
-        })
+        insights: List[Dict[str, Any]] = [
+            {
+                "sub_domain": "generic",
+                "level": "INFO",
+                "title": "Dataset Not Mapped to a Supported Domain",
+                "so_what": (
+                    "The dataset does not strongly match any supported "
+                    "business domain. Analysis is limited to structural signals."
+                ),
+                "confidence": 0.4,
+            }
+        ]
 
         if kpis.get("data_completeness", 1.0) < 0.7:
             insights.append({
                 "sub_domain": "generic",
                 "level": "WARNING",
-                "title": "Data Completeness Risk",
+                "title": "Low Data Completeness",
                 "so_what": (
-                    "High levels of missing data may reduce analytical reliability "
-                    "and executive confidence."
+                    "High levels of missing data may limit analytical reliability "
+                    "and decision confidence."
                 ),
-                "confidence": 0.6,
+                "confidence": 0.45,
             })
 
-        # Hard guarantee: minimum 3 insights
         while len(insights) < 3:
             insights.append({
                 "sub_domain": "generic",
                 "level": "INFO",
-                "title": "Baseline Dataset Signal",
+                "title": "Fallback Analysis Mode",
                 "so_what": (
-                    "Dataset structure appears stable with no immediate anomalies."
+                    "Further domain context is required for deeper intelligence."
                 ),
-                "confidence": 0.45,
+                "confidence": 0.35,
             })
 
         return insights
 
     # -------------------------------------------------
-    # RECOMMENDATIONS (SAFE & ACTIONABLE)
+    # RECOMMENDATIONS (META-LEVEL ONLY)
     # -------------------------------------------------
-
     def generate_recommendations(
         self,
         df: pd.DataFrame,
@@ -212,41 +204,32 @@ class GenericDomain(BaseDomain):
             {
                 "sub_domain": "generic",
                 "priority": "HIGH",
-                "action": "Clarify dataset intent and business context",
+                "action": "Provide business context and dataset purpose",
                 "owner": "Data Owner",
                 "timeline": "Immediate",
-                "goal": "Enable accurate domain classification and deeper analysis",
-                "confidence": 0.6,
+                "goal": "Enable accurate domain classification",
+                "confidence": 0.5,
             },
             {
                 "sub_domain": "generic",
                 "priority": "MEDIUM",
-                "action": "Improve schema documentation and column naming consistency",
+                "action": "Standardize column naming and add metadata",
                 "owner": "Data Engineering",
                 "timeline": "30–60 days",
-                "goal": "Increase semantic resolvability and automation readiness",
-                "confidence": 0.55,
-            },
-            {
-                "sub_domain": "generic",
-                "priority": "LOW",
-                "action": "Perform exploratory data profiling before operational use",
-                "owner": "Analytics",
-                "timeline": "Ongoing",
-                "goal": "Reduce misinterpretation risk",
-                "confidence": 0.5,
+                "goal": "Improve semantic resolvability",
+                "confidence": 0.45,
             },
         ]
 
 
 # =====================================================
-# GENERIC DOMAIN DETECTOR (ABSOLUTE FALLBACK)
+# GENERIC DOMAIN DETECTOR (TRUE FALLBACK)
 # =====================================================
 
 class GenericDomainDetector(BaseDomainDetector):
     """
-    Always returns a low-confidence fallback result.
-    Must be LAST in router detector order.
+    Absolute fallback detector.
+    NEVER competes with real domains.
     """
 
     domain_name = "generic"
@@ -254,13 +237,13 @@ class GenericDomainDetector(BaseDomainDetector):
     def detect(self, df: pd.DataFrame):
         return DomainDetectionResult(
             domain="generic",
-            confidence=0.2,
+            confidence=0.15,   # 🔒 must stay LOW
             signals={"fallback": True},
         )
 
 
 # =====================================================
-# REGISTRATION HOOK
+# REGISTRATION
 # =====================================================
 
 def register(registry):
@@ -268,5 +251,5 @@ def register(registry):
         "generic",
         GenericDomain,
         GenericDomainDetector,
-        overwrite=True,  # 🚨 explicit, intentional
+        overwrite=True,
     )
