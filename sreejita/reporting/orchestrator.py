@@ -1,6 +1,6 @@
 # =====================================================
-# ORCHESTRATOR — UNIVERSAL (FINAL, ENFORCED)
-# Sreejita Framework v3.5.x
+# ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE)
+# Sreejita Framework v3.6 (LOCKED)
 # =====================================================
 
 import logging
@@ -16,6 +16,7 @@ from sreejita.core.dataset_shape import detect_dataset_shape
 from sreejita.core.fingerprint import dataframe_fingerprint
 
 log = logging.getLogger("sreejita.orchestrator")
+
 
 # =====================================================
 # SAFE FILE LOADER
@@ -101,10 +102,7 @@ def generate_report_payload(
     # -------------------------------------------------
     # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
-    try:
-        shape_info = detect_dataset_shape(df)
-    except Exception:
-        shape_info = {"shape": "unknown", "signals": {}}
+    shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
     # 3. DOMAIN DECISION (NEVER NULL)
@@ -114,22 +112,23 @@ def generate_report_payload(
     domain = decision.selected_domain
 
     if engine is None or not domain:
-        raise RuntimeError("Unsupported or unknown domain")
+        raise RuntimeError("Domain resolution failed")
+
+    # 🔒 HARD RESET DOMAIN STATE (CRITICAL)
+    if hasattr(engine, "_last_kpis"):
+        engine._last_kpis = None
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT & ISOLATED)
+    # 4. DOMAIN EXECUTION (STRICT PIPELINE)
     # -------------------------------------------------
-    visuals: List[Dict[str, Any]] = []
-
     try:
-        # --- Preprocess
-        if hasattr(engine, "preprocess"):
-            df = engine.preprocess(df)
+        # Preprocess
+        df = engine.preprocess(df)
 
-        # --- KPIs
+        # KPIs (authoritative)
         kpis = engine.calculate_kpis(df)
 
-        # --- Visuals (isolated failure)
+        # Visuals (raw, unsliced)
         try:
             visuals = engine.generate_visuals(
                 df=df,
@@ -138,23 +137,14 @@ def generate_report_payload(
         except Exception:
             visuals = []
 
-        # --- Insights
-        try:
-            insights = engine.generate_insights(df, kpis, shape_info=shape_info)
-        except TypeError:
-            insights = engine.generate_insights(df, kpis)
+        # Insights (single contract)
+        insights = engine.generate_insights(df, kpis)
 
-        # --- Recommendations
-        try:
-            raw_recs = engine.generate_recommendations(
-                df, kpis, insights, shape_info=shape_info
-            )
-        except TypeError:
-            raw_recs = engine.generate_recommendations(df, kpis, insights)
-
+        # Recommendations (single contract)
+        raw_recs = engine.generate_recommendations(df, kpis, insights)
         recommendations = enrich_recommendations(raw_recs)
 
-        # --- Executive Cognition
+        # Executive cognition
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -162,11 +152,13 @@ def generate_report_payload(
         )
 
     except Exception as e:
-        log.exception("Domain execution failed")
-        raise RuntimeError(str(e))
+        log.exception(
+            f"Domain execution failed | domain={domain} | fingerprint={dataset_key}"
+        )
+        raise RuntimeError(f"{domain} execution failed: {e}")
 
     # -------------------------------------------------
-    # 5. VISUAL SAFETY FILTER
+    # 5. VISUAL VALIDATION (BEFORE HARDENING)
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
@@ -179,6 +171,18 @@ def generate_report_payload(
         except Exception:
             continue
 
+    # -------------------------------------------------
+    # 6. UNIVERSAL VISUAL HARDENING (CRITICAL)
+    # -------------------------------------------------
+    valid_visuals = engine.ensure_minimum_visuals(
+        valid_visuals,
+        df,
+        run_dir / "visuals" / domain,
+    )
+
+    # -------------------------------------------------
+    # 7. EXECUTIVE SAFE SLICING (MAX 6)
+    # -------------------------------------------------
     valid_visuals = sorted(
         valid_visuals,
         key=lambda x: float(x.get("importance", 0)) * float(x.get("confidence", 1)),
@@ -186,19 +190,7 @@ def generate_report_payload(
     )[:6]
 
     # -------------------------------------------------
-    # ✅ UNIVERSAL VISUAL HARDENING (CRITICAL)
-    # -------------------------------------------------
-    if hasattr(engine, "ensure_minimum_visuals"):
-        hardened = engine.ensure_minimum_visuals(
-            valid_visuals,
-            df,
-            run_dir / "visuals" / domain,
-        )
-        if isinstance(hardened, list):
-            valid_visuals = hardened
-
-    # -------------------------------------------------
-    # 6. BOARD READINESS HISTORY
+    # 8. BOARD READINESS HISTORY
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -217,7 +209,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 7. FINAL PAYLOAD (STRICT CONTRACT)
+    # 9. FINAL PAYLOAD (STRICT, STABLE)
     # -------------------------------------------------
     return {
         domain: {
