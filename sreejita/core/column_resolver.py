@@ -24,6 +24,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     "patient_id": {
         "aliases": [
             "patient_id", "patientid", "pid", "ptid",
+            "patient", "patient_code",
             "mrn", "uhid", "medical_record_number"
         ],
         "dtype": "object",
@@ -44,6 +45,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "aliases": [
             "admission_date", "admit_date",
             "admission_datetime", "date_of_admission",
+            "admissiondate", "admit_dt", "visitdate",
             "visit_date", "encounter_date", "check_in_date"
         ],
         "dtype": "datetime",
@@ -53,8 +55,9 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     "discharge_date": {
         "aliases": [
             "discharge_date", "discharged_date",
+            "dischargedate", "disch_date", "disch_dt",
             "discharge_datetime", "date_of_discharge",
-            "checkout_date", "completion_date"
+            "checkout_date", "completion_date", "end_date"
         ],
         "dtype": "datetime",
         "priority": 0.95,
@@ -73,7 +76,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
     # ---------------- DURATION ----------------
     "length_of_stay": {
-        "aliases": ["length_of_stay", "los", "stay_length"],
+        "aliases": ["length_of_stay", "los", "stay_days", "days_stay", "stay_length"],
         "dtype": "numeric",
         "priority": 1.0,
     },
@@ -123,7 +126,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     "facility": {
         "aliases": [
             "facility", "hospital", "clinic",
-            "location", "branch"
+            "location", "dept", "department", "branch"
         ],
         "dtype": "object",
         "priority": 0.8,
@@ -135,6 +138,14 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         ],
         "dtype": "object",
         "priority": 0.8,
+    },
+    "diagnosis": 
+    {
+        "aliases": [
+            "diagnosis", "icd_code", "primary_diagnosis", "diagnosis_code"
+        ],
+        "dtype": "object",
+        "priority": 0.9,
     },
 
     "bed_id": {
