@@ -20,7 +20,6 @@ from .base import BaseDomain
 
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
 
-
 # =====================================================
 # CONSTANTS
 # =====================================================
@@ -31,7 +30,6 @@ MIN_SAMPLE_SIZE = 30
 # 'flag' is a generalized binary outcome proxy used across:
 # mortality, alerts, specimen rejection, screening, immunization, etc.
 # This is intentional for universal-domain support in v3.x.
-
 
 # =====================================================
 # SUB-DOMAINS (CANONICAL ENUM)
@@ -45,7 +43,6 @@ class HealthcareSubDomain(str, Enum):
     PUBLIC_HEALTH = "public_health"
     MIXED = "mixed"
     UNKNOWN = "unknown"
-
 
 # =====================================================
 # VISUAL INTELLIGENCE MAP (LOCKED CONTRACT)
@@ -98,7 +95,6 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[str]] = {
         "immunization_rate",
     ],
 }
-
 
 # =====================================================
 # HEALTHCARE KPI INTELLIGENCE MAP (LOCKED CONTRACT)
@@ -162,7 +158,6 @@ HEALTHCARE_KPI_MAP: Dict[str, List[str]] = {
     ],
 }
 
-
 # =====================================================
 # HEALTHCARE INSIGHT INTELLIGENCE MAP (LOCKED)
 # =====================================================
@@ -225,7 +220,6 @@ HEALTHCARE_INSIGHT_MAP: Dict[str, List[str]] = {
     ],
 }
 
-
 # =====================================================
 # HEALTHCARE RECOMMENDATION MAP (LOCKED)
 # =====================================================
@@ -287,6 +281,7 @@ HEALTHCARE_RECOMMENDATION_MAP: Dict[str, List[str]] = {
         "whole_person_platform",
     ],
 }
+
 # =====================================================
 # SAFE SIGNAL DETECTION (UNIVERSAL, DETERMINISTIC)
 # =====================================================
@@ -323,7 +318,6 @@ def infer_healthcare_subdomains(
     Returns:
         Dict[sub_domain: confidence_score]
     """
-
     # -------------------------------
     # SIGNAL COUNTS (NOT BOOLEAN)
     # -------------------------------
@@ -414,6 +408,19 @@ class HealthcareDomain(BaseDomain):
             if f"{sub}_{key}" in kpis
             else kpis.get(key)
         )
+
+    @staticmethod
+    def get_kpi_confidence(kpis: Dict[str, Any], sub: str, key: str) -> float:
+        """
+        Returns confidence for namespaced KPIs in mixed datasets,
+        with safe fallback to base KPI confidence.
+        """
+        conf_map = kpis.get("_confidence", {})
+
+        if f"{sub}_{key}" in conf_map:
+            return conf_map.get(f"{sub}_{key}", 0.6)
+
+        return conf_map.get(key, 0.6)
     # -------------------------------------------------
     # PREPROCESS
     # -------------------------------------------------
@@ -559,7 +566,7 @@ class HealthcareDomain(BaseDomain):
         active_subs = {
             sub: score
             for sub, score in sub_scores.items()
-            if isinstance(score, (int, float)) and score >= 0.3
+            if isinstance(score, (int, float)) and score >= 0.2
         }
 
         if not active_subs:
@@ -838,7 +845,7 @@ class HealthcareDomain(BaseDomain):
             if key.startswith("_"):
                 continue
             
-            if key.endswith("_placeholder_kpi"):
+            if "_placeholder_kpi" in key:
                 kpis["_confidence"][key] = 0.0
                 continue
             
@@ -985,7 +992,7 @@ class HealthcareDomain(BaseDomain):
             v for v in visuals
             if isinstance(v, dict)
             and Path(v.get("path", "")).exists()
-            and float(v.get("confidence", 0)) >= 0.3
+            and float(v.get("confidence", 0)) >= 0.25
         ]
     
         # -------------------------------------------------
@@ -2219,8 +2226,8 @@ class HealthcareDomain(BaseDomain):
             and self.get_kpi(kpis, "diagnostics", "avg_tat") > 120
         ):
             cross_conf = min(
-                kpis.get("_confidence", {}).get("avg_tat", 0.6),
-                kpis.get("_confidence", {}).get("avg_los", 0.6),
+                self.get_kpi_confidence(kpis, "diagnostics", "avg_tat"),
+                self.get_kpi_confidence(kpis, "hospital", "avg_los"),
             )
             
             insights.append({
