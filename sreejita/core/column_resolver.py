@@ -12,6 +12,11 @@ import pandas as pd
 # =====================================================
 # SEMANTIC COLUMN MAP (STRICT, NON-POLLUTING)
 # =====================================================
+# RULES:
+# - No alias may imply a domain by itself
+# - Pharmacy signals must be EXPLICIT
+# - No generic time/cost leakage
+# =====================================================
 
 SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
@@ -34,7 +39,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "priority": 0.9,
     },
 
-    # ---------------- TIME ----------------
+    # ---------------- TIME (STRICT) ----------------
     "admission_date": {
         "aliases": [
             "admission_date", "admit_date",
@@ -55,6 +60,7 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "priority": 0.95,
     },
 
+    # 🚨 PHARMACY TIME — EXPLICIT ONLY
     "fill_date": {
         "aliases": [
             "fill_date", "dispense_date",
@@ -92,8 +98,10 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "priority": 0.9,
     },
 
-    # ---------------- FLAGS (STRICT) ----------------
-    # IMPORTANT: this is GENERIC binary outcome ONLY
+    # ---------------- FLAGS (GENERIC ONLY) ----------------
+    # IMPORTANT:
+    # - This does NOT imply mortality, alerts, or pharmacy
+    # - Interpretation is domain responsibility
     "flag": {
         "aliases": [
             "flag", "outcome", "event_flag",
@@ -113,24 +121,34 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
 
     # ---------------- STRUCTURE ----------------
     "facility": {
-        "aliases": ["facility", "hospital", "clinic", "location", "branch"],
+        "aliases": [
+            "facility", "hospital", "clinic",
+            "location", "branch"
+        ],
         "dtype": "object",
         "priority": 0.8,
     },
 
     "doctor": {
-        "aliases": ["doctor", "physician", "provider"],
+        "aliases": [
+            "doctor", "physician", "provider"
+        ],
         "dtype": "object",
         "priority": 0.8,
     },
 
     "bed_id": {
-        "aliases": ["bed_id", "bed", "room_no"],
+        "aliases": [
+            "bed_id", "bed", "room_no"
+        ],
         "dtype": "object",
         "priority": 0.9,
     },
 
-    # ---------------- PHARMACY / POPULATION ----------------
+    # ---------------- PHARMACY / POPULATION (HARD-GATED) ----------------
+    # NOTE:
+    # These columns NEVER imply pharmacy alone.
+    # Sub-domain logic must require MULTIPLE signals.
     "supply": {
         "aliases": [
             "days_supply", "supply",
@@ -141,14 +159,16 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
     },
 
     "population": {
-        "aliases": ["population", "covered_lives"],
+        "aliases": [
+            "population", "covered_lives"
+        ],
         "dtype": "numeric",
         "priority": 0.9,
     },
 }
 
 # =====================================================
-# NORMALIZATION HELPERS
+# NORMALIZATION HELPERS (LOCKED)
 # =====================================================
 
 def _normalize(name: str) -> str:
@@ -162,7 +182,7 @@ def _normalize(name: str) -> str:
 def _similarity(a: str, b: str) -> float:
     ratio = SequenceMatcher(None, a, b).ratio()
     if a in b or b in a:
-        ratio = max(ratio, 0.9)
+        ratio = max(ratio, 0.90)
     return ratio
 
 
@@ -174,17 +194,20 @@ def _dtype_score(series: pd.Series, expected: str) -> float:
     try:
         if expected == "numeric":
             return 1.0 if pd.to_numeric(series, errors="coerce").notna().mean() > 0.7 else 0.0
+
         if expected == "datetime":
             return 1.0 if pd.to_datetime(series, errors="coerce").notna().mean() > 0.7 else 0.0
+
         if expected == "binary":
             uniq = pd.to_numeric(series, errors="coerce").dropna().unique()
             return 1.0 if set(uniq).issubset({0, 1}) else 0.0
+
         return 1.0
     except Exception:
         return 0.0
 
 # =====================================================
-# CORE RESOLVER (DETERMINISTIC)
+# CORE RESOLVER (DETERMINISTIC, NON-HALLUCINATING)
 # =====================================================
 
 def resolve_column_with_confidence(
@@ -193,7 +216,10 @@ def resolve_column_with_confidence(
     cutoff: float = 0.72,
 ) -> Tuple[Optional[str], float]:
 
-    if df is None or df.empty or semantic_key not in SEMANTIC_COLUMN_MAP:
+    if df is None or df.empty:
+        return None, 0.0
+
+    if semantic_key not in SEMANTIC_COLUMN_MAP:
         return None, 0.0
 
     spec = SEMANTIC_COLUMN_MAP[semantic_key]
@@ -203,20 +229,20 @@ def resolve_column_with_confidence(
 
     norm_cols = {_normalize(c): c for c in df.columns}
 
-    best_col = None
-    best_score = 0.0
+    best_col: Optional[str] = None
+    best_score: float = 0.0
 
     for alias in aliases:
         alias_norm = _normalize(alias)
 
         for norm_col, original_col in norm_cols.items():
             name_score = _similarity(alias_norm, norm_col)
-            if name_score < 0.7:
+            if name_score < 0.70:
                 continue
 
             series = df[original_col]
             coverage = _coverage(series)
-            if coverage < 0.3:
+            if coverage < 0.30:
                 continue
 
             dtype_score = _dtype_score(series, expected_dtype)
@@ -237,7 +263,7 @@ def resolve_column_with_confidence(
     return None, 0.0
 
 # =====================================================
-# BACKWARD COMPATIBLE API
+# BACKWARD-COMPATIBLE API
 # =====================================================
 
 def resolve_column(
@@ -249,15 +275,21 @@ def resolve_column(
     return col
 
 
-def bulk_resolve(df: pd.DataFrame, keys: List[str]) -> Dict[str, Optional[str]]:
+def bulk_resolve(
+    df: pd.DataFrame,
+    keys: List[str],
+) -> Dict[str, Optional[str]]:
     return {k: resolve_column(df, k) for k in keys}
 
-
 # =====================================================
-# SEMANTIC CAPABILITY SIGNALS (SAFE)
+# SEMANTIC CAPABILITY SIGNALS (SAFE, NON-DOMAINAL)
 # =====================================================
 
 def resolve_semantics(df: pd.DataFrame) -> Dict[str, bool]:
+    """
+    Capability signals ONLY.
+    Never infer domain or sub-domain here.
+    """
     return {
         "has_patient_id": bool(resolve_column(df, "patient_id")),
         "has_admission_date": bool(resolve_column(df, "admission_date")),
