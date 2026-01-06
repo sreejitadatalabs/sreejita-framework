@@ -25,6 +25,41 @@ st.title("Sreejita Framework")
 st.caption("v3.5.1 — Markdown Source · Executive PDF (Stable)")
 
 # -------------------------------------------------
+# DOMAIN SELECTOR (NEW)
+# -------------------------------------------------
+st.sidebar.header("🏥 Domain & Data Settings")
+domain_hint = st.sidebar.selectbox(
+    "What type of data?",
+    [
+        "Auto-detect",
+        "Healthcare (Hospital)",
+        "Healthcare (Clinic)",
+        "Healthcare (Diagnostics)",
+        "Healthcare (Pharmacy)",
+        "Healthcare (Public Health)",
+        "Retail",
+        "Ecommerce",
+        "Finance",
+    ],
+    help="Select your data domain for accurate analysis"
+)
+
+# Map selections to domain hint
+domain_hint_map = {
+    "Healthcare (Hospital)": "healthcare",
+    "Healthcare (Clinic)": "healthcare",
+    "Healthcare (Diagnostics)": "healthcare",
+    "Healthcare (Pharmacy)": "healthcare",
+    "Healthcare (Public Health)": "healthcare",
+    "Retail": "retail",
+    "Ecommerce": "ecommerce",
+    "Finance": "finance",
+    "Auto-detect": None,
+}
+
+user_domain_hint = domain_hint_map.get(domain_hint)
+
+# -------------------------------------------------
 # INPUTS
 # -------------------------------------------------
 uploaded_file = st.file_uploader(
@@ -64,12 +99,14 @@ if st.button("🚀 Run Analysis"):
             temp_path = temp_dir / f"{uuid.uuid4().hex}_{uploaded_file.name}"
             temp_path.write_bytes(uploaded_file.getbuffer())
 
-            result = run_analysis_from_ui(
-                input_path=str(temp_path),
-                narrative_enabled=enable_narrative,
-                narrative_provider=provider,
-                generate_pdf=export_pdf,
-            )
+                result = run_analysis_from_ui(
+                    input_path=str(temp_path),
+                    narrative_enabled=enable_narrative,
+                    narrative_provider=provider,
+                    generate_pdf=export_pdf,
+                    domain_hint=user_domain_hint,  # ✅ ADD THIS LINE
+                )
+
 
     except Exception as e:
         st.error("❌ Analysis failed")
