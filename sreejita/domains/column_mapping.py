@@ -25,6 +25,16 @@ class ColumnMapping:
     # ID columns
     ID_COLS = {"id", "customer_id", "order_id", "transaction_id", "patient_id", "entity_id"}
 
+    # Example: Map custom columns to healthcare standard
+    HEALTHCARE_MAPPING = {
+        "your_patient_col": "patient_id",
+        "your_admission_col": "admission_date",
+        "your_discharge_col": "discharge_date",
+        "your_los_col": "length_of_stay",
+    }
+    
+    df_standardized = df.rename(columns=HEALTHCARE_MAPPING)
+
     @staticmethod
     def find_column(df_columns: Set[str], mapping_set: Set[str]) -> Optional[str]:
         """Find first matching column from mapping set in dataframe columns."""
