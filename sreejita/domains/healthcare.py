@@ -2401,53 +2401,59 @@ class HealthcareDomain(BaseDomain):
         return recommendations[:8]
 
 # =====================================================
-# REGISTRATION
+# HEALTHCARE DOMAIN DETECTOR (FIXED, OPERATIONALLY SAFE)
 # =====================================================
+
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
 
     def detect(self, df: pd.DataFrame):
 
-        # -------------------------------------------------
-        # STRICT COLUMN PRESENCE CHECKS
-        # -------------------------------------------------
+        if df is None or df.empty:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=0.0,
+                signals={},
+            )
+
+        cols = {c.lower() for c in df.columns}
+
         def has_any(candidates):
-            return any(c in df.columns for c in candidates)
+            return any(c in cols for c in candidates)
 
         # -------------------------------------------------
-        # PRESENCE SIGNALS (BINARY, NON-FUZZY)
+        # PRESENCE SIGNALS (INTENTIONAL, OPERATIONAL)
         # -------------------------------------------------
-        presence = {
-            # Identity / clinical anchors
+        signals = {
+            # Identity
             "pid": has_any([
                 "patient_id", "patientid", "mrn", "medical_record_number"
             ]),
-            "diagnosis": has_any([
-                "diagnosis", "icd_code", "primary_diagnosis"
-            ]),
 
-            # Lifecycle
-            "date": has_any([
+            # Time / lifecycle
+            "admission": has_any([
                 "admission_date", "visit_date", "encounter_date"
             ]),
-            "discharge_date": has_any([
+            "discharge": has_any([
                 "discharge_date"
             ]),
             "los": has_any([
                 "length_of_stay", "los"
             ]),
 
-            # Operational (supporting only)
-            "facility": has_any([
-                "facility", "hospital", "clinic"
+            # Clinical (supporting, NOT mandatory)
+            "diagnosis": has_any([
+                "diagnosis", "icd_code", "primary_diagnosis"
             ]),
 
-            # Supporting (never decisive alone)
+            # Facility context
+            "facility": has_any([
+                "hospital", "facility", "clinic"
+            ]),
+
+            # Financial / population (supporting only)
             "cost": has_any([
                 "cost", "billing_amount", "total_charges"
-            ]),
-            "supply": has_any([
-                "days_supply", "supply"
             ]),
             "population": has_any([
                 "population", "catchment_population"
@@ -2455,75 +2461,59 @@ class HealthcareDomainDetector(BaseDomainDetector):
         }
 
         # -------------------------------------------------
-        # HARD GUARDRAIL: ≥2 TOTAL SIGNALS
+        # 🚑 HARD HEALTHCARE ACTIVATION RULE
         # -------------------------------------------------
-        if sum(presence.values()) < 2:
+        healthcare_anchor = any([
+            # Core hospital ops
+            signals["los"],
+            signals["discharge"],
+
+            # Patient + time
+            signals["pid"] and signals["admission"],
+
+            # Admission in facility
+            signals["admission"] and signals["facility"],
+
+            # Clinical diagnosis (alone sufficient)
+            signals["diagnosis"],
+        ])
+
+        if not healthcare_anchor:
             return DomainDetectionResult(
                 domain=None,
                 confidence=0.0,
-                signals=presence,
+                signals=signals,
             )
 
         # -------------------------------------------------
-        # HARD CLINICAL ANCHOR (NON-NEGOTIABLE)
-        # -------------------------------------------------
-        clinical_anchor = (
-            presence["pid"]
-            or presence["diagnosis"]
-            or (presence["date"] and presence["discharge_date"])
-        )
-
-        if not clinical_anchor:
-            return DomainDetectionResult(
-                domain=None,
-                confidence=0.0,
-                signals=presence,
-            )
-
-        # -------------------------------------------------
-        # WEIGHTED CONFIDENCE (ANCHOR-GATED)
+        # CONFIDENCE SCORING (HONEST, NON-INFLATING)
         # -------------------------------------------------
         weights = {
-            "pid": 0.20,
-            "diagnosis": 0.18,
-            "date": 0.12,
-            "discharge_date": 0.10,
+            "pid": 0.18,
+            "admission": 0.16,
+            "discharge": 0.14,
+            "los": 0.16,
             "facility": 0.12,
-            "los": 0.06,
-            "cost": 0.10,
-            "population": 0.08,
-            "supply": 0.04,
+            "diagnosis": 0.14,
+            "cost": 0.06,
+            "population": 0.04,
         }
 
         confidence = round(
             min(
                 0.95,
-                sum(
-                    weights[k]
-                    for k, v in presence.items()
-                    if v and (clinical_anchor or k in {"pid", "diagnosis"})
-                )
+                sum(weights[k] for k, v in signals.items() if v)
             ),
             2,
         )
 
-        # -------------------------------------------------
-        # CONFIDENCE FLOOR (FALSE-POSITIVE SAFE)
-        # -------------------------------------------------
-        if confidence < 0.45:
+        # Absolute safety floor
+        if confidence < 0.50:
             return DomainDetectionResult(
                 domain=None,
                 confidence=confidence,
-                signals=presence,
+                signals=signals,
             )
-
-        # -------------------------------------------------
-        # SUB-DOMAIN HINTING (NON-BINDING, CONTEXT ONLY)
-        # -------------------------------------------------
-        sub_domains = {}  # detector NEVER infers sub-domains
-        signals = dict(presence)
-        if sub_domains:
-            signals["likely_subdomains"] = sub_domains
 
         return DomainDetectionResult(
             domain=self.domain_name,
