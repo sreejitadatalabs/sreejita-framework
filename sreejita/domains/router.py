@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import logging
 
 # -----------------------------------------------------
-# DOMAIN IMPORTS
+# DOMAIN IMPORTS (DETECTORS ONLY)
 # -----------------------------------------------------
 
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
@@ -19,7 +19,7 @@ from sreejita.domains.marketing import MarketingDomain, MarketingDomainDetector
 from sreejita.domains.hr import HRDomain, HRDomainDetector
 from sreejita.domains.supply_chain import SupplyChainDomain, SupplyChainDomainDetector
 
-# 🚑 GENERIC FALLBACK (ABSOLUTE LAST RESORT)
+# 🚑 GENERIC (FALLBACK ONLY — NEVER COMPETES)
 from sreejita.domains.generic import GenericDomain, GenericDomainDetector
 
 # -----------------------------------------------------
@@ -33,7 +33,13 @@ from sreejita.core.fingerprint import dataframe_fingerprint
 log = logging.getLogger("sreejita.router")
 
 # =====================================================
-# DOMAIN DETECTORS (ORDER MATTERS, GENERIC LAST)
+# CONFIG
+# =====================================================
+
+MIN_DOMAIN_CONFIDENCE = 0.45   # 🔒 critical guardrail
+
+# =====================================================
+# DOMAIN DETECTORS (GENERIC EXCLUDED)
 # =====================================================
 
 DOMAIN_DETECTORS = [
@@ -45,24 +51,29 @@ DOMAIN_DETECTORS = [
     MarketingDomainDetector(),
     HRDomainDetector(),
     SupplyChainDomainDetector(),
-    GenericDomainDetector(),  # 🚑 ABSOLUTE LAST
 ]
 
+GENERIC_DETECTOR = GenericDomainDetector()
+
 # =====================================================
-# DOMAIN IMPLEMENTATIONS (SINGLETONS)
+# DOMAIN IMPLEMENTATION FACTORY (LAZY)
 # =====================================================
 
-DOMAIN_IMPLEMENTATIONS = {
-    "retail": RetailDomain(),
-    "customer": CustomerDomain(),
-    "finance": FinanceDomain(),
-    "ecommerce": EcommerceDomain(),
-    "healthcare": HealthcareDomain(),
-    "marketing": MarketingDomain(),
-    "hr": HRDomain(),
-    "supply_chain": SupplyChainDomain(),
-    "generic": GenericDomain(),
+_DOMAIN_FACTORY = {
+    "retail": RetailDomain,
+    "customer": CustomerDomain,
+    "finance": FinanceDomain,
+    "ecommerce": EcommerceDomain,
+    "healthcare": HealthcareDomain,
+    "marketing": MarketingDomain,
+    "hr": HRDomain,
+    "supply_chain": SupplyChainDomain,
+    "generic": GenericDomain,
 }
+
+def _get_domain_engine(name: str):
+    cls = _DOMAIN_FACTORY.get(name)
+    return cls() if cls else GenericDomain()
 
 # =====================================================
 # OBSERVABILITY
@@ -70,15 +81,9 @@ DOMAIN_IMPLEMENTATIONS = {
 
 _OBSERVERS: List[DecisionObserver] = []
 
-
 def register_observer(observer: DecisionObserver):
-    """
-    Register a non-blocking observer for domain-decision events.
-    Observers must NEVER raise.
-    """
     if observer:
         _OBSERVERS.append(observer)
-
 
 # =====================================================
 # DOMAIN DECISION ENGINE (AUTHORITATIVE)
@@ -89,16 +94,16 @@ def decide_domain(df) -> DecisionExplanation:
     Determine the most appropriate domain for a dataset.
 
     GUARANTEES:
-    - Detector confidence is authoritative
-    - No re-scoring / no re-weighting
-    - Generic is true last resort
+    - Generic NEVER competes
+    - Minimum confidence enforced
+    - Deterministic selection
     - Always returns DecisionExplanation
     """
 
     rule_results: Dict[str, Dict[str, Any]] = {}
 
     # -------------------------------------------------
-    # PHASE 1: RULE-BASED DETECTION (AUTHORITATIVE)
+    # PHASE 1: RULE-BASED DETECTION
     # -------------------------------------------------
     for detector in DOMAIN_DETECTORS:
         try:
@@ -107,7 +112,6 @@ def decide_domain(df) -> DecisionExplanation:
             if not result or not result.domain:
                 continue
 
-            # Keep the BEST confidence per domain
             prev = rule_results.get(result.domain)
             if prev is None or result.confidence > prev["confidence"]:
                 rule_results[result.domain] = {
@@ -117,13 +121,15 @@ def decide_domain(df) -> DecisionExplanation:
                 }
 
         except Exception as e:
-            log.debug(
-                f"Detector {detector.__class__.__name__} failed: {e}"
-            )
+            log.debug(f"{detector.__class__.__name__} failed: {e}")
 
     # -------------------------------------------------
-    # PHASE 2: AUTHORITATIVE SELECTION
+    # PHASE 2: CONFIDENCE-GATED SELECTION
     # -------------------------------------------------
+    selected_domain = None
+    confidence = 0.0
+    meta: Dict[str, Any] = {}
+
     if rule_results:
         selected_domain, best = max(
             rule_results.items(),
@@ -131,25 +137,22 @@ def decide_domain(df) -> DecisionExplanation:
         )
         confidence = best["confidence"]
         meta = best
-    else:
-        selected_domain = "generic"
-        confidence = 0.25
-        meta = {"signals": {"fallback": True}}
 
     # -------------------------------------------------
-    # HARD SAFETY CHECK
+    # PHASE 3: HARD FALLBACK TO GENERIC
     # -------------------------------------------------
     if (
-        selected_domain not in DOMAIN_IMPLEMENTATIONS
-        or not isinstance(confidence, (int, float))
-        or confidence < 0.25
+        not selected_domain
+        or confidence < MIN_DOMAIN_CONFIDENCE
+        or selected_domain not in _DOMAIN_FACTORY
     ):
-        log.warning(
-            "No confident domain detected — falling back to GENERIC domain"
-        )
+        generic = GENERIC_DETECTOR.detect(df)
         selected_domain = "generic"
-        confidence = 0.25
-        meta = {"signals": {"fallback": True}}
+        confidence = round(float(generic.confidence or 0.25), 2)
+        meta = {
+            "signals": getattr(generic, "signals", {"fallback": True}),
+            "detector": "GenericDomainDetector",
+        }
 
     # -------------------------------------------------
     # BUILD ALTERNATIVES (EXPLAINABILITY)
@@ -168,7 +171,7 @@ def decide_domain(df) -> DecisionExplanation:
     ]
 
     # -------------------------------------------------
-    # DECISION OBJECT (STRICT CONTRACT)
+    # DECISION OBJECT
     # -------------------------------------------------
     decision = DecisionExplanation(
         decision_type="domain_detection",
@@ -177,9 +180,9 @@ def decide_domain(df) -> DecisionExplanation:
         alternatives=alternatives,
         signals=meta.get("signals", {}),
         rules_applied=[
-            "authoritative_detector_selection",
-            "highest_confidence_wins",
-            "generic_fallback_only_if_required",
+            "rule_based_detection",
+            "minimum_confidence_gate",
+            "generic_fallback_only",
         ],
         domain_scores={
             k: {"confidence": v["confidence"]}
@@ -188,17 +191,17 @@ def decide_domain(df) -> DecisionExplanation:
     )
 
     # -------------------------------------------------
-    # ATTACH ENGINE (NEVER NULL)
+    # ATTACH ENGINE (LAZY, SAFE)
     # -------------------------------------------------
-    decision.engine = DOMAIN_IMPLEMENTATIONS[selected_domain]
+    decision.engine = _get_domain_engine(selected_domain)
 
     # -------------------------------------------------
-    # DATASET FINGERPRINT (TRACEABILITY)
+    # TRACEABILITY
     # -------------------------------------------------
     decision.fingerprint = dataframe_fingerprint(df)
 
     # -------------------------------------------------
-    # OBSERVABILITY HOOKS (NON-BLOCKING)
+    # OBSERVABILITY (NON-BLOCKING)
     # -------------------------------------------------
     for observer in _OBSERVERS:
         try:
@@ -208,25 +211,16 @@ def decide_domain(df) -> DecisionExplanation:
 
     return decision
 
-
 # =====================================================
-# DOMAIN PREPROCESSING (OPTIONAL UTILITY)
+# DOMAIN PREPROCESSING (UTILITY)
 # =====================================================
 
 def apply_domain(df, domain_name: str):
-    """
-    Apply ONLY domain-specific preprocessing.
-
-    This does NOT:
-    - calculate KPIs
-    - generate insights
-    - generate recommendations
-    """
-    domain = DOMAIN_IMPLEMENTATIONS.get(domain_name)
+    domain = _DOMAIN_FACTORY.get(domain_name)
     if not domain:
         return df
 
     try:
-        return domain.preprocess(df)
+        return domain().preprocess(df)
     except Exception:
         return df
