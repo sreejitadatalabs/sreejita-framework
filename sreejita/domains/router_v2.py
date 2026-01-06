@@ -11,12 +11,24 @@ from sreejita.domains.registry import registry
 from sreejita.domains.contracts import DomainDetectionResult
 
 
-def detect_domain(df) -> Optional[DomainDetectionResult]:
+def detect_domain(df, domain_hint=None, strict=False):
     """
-    Detect domain using registry detectors.
+    Detect domain with optional hints and non-strict fallback.
     """
-    return registry.detect_domain(df)
-
+    # If user provides domain hint, use that
+    if domain_hint and domain_hint.lower() == "healthcare":
+        return "healthcare"
+    
+    # Try detection
+    detected = domain_detector.detect(df)
+    
+    # If detection fails and we have minimal healthcare signals, use healthcare
+    if detected.confidence < 0.40:
+        healthcare_signals = {
+            c.lower() for c in df.columns
+        } & healthcare_keywords
+        if len(healthcare_signals) >= 2:
+            return "healthcare"  # Safe fallback
 
 def apply_domain(df):
     """
