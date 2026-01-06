@@ -592,7 +592,6 @@ class HealthcareDomain(BaseDomain):
             prefix = f"{sub}_"
             return any(k.startswith(prefix) for k in kpis.keys())
 
-    
         # -------------------------------------------------
         # SUB-DOMAIN CONFIDENCE WEIGHTING
         # -------------------------------------------------
@@ -702,54 +701,58 @@ class HealthcareDomain(BaseDomain):
         Concrete visual implementations.
         Raises Exception if data is insufficient.
         """
-    
+        
         c = self.cols
         time_col = getattr(self, "time_col", None)
-    
+            
         # =================================================
         # SAFETY: minimum data requirement
         # =================================================
         if df is None or len(df) < 10:
             raise ValueError("Insufficient data for visualization")
-    
+
+        # Never mutate shared dataframe
+        df = df.copy(deep=False)
+        
         # =================================================
         # HOSPITAL VISUALS (STRICT & TIME-SAFE)
         # =================================================
         if sub_domain == "hospital":
-    
+            
             admit_col = c.get("date")
             discharge_col = c.get("discharge_date")
             los_col = c.get("los")
-    
+        
             # Ensure datetime safety where applicable
             for col in (admit_col, discharge_col):
                 if col and col in df.columns:
                     df[col] = pd.to_datetime(df[col], errors="coerce")
-    
+        
             # -------------------------------------------------
             # 1. Average LOS Trend
             # -------------------------------------------------
             if visual_key == "avg_los_trend":
+                time_axis = admit_col or discharge_col
                 if not (admit_col and los_col):
                     raise ValueError("Admission date or LOS missing")
-    
+        
                 series = (
-                    df[[admit_col, los_col]]
+                    df[[time_axis, los_col]]
                     .dropna()
-                    .set_index(admit_col)[los_col]
+                    .set_index(time_axis)[los_col]
                     .resample("M")
                     .mean()
                 )
-    
-                if series.dropna().empty:
-                    raise ValueError("No LOS trend data")
-    
+        
+                if series.empty:
+                    raise ValueError("No LOS data")
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 series.plot(ax=ax)
                 ax.set_title("Average Length of Stay Trend", fontweight="bold")
                 ax.set_ylabel("Days")
                 ax.grid(alpha=0.3)
-    
+        
                 register_visual(
                     fig,
                     "hospital_avg_los_trend.png",
@@ -759,40 +762,33 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 2. Bed Turnover Velocity
             # -------------------------------------------------
             if visual_key == "bed_turnover":
                 bed_col = c.get("bed_id")
-                if not bed_col or bed_col not in df.columns:
+                if not bed_col:
                     raise ValueError("Bed ID missing")
-    
-                turnover = (
-                    df[bed_col]
-                    .dropna()
-                    .value_counts()
-                    .clip(upper=100)
-                )
-    
-                if turnover.empty:
-                    raise ValueError("No bed turnover data")
-    
+        
+                counts = df[bed_col].dropna().value_counts()
+                if counts.empty:
+                    raise ValueError("No bed usage data")
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
-                turnover.plot(kind="hist", bins=15, ax=ax)
+                counts.clip(upper=100).plot(kind="hist", bins=15, ax=ax)
                 ax.set_title("Bed Turnover Velocity", fontweight="bold")
-                ax.set_xlabel("Patients per Bed")
     
                 register_visual(
                     fig,
                     "hospital_bed_velocity.png",
-                    "Utilization frequency of physical hospital beds.",
+                    "Utilization frequency of hospital beds.",
                     0.92,
                     0.88,
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 3. Readmission Risk
             # -------------------------------------------------
@@ -800,18 +796,18 @@ class HealthcareDomain(BaseDomain):
                 col = c.get("readmitted")
                 if not col or col not in df.columns:
                     raise ValueError("Readmission column missing")
-    
+                    
                 rates = df[col].dropna().value_counts(normalize=True)
                 if rates.empty:
                     raise ValueError("No readmission data")
-    
+        
                 rates.index = rates.index.map({0: "No", 1: "Yes"}).fillna(rates.index)
-    
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 rates.plot(kind="bar", ax=ax)
                 ax.set_title("Readmission Rate Distribution", fontweight="bold")
                 ax.set_ylabel("Rate")
-    
+        
                 register_visual(
                     fig,
                     "hospital_readmission.png",
@@ -821,23 +817,23 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 4. Discharge Hour Distribution
             # -------------------------------------------------
             if visual_key == "discharge_hour":
                 if not discharge_col or discharge_col not in df.columns:
                     raise ValueError("Discharge date missing")
-    
+        
                 hours = df[discharge_col].dt.hour.dropna()
                 if hours.empty:
                     raise ValueError("No discharge hour data")
-    
+                    
                 fig, ax = plt.subplots(figsize=(6, 4))
                 hours.value_counts().sort_index().plot(kind="bar", ax=ax)
                 ax.set_title("Discharge Hour Distribution", fontweight="bold")
                 ax.set_xlabel("Hour of Day")
-    
+        
                 register_visual(
                     fig,
                     "hospital_discharge_hour.png",
@@ -847,37 +843,37 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 5. Acuity vs Staffing (Proxy)
             # -------------------------------------------------
             if visual_key == "acuity_vs_staffing":
                 if not (los_col and c.get("cost")):
                     raise ValueError("LOS or cost missing")
-    
+        
                 cost_col = c.get("cost")
                 if cost_col not in df.columns:
                     raise ValueError("Cost column missing")
-    
+        
                 cost_cap = df[cost_col].quantile(0.95)
                 if pd.isna(cost_cap):
                     raise ValueError("Invalid cost distribution")
-    
+        
                 tmp = (
                     df[[los_col, cost_col]]
                     .dropna()
                     .clip(upper={los_col: 60, cost_col: cost_cap})
                 )
-    
+        
                 if tmp.empty:
                     raise ValueError("No acuity-cost data")
-    
+        
                 fig, ax = plt.subplots(figsize=(6, 4))
                 ax.scatter(tmp[los_col], tmp[cost_col], alpha=0.35)
                 ax.set_xlabel("Length of Stay (Acuity Proxy)")
                 ax.set_ylabel("Cost (Staffing Proxy)")
                 ax.set_title("Acuity vs Staffing Intensity (Proxy)", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     "hospital_acuity_staffing.png",
@@ -887,7 +883,7 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 6. ED Boarding Time Trend
             # -------------------------------------------------
@@ -895,7 +891,7 @@ class HealthcareDomain(BaseDomain):
                 dur_col = c.get("duration")
                 if not (dur_col and admit_col):
                     raise ValueError("Duration or admission date missing")
-    
+        
                 series = (
                     df[[admit_col, dur_col]]
                     .dropna()
@@ -903,15 +899,15 @@ class HealthcareDomain(BaseDomain):
                     .resample("M")
                     .mean()
                 )
-    
+        
                 if series.empty:
                     raise ValueError("No ED boarding data")
-    
+        
                 fig, ax = plt.subplots(figsize=(8, 4))
                 series.plot(ax=ax)
                 ax.set_title("ED Boarding Time Trend", fontweight="bold")
                 ax.set_ylabel("Duration (units as recorded)")
-    
+        
                 register_visual(
                     fig,
                     "hospital_ed_boarding.png",
@@ -921,7 +917,7 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
+        
             # -------------------------------------------------
             # 7. Mortality Trend (Proxy)
             # -------------------------------------------------
@@ -929,7 +925,7 @@ class HealthcareDomain(BaseDomain):
                 flag_col = c.get("flag")
                 if not (flag_col and admit_col):
                     raise ValueError("Mortality proxy or admission date missing")
-    
+        
                 rate = (
                     df[[admit_col, flag_col]]
                     .dropna()
@@ -937,14 +933,14 @@ class HealthcareDomain(BaseDomain):
                     .resample("M")
                     .mean()
                 )
-    
+        
                 if rate.empty:
                     raise ValueError("No mortality data")
     
                 fig, ax = plt.subplots(figsize=(8, 4))
                 rate.plot(ax=ax, marker="o")
                 ax.set_title("In-Hospital Mortality Proxy Trend", fontweight="bold")
-    
+        
                 register_visual(
                     fig,
                     "hospital_mortality_trend.png",
@@ -954,10 +950,9 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-    
-            raise ValueError(f"Unhandled hospital visual key: {visual_key}")
- 
         
+            raise ValueError(f"Unhandled hospital visual key: {visual_key}")
+
         # =================================================
         # CLINIC / AMBULATORY VISUALS (HARDENED & SAFE)
         # =================================================
