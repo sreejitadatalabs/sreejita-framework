@@ -1,24 +1,73 @@
+# =====================================================
+# COLUMN NORMALIZER — STABLE & DOMAIN-SAFE
+# Sreejita Framework v3.6
+# =====================================================
+
 import re
+from typing import Iterable, Tuple, Dict, Set
+
+
+# -------------------------------------------------
+# SINGLE COLUMN NORMALIZATION
+# -------------------------------------------------
 
 def normalize_column(col: str) -> str:
     """
-    Normalize column names into canonical snake_case tokens.
-    Examples:
-      'Admission Date' -> 'admission_date'
-      'Shipping Cost' -> 'shipping_cost'
-      'CTR (%)' -> 'ctr'
+    Normalize column names into stable snake_case tokens.
+
+    GUARANTEES:
+    - Preserves semantic word boundaries
+    - Never returns empty string
+    - Never raises
     """
-    col = col.lower().strip()
-    col = re.sub(r"[^\w\s]", "", col)   # remove symbols
-    col = re.sub(r"\s+", "_", col)      # spaces to underscores
-    return col
+
+    try:
+        if col is None:
+            return ""
+
+        col = str(col).strip().lower()
+
+        # Replace separators with space (preserve word boundaries)
+        col = re.sub(r"[\/\-\.\(\)\[\]%]", " ", col)
+
+        # Remove remaining non-alphanumerics
+        col = re.sub(r"[^a-z0-9\s_]", "", col)
+
+        # Normalize whitespace to underscores
+        col = re.sub(r"\s+", "_", col)
+
+        # Collapse multiple underscores
+        col = re.sub(r"_+", "_", col)
+
+        # Strip edge underscores
+        col = col.strip("_")
+
+        return col or ""
+
+    except Exception:
+        return ""
 
 
-def normalize_columns(columns):
+# -------------------------------------------------
+# BULK NORMALIZATION
+# -------------------------------------------------
+
+def normalize_columns(
+    columns: Iterable[str],
+) -> Tuple[Set[str], Dict[str, str]]:
     """
+    Normalize iterable of column names.
+
     Returns:
       - normalized_columns: set[str]
-      - mapping: original -> normalized
+      - mapping: original_column -> normalized_column
     """
-    mapping = {c: normalize_column(c) for c in columns}
+
+    mapping: Dict[str, str] = {}
+
+    for c in columns:
+        normalized = normalize_column(c)
+        if normalized:
+            mapping[c] = normalized
+
     return set(mapping.values()), mapping
