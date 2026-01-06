@@ -2,7 +2,6 @@
 Sreejita Framework CLI
 v3.5.1 — Markdown + ReportLab PDF (STABLE)
 """
-
 import argparse
 import logging
 from pathlib import Path
@@ -13,13 +12,11 @@ import importlib
 
 from sreejita.__version__ import __version__
 from sreejita.config.loader import load_config
-
 from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
 logger = logging.getLogger(__name__)
-
 
 # =====================================================
 # PROGRAMMATIC ENTRY (CLI / UI / API)
@@ -29,18 +26,17 @@ def run_single_file(
     config_path: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
     generate_pdf: bool = False,
+    domain_hint: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
     """
     v3.5.1 Programmatic Entry (STABLE)
-
     Returns:
-        {
-            "markdown": <path>,
-            "pdf": <path or None>,
-            "run_dir": <path>
-        }
+    {
+        "markdown": <path>,
+        "pdf": <path or None>,
+        "run_dir": <path>
+    }
     """
-
     # -------------------------------------------------
     # Bootstrap domains (lazy & safe)
     # -------------------------------------------------
@@ -62,6 +58,13 @@ def run_single_file(
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
+    # Domain hint (from UI / CLI) — CRITICAL FIX
+    # -------------------------------------------------
+    if domain_hint:
+        final_config["domain_hint"] = domain_hint
+        logger.info("Domain hint provided: %s", domain_hint)
+
+    # -------------------------------------------------
     # HYBRID REPORT (MARKDOWN + DOMAIN RESULTS)
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
@@ -80,7 +83,6 @@ def run_single_file(
         "primary_domain",
         "run_dir",
     }
-
     missing = required_keys - set(result.keys())
     if missing:
         raise RuntimeError(
@@ -99,7 +101,6 @@ def run_single_file(
         )
 
     primary_payload = domain_results[primary_domain]
-
     if not isinstance(primary_payload, dict):
         raise RuntimeError(
             f"Primary domain payload corrupted: {type(primary_payload)}"
@@ -116,7 +117,6 @@ def run_single_file(
             pdf_mod = importlib.import_module(
                 "sreejita.reporting.pdf_renderer"
             )
-
             if not hasattr(pdf_mod, "ExecutivePDFRenderer"):
                 raise ImportError("ExecutivePDFRenderer not found")
 
@@ -128,20 +128,19 @@ def run_single_file(
                 "executive": primary_payload.get("executive", {}),
                 "visuals": primary_payload.get("visuals", []),
                 "insights": primary_payload
-                    .get("executive", {})
-                    .get("insights", {}),
+                .get("executive", {})
+                .get("insights", {}),
                 "recommendations": primary_payload.get("recommendations", []),
                 "domain": primary_domain,
                 "kpis": primary_payload
-                    .get("executive", {})
-                    .get("primary_kpis", []),
+                .get("executive", {})
+                .get("primary_kpis", []),
             }
 
             pdf_renderer.render(
                 payload=pdf_payload,
                 output_path=pdf_path,
             )
-
             logger.info("PDF generated successfully: %s", pdf_path)
 
         except Exception:
@@ -165,15 +164,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=f"Sreejita Framework v{__version__}"
     )
-
     parser.add_argument("input", nargs="?", help="Input CSV or Excel file")
     parser.add_argument("--config", required=False, help="Path to config YAML")
-
     parser.add_argument("--batch", help="Run batch processing")
     parser.add_argument("--watch", help="Watch folder for new files")
     parser.add_argument("--schedule", action="store_true")
-
     parser.add_argument("--pdf", action="store_true", help="Export Executive PDF")
+    parser.add_argument("--domain", help="Domain hint (healthcare, retail, generic)")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -229,14 +226,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         input_path=str(input_path),
         config_path=args.config,
         generate_pdf=args.pdf,
+        domain_hint=args.domain,
     )
 
     print("\n✅ Report generated")
     print(f"📝 Markdown: {result['markdown']}")
-
     if result["pdf"]:
         print(f"📄 PDF: {result['pdf']}")
-
     print(f"📁 Run folder: {result['run_dir']}")
     return 0
 
