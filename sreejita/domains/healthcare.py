@@ -710,8 +710,6 @@ class HealthcareDomain(BaseDomain):
                 "sub_domain": sub_domain,
             })
 
-        used_drivers = set()
-
         def driver_signature(visual_key: str, axis: str) -> str:
             """
             Prevents visuals that tell the same story with same data driver.
@@ -791,28 +789,50 @@ class HealthcareDomain(BaseDomain):
             required_axes = {"time", "distribution"}
             axes_present = {v["axis"] for v in pool}
             
-            if not required_axes.issubset(axes_present):
-                continue  # fail this sub-domain gracefully
-    
+            # Enforce at least one time + one non-time visual
+            if "time" not in axes_present:
+                continue
+            
+            if axes_present == {"time"}:
+                continue  # 🚫 reject time-only narratives
+                
         # -------------------------------------------------
-        # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE-BALANCED)
+        # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE + DRIVER BALANCED)
         # -------------------------------------------------
         ROLE_PRIORITY = ["volume", "flow", "quality", "financial", "utilization", "experience"]
-
-        selected = []
-        seen_roles = set()
         
-        for role in ROLE_PRIORITY:
-            role_candidates = [
-                v for v in pool
-                if v["role"] == role and v["confidence"] >= 0.4
-            ]
-            if role_candidates:
-                best = max(role_candidates, key=lambda v: v["importance"] * v["confidence"])
-                selected.append(best)
-                seen_roles.add(role)
+        for sub, pool in candidates.items():
         
-        published.extend(selected[:6])
+            # --- DRIVER DEDUP (prevent same story twice) ---
+            used_drivers = set()
+            deduped_pool = []
+        
+            for v in pool:
+                sig = driver_signature(v["visual_key"], v["axis"])
+                if sig not in used_drivers:
+                    used_drivers.add(sig)
+                    deduped_pool.append(v)
+        
+            # --- ROLE BALANCED SELECTION ---
+            selected = []
+            used_roles = set()
+        
+            for role in ROLE_PRIORITY:
+                role_candidates = [
+                    v for v in deduped_pool
+                    if v["role"] == role and v["confidence"] >= 0.4
+                ]
+                if role_candidates:
+                    best = max(
+                        role_candidates,
+                        key=lambda v: v["importance"] * v["confidence"]
+                    )
+                    selected.append(best)
+                    used_roles.add(role)
+        
+            published.extend(selected[:6])
+        
+        return published
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
@@ -836,9 +856,7 @@ class HealthcareDomain(BaseDomain):
     
         c = self.cols
         if axis == "time":
-            if visual_key in {"avg_los_trend", "spend_velocity"}:
-                pass
-            elif time_col is None:
+            if time_col is None or time_col not in df.columns:
                 raise ValueError("Time axis required but missing")
 
         time_col = getattr(self, "time_col", None)
@@ -1079,7 +1097,11 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # ---------------- PHARMACY -----------------------
         # =================================================
-        if sub_domain == HealthcareSubDomain.PHARMACY.value:
+        if sub == HealthcareSubDomain.PHARMACY.value:
+            axes = {v["axis"] for v in candidates.get(sub, [])}
+            if axes == {"time"}:
+                continue  # 🚫 reject time-only pharmacy story
+
     
             fill_col = c.get("fill_date")
             supply_col = c.get("supply")
