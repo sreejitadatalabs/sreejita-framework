@@ -721,36 +721,45 @@ class HealthcareDomain(BaseDomain):
             })
 
         def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
+            """
+            Unique narrative driver identity.
+            If two visuals share this → only one allowed.
+            """
             DRIVER_MAP = {
-                # -------- TIME DRIVERS --------
-                "admission_volume_trend": f"time:{cols.get('date')}",
-                "avg_los_trend": f"time:{cols.get('date')}:{cols.get('los')}",
-                "ed_boarding": f"time:{cols.get('date')}:{cols.get('duration')}",
-                "mortality_trend": f"time:{cols.get('date')}:{cols.get('flag')}",
+                # -------- TIME --------
+                "admission_volume_trend": ("time", cols.get("date")),
+                "avg_los_trend": ("time", cols.get("date"), cols.get("los")),
+                "ed_boarding": ("time", cols.get("date"), cols.get("duration")),
+                "mortality_trend": ("time", cols.get("date"), cols.get("flag")),
         
-                "visit_volume_trend": f"time:{cols.get('date')}",
-                "clinic_revenue_proxy": f"time:{cols.get('date')}:{cols.get('cost')}",
+                "visit_volume_trend": ("time", cols.get("date")),
+                "clinic_revenue_proxy": ("time", cols.get("date"), cols.get("cost")),
         
-                "dispense_volume_trend": f"time:{cols.get('fill_date')}",
-                "spend_velocity": f"time:{cols.get('fill_date')}:{cols.get('cost')}",
+                "dispense_volume_trend": ("time", cols.get("fill_date")),
+                "spend_velocity": ("time", cols.get("fill_date"), cols.get("cost")),
         
                 # -------- DISTRIBUTION --------
-                "los_distribution": f"dist:{cols.get('los')}",
-                "wait_time_split": f"dist:{cols.get('duration')}",
-                "inventory_turn": f"dist:{cols.get('supply')}",
-        
-                # -------- COMPOSITION --------
-                "facility_mix": f"comp:{cols.get('facility')}",
-                "therapeutic_spend": f"comp:{cols.get('facility')}",
-                "telehealth_mix": f"comp:{cols.get('admit_type')}",
+                "los_distribution": ("dist", cols.get("los")),
+                "wait_time_split": ("dist", cols.get("duration")),
+                "inventory_turn": ("dist", cols.get("supply")),
+                "cost_per_rx_distribution": ("dist", cols.get("cost")),
         
                 # -------- ENTITY --------
-                "provider_utilization": f"entity:{cols.get('doctor')}",
-                "prescribing_variance": f"entity:{cols.get('doctor')}",
-                "order_heatmap": f"entity:{cols.get('doctor')}",
+                "provider_utilization": ("entity", cols.get("doctor")),
+                "prescribing_variance": ("entity", cols.get("doctor")),
+                "order_heatmap": ("entity", cols.get("doctor")),
+        
+                # -------- COMPOSITION --------
+                "facility_mix": ("comp", cols.get("facility")),
+                "telehealth_mix": ("comp", cols.get("admit_type")),
+                "therapeutic_spend": ("comp", cols.get("facility")),
             }
         
-            return DRIVER_MAP.get(visual_key, f"{axis}:{visual_key}")
+            sig = DRIVER_MAP.get(visual_key)
+            if not sig:
+                return f"{axis}:{visual_key}"
+        
+            return "|".join(str(x) for x in sig if x)
 
         # -------------------------------------------------
         # VISUAL DISPATCH
@@ -782,29 +791,29 @@ class HealthcareDomain(BaseDomain):
             if not visual_defs:
                 continue
     
-            rendered_keys = set()
-    
+            used_drivers = set()
+
             for visual_def in visual_defs:
                 visual_key = visual_def["key"]
                 role = visual_def["role"]
                 axis = visual_def["axis"]
-    
-                if visual_key in rendered_keys:
-                    continue
-                rendered_keys.add(visual_key)
-    
-                try:
-                    self._render_visual_by_key(
-                        visual_key=visual_key,
-                        role=role,
-                        axis=axis,
-                        df=df,
-                        output_dir=output_dir,
-                        sub_domain=sub,
-                        register_visual=register_visual,
-                    )
-                except Exception:
-                    continue
+            
+                sig = driver_signature(visual_key, axis, self.cols)
+                if sig in used_drivers:
+                    continue  # 🚫 same story, skip early
+            
+                used_drivers.add(sig)
+            
+                self._render_visual_by_key(
+                    visual_key=visual_key,
+                    role=role,
+                    axis=axis,
+                    df=df,
+                    output_dir=output_dir,
+                    sub_domain=sub,
+                    register_visual=register_visual,
+                )
+
 
         # Ensure at least one non-time visual exists per sub-domain
         for sub, pool in candidates.items():
@@ -826,64 +835,125 @@ class HealthcareDomain(BaseDomain):
         ]
         
         for sub, pool in candidates.items():
-            # 🚫 Reject clinic narratives without non-time visuals
+        
+            # -------------------------------------------------
+            # SAFETY: DROP INVALID / LOW-CONFIDENCE VISUALS
+            # -------------------------------------------------
+            pool = [
+                v for v in pool
+                if Path(v.get("path", "")).exists()
+                and v.get("confidence", 0) >= 0.35
+            ]
+        
+            if not pool:
+                continue
+        
+            # -------------------------------------------------
+            # FIX 3 — FORCE CLINIC NON-TIME VISUALS
+            # -------------------------------------------------
             if sub == HealthcareSubDomain.CLINIC.value:
-                has_non_time = any(
-                    v["axis"] != "time" for v in pool
-                )
-                if not has_non_time:
-                    continue  # reject clinic story
-
-            # ---------- DRIVER DEDUP ----------
+                non_time = [v for v in pool if v.get("axis") != "time"]
+                if len(non_time) < 2:
+                    continue  # 🚫 clinic must explain flow & experience
+        
+            # -------------------------------------------------
+            # DRIVER DEDUP (PREVENT SAME STORY TWICE)
+            # -------------------------------------------------
             used_drivers = set()
             deduped_pool = []
         
-            for v in sorted(pool, key=lambda x: -x["importance"]):
-                sig = driver_signature(v["visual_key"], v["axis"], self.cols)
-                if sig not in used_drivers:
-                    used_drivers.add(sig)
-                    deduped_pool.append(v)
+            for v in sorted(pool, key=lambda x: -x.get("importance", 0)):
+                sig = driver_signature(
+                    v.get("visual_key"),
+                    v.get("axis"),
+                    self.cols,
+                )
+                if sig in used_drivers:
+                    continue
+                used_drivers.add(sig)
+                deduped_pool.append(v)
         
-            # ---------- AXIS BALANCE ----------
+            if not deduped_pool:
+                continue
+        
+            # -------------------------------------------------
+            # AXIS BALANCE ENFORCEMENT
+            # -------------------------------------------------
             axis_groups = {}
             for v in deduped_pool:
-                axis_groups.setdefault(v["axis"], []).append(v)
+                axis_groups.setdefault(v.get("axis"), []).append(v)
         
-            # Enforce narrative minimum
+            # Must have time + at least one non-time axis
             if "time" not in axis_groups:
                 continue
         
-            if len(axis_groups) == 1 and "time" in axis_groups:
-                continue  # 🚫 reject time-only story
+            if set(axis_groups.keys()) == {"time"}:
+                continue  # 🚫 reject time-only narrative
         
-            # 🚫 Reject narratives driven by only one column  
-            driver_cols = {
-                v["axis"]: driver_signature(v["visual_key"], v["axis"], self.cols)
+            # -------------------------------------------------
+            # REJECT NARRATIVES DRIVEN BY SINGLE COLUMN
+            # -------------------------------------------------
+            driver_set = {
+                driver_signature(v.get("visual_key"), v.get("axis"), self.cols)
                 for v in deduped_pool
             }
-            
-            if len(set(driver_cols.values())) < 2:
-                continue  # narrative too thin
-
-            selected = []
-            used_roles = set()
         
-            # Prefer diversity over importance
+            if len(driver_set) < 2:
+                continue  # 🚫 narrative too thin
+        
+            # -------------------------------------------------
+            # ROLE + AXIS DIVERSITY SELECTION
+            # -------------------------------------------------
+            selected = []
+        
             for role in ROLE_PRIORITY:
                 for axis in ("time", "distribution", "composition", "entity"):
-                    candidates_axis = [
+                    role_axis_candidates = [
                         v for v in axis_groups.get(axis, [])
-                        if v["role"] == role and v["confidence"] >= 0.4
+                        if v.get("role") == role and v.get("confidence", 0) >= 0.4
                     ]
-                    if candidates_axis:
+                    if role_axis_candidates:
                         best = max(
-                            candidates_axis,
-                            key=lambda v: v["importance"] * v["confidence"]
+                            role_axis_candidates,
+                            key=lambda v: v.get("importance", 0) * v.get("confidence", 0),
                         )
                         selected.append(best)
-                        used_roles.add(role)
-                        break
+                        break  # move to next role
         
+                if len(selected) >= 6:
+                    break
+        
+            if not selected:
+                continue
+        
+            # -------------------------------------------------
+            # FIX 4 — HARD LIMIT HISTOGRAM (DISTRIBUTION) VISUALS
+            # -------------------------------------------------
+            filtered = []
+            hist_count = 0
+        
+            for v in selected:
+                if v.get("axis") == "distribution":
+                    hist_count += 1
+                    if hist_count > 2:
+                        continue  # 🚫 skip extra histograms
+                filtered.append(v)
+        
+            selected = filtered
+        
+            # -------------------------------------------------
+            # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
+            # -------------------------------------------------
+            selected.sort(
+                key=lambda v: (
+                    ROLE_PRIORITY.index(v["role"])
+                    if v.get("role") in ROLE_PRIORITY else 99
+                )
+            )
+        
+            # -------------------------------------------------
+            # PUBLISH (MAX 6)
+            # -------------------------------------------------
             published.extend(selected[:6])
         
         return published
