@@ -25,7 +25,26 @@ log = logging.getLogger("sreejita.orchestrator")
 
 MIN_DOMAIN_CONFIDENCE = 0.40
 MAX_EXECUTIVE_VISUALS = 6
-fallback_domain = best_detected_domain
+# -------------------------------------------------
+# DOMAIN SELECTION — CONFIDENCE DRIVEN (UNIVERSAL)
+# -------------------------------------------------
+
+# detection_results: List[DomainDetectionResult]
+valid_results = [
+    r for r in detection_results
+    if r.domain is not None and r.confidence is not None
+]
+
+if not valid_results:
+    raise RuntimeError(
+        "No valid domain detected. Please select a domain manually."
+    )
+
+# Select highest-confidence domain
+best_result = max(valid_results, key=lambda r: r.confidence)
+
+selected_domain = best_result.domain
+selected_confidence = best_result.confidence
 
 # =====================================================
 # SAFE FILE LOADER (NEVER CRASH)
