@@ -19,14 +19,13 @@ from sreejita.core.fingerprint import dataframe_fingerprint
 
 log = logging.getLogger("sreejita.orchestrator")
 
-
 # =====================================================
 # GOVERNANCE CONSTANTS
 # =====================================================
 
-MIN_DOMAIN_CONFIDENCE = 0.40   # 🚨 hard gate
+MIN_DOMAIN_CONFIDENCE = 0.40
 MAX_EXECUTIVE_VISUALS = 6
-
+FALLBACK_DOMAIN = "generic"
 
 # =====================================================
 # SAFE FILE LOADER (NEVER CRASH)
@@ -48,7 +47,6 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
                 continue
 
     raise RuntimeError(f"Unsupported file type: {path.suffix}")
-
 
 # =====================================================
 # BOARD READINESS HISTORY (SAFE, NON-BLOCKING)
@@ -83,7 +81,6 @@ def _trend(prev: Optional[int], curr: Optional[int]) -> str:
         return "↓"
     return "→"
 
-
 # =====================================================
 # CANONICAL ENTRY POINT (ONLY ENTRY)
 # =====================================================
@@ -96,9 +93,9 @@ def generate_report_payload(
     Universal report payload generator.
 
     GUARANTEES:
-    - Domain is confidence-gated
+    - Auto-detect never hard-fails
+    - Domain fallback is safe
     - KPIs precede visuals
-    - Visuals are evidence-backed
     - Executive output is board-safe
     """
 
@@ -128,7 +125,7 @@ def generate_report_payload(
     shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
-    # 3. DOMAIN DECISION (CONFIDENCE-GATED)
+    # 3. DOMAIN DECISION (NON-FATAL, FALLBACK SAFE)
     # -------------------------------------------------
     domain_hint = config.get("domain_hint")
 
@@ -138,31 +135,39 @@ def generate_report_payload(
         strict=False,
     )
 
-    if (
-        detection is None
-        or not detection.domain
-        or detection.confidence < MIN_DOMAIN_CONFIDENCE
-    ):
-        raise RuntimeError(
-            f"No confident domain detected "
-            f"(confidence={getattr(detection, 'confidence', 0.0)})"
-        )
+    domain: str = FALLBACK_DOMAIN
 
-    domain = detection.domain
+    if detection and detection.domain:
+        if detection.confidence >= MIN_DOMAIN_CONFIDENCE:
+            domain = detection.domain
+        else:
+            log.warning(
+                f"Low domain confidence "
+                f"(domain={detection.domain}, confidence={detection.confidence}). "
+                f"Falling back to '{FALLBACK_DOMAIN}'."
+            )
+    else:
+        log.warning(
+            "No confident domain detected. "
+            f"Falling back to '{FALLBACK_DOMAIN}'."
+        )
 
     engine = registry.get_domain(domain)
     if engine is None:
-        raise RuntimeError(f"Resolved domain '{domain}' is not registered")
+        raise RuntimeError(
+            f"Fallback domain '{domain}' is not registered. "
+            "This is a framework configuration error."
+        )
 
-    # 🔒 CRITICAL: RESET DOMAIN STATE (NO LEAKAGE ACROSS RUNS)
+    # 🔒 RESET ENGINE STATE (NO LEAKAGE ACROSS RUNS)
     if hasattr(engine, "_last_kpis"):
         engine._last_kpis = None
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT ORDER — NEVER CHANGE)
+    # 4. DOMAIN EXECUTION (STRICT ORDER)
     # -------------------------------------------------
     try:
-        # PREPROCESS (COPY-SAFE)
+        # PREPROCESS
         df = engine.preprocess(df)
 
         # KPIs — SINGLE SOURCE OF TRUTH
@@ -181,14 +186,14 @@ def generate_report_payload(
         except Exception:
             visuals = []
 
-        # INSIGHTS — KPI-BOUND
+        # INSIGHTS
         insights = engine.generate_insights(df, kpis)
 
-        # RECOMMENDATIONS — INSIGHT-BOUND
+        # RECOMMENDATIONS
         raw_recs = engine.generate_recommendations(df, kpis, insights)
         recommendations = enrich_recommendations(raw_recs)
 
-        # EXECUTIVE COGNITION — FINAL
+        # EXECUTIVE
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -202,7 +207,7 @@ def generate_report_payload(
         raise RuntimeError(f"{domain} execution failed: {e}")
 
     # -------------------------------------------------
-    # 5. VISUAL VALIDATION (PATH + CONFIDENCE)
+    # 5. VISUAL VALIDATION
     # -------------------------------------------------
     valid_visuals: List[Dict[str, Any]] = []
 
@@ -216,7 +221,7 @@ def generate_report_payload(
             continue
 
     # -------------------------------------------------
-    # 6. UNIVERSAL VISUAL SAFETY NET (FINAL GUARD)
+    # 6. UNIVERSAL VISUAL SAFETY NET
     # -------------------------------------------------
     valid_visuals = engine.ensure_minimum_visuals(
         valid_visuals,
@@ -225,7 +230,7 @@ def generate_report_payload(
     )
 
     # -------------------------------------------------
-    # 7. EXECUTIVE VISUAL SELECTION (MAX 6)
+    # 7. EXECUTIVE VISUAL SELECTION
     # -------------------------------------------------
     valid_visuals = sorted(
         valid_visuals,
@@ -254,7 +259,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 9. FINAL PAYLOAD (STRICT, DOMAIN-SCOPED)
+    # 9. FINAL PAYLOAD (DOMAIN-SCOPED, SAFE)
     # -------------------------------------------------
     return {
         domain: {
