@@ -2473,16 +2473,7 @@ class HealthcareDomain(BaseDomain):
 # =====================================================
 # DETECTOR-LEVEL CANONICAL SIGNALS (LIGHTWEIGHT & FAST)
 # =====================================================
-
 def _detect_semantic_signals(df: pd.DataFrame) -> Dict[str, bool]:
-    """
-    Lightweight semantic detection for DOMAIN DETECTORS ONLY.
-    - Alias-aware
-    - Coverage-aware (cheap)
-    - No dtype inference
-    - No domain leakage
-    """
-
     if df is None or df.empty:
         return {}
 
@@ -2496,33 +2487,66 @@ def _detect_semantic_signals(df: pd.DataFrame) -> Dict[str, bool]:
             a = norm(a)
             for k, original in cols.items():
                 if a in k:
-                    coverage = df[original].notna().mean()
-                    if coverage >= min_coverage:
+                    if df[original].notna().mean() >= min_coverage:
                         return True
         return False
 
     return {
-        # Identity
-        "patient": has_any(["patientid", "mrn", "pid", "uhid"]),
+        # ---------------- IDENTITY ----------------
+        "patient": has_any([
+            "patientid", "patient_mrn", "patntid",
+            "mrn", "pid", "uhid"
+        ]),
 
-        # Encounter lifecycle
-        "admission": has_any(["admissiondate", "visitdate", "encounterdate"]),
-        "discharge": has_any(["dischargedate"]),
-        "los": has_any(["lengthofstay", "los"]),
+        # ---------------- ENCOUNTER / VISIT ----------------
+        "admission": has_any([
+            "admissiondate", "dateofadmission",
+            "visitdate", "apptdat", "appointmentdate"
+        ]),
 
-        # Clinical context
-        "diagnosis": has_any(["diagnosis", "icd"]),
+        "discharge": has_any([
+            "dischargedate"
+        ]),
 
-        # Operations
-        "facility": has_any(["hospital", "clinic", "facility", "branch"]),
+        # ---------------- DURATION ----------------
+        "los": has_any([
+            "lengthofstay", "los"
+        ]),
 
-        # Financial / population (supporting only)
-        "cost": has_any(["billingamount", "totalcharges", "cost"]),
-        "population": has_any(["population", "coveredlives"]),
+        "duration": has_any([
+            "waittime", "waittimemins",
+            "duration", "turnaroundtime"
+        ]),
 
-        # Explicit pharmacy (DO NOT SOFTEN)
-        "pharmacy_time": has_any(["rxfilleddate", "filldate"]),
-        "pharmacy_supply": has_any(["dayssupply", "quantitydispensed"]),
+        # ---------------- CLINICAL ----------------
+        "diagnosis": has_any([
+            "diagnosis", "medicalcondition", "icd"
+        ]),
+
+        # ---------------- OPERATIONS ----------------
+        "facility": has_any([
+            "hospital", "clinic", "clinicloc",
+            "facility", "branch"
+        ]),
+
+        # ---------------- FINANCIAL ----------------
+        "cost": has_any([
+            "billingamount", "billamt",
+            "totalcharges", "cost"
+        ]),
+
+        # ---------------- PHARMACY (HARD GATE) ----------------
+        "pharmacy_time": has_any([
+            "rxfilldate", "filldate"
+        ]),
+        "pharmacy_supply": has_any([
+            "dayssupply", "dispenseddayssupply"
+        ]),
+
+        # ---------------- FLAGS ----------------
+        "flag": has_any([
+            "safetyalert", "alertflag", "readmit", "re-admit"
+        ]),
     }
 
 # =====================================================
@@ -2554,14 +2578,14 @@ class HealthcareDomainDetector(BaseDomainDetector):
         # HEALTHCARE ANCHOR (SOFT, NON-BINARY)
         # -------------------------------------------------
         anchor_score = sum([
-            signals.get("los", False),
-            signals.get("discharge", False),
+            signals.get("patient", False),
+            signals.get("admission", False),
+            signals.get("facility", False),
             signals.get("diagnosis", False),
-            signals.get("patient", False) and signals.get("admission", False),
-            signals.get("admission", False) and signals.get("facility", False),
+            signals.get("pharmacy_time", False),
         ])
 
-        if anchor_score == 0:
+        if anchor_score < 2:
             return DomainDetectionResult(
                 domain=None,
                 confidence=0.0,
