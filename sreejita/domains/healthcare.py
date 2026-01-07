@@ -2603,16 +2603,18 @@ class HealthcareDomainDetector(BaseDomainDetector):
             confidence += 0.06
 
         confidence = round(min(0.95, confidence), 2)
+        
+        # -------------------------------------------------
+        # SAFETY FLOOR — NEVER DROP DOMAIN ONCE ANCHORED
+        # -------------------------------------------------
+        confidence = max(0.30, confidence)
+        
+        return DomainDetectionResult(
+            domain=self.domain_name,
+            confidence=confidence,
+            signals=signals,
+        )
 
-        # -------------------------------------------------
-        # SAFETY FLOOR
-        # -------------------------------------------------
-        if confidence < 0.35:
-            return DomainDetectionResult(
-                domain=None,
-                confidence=confidence,
-                signals=signals,
-            )
 
         return DomainDetectionResult(
             domain=self.domain_name,
