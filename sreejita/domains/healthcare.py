@@ -710,26 +710,26 @@ class HealthcareDomain(BaseDomain):
                 "sub_domain": sub_domain,
             })
 
-        def driver_signature(visual_key: str, axis: str) -> str:
-            """
-            Prevents visuals that tell the same story with same data driver.
-            """
-            TIME_DRIVERS = {
-                "admission_volume_trend": "admission_date",
-                "avg_los_trend": "los",
-                "dispense_volume_trend": "fill_date",
-                "spend_velocity": "cost_time",
-                "visit_volume_trend": "visit_date",
+        def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
+            DRIVER_MAP = {
+                # TIME DRIVERS
+                "admission_volume_trend": cols.get("date"),
+                "avg_los_trend": cols.get("los"),
+                "dispense_volume_trend": cols.get("fill_date"),
+                "spend_velocity": f"{cols.get('fill_date')}_cost",
+                "visit_volume_trend": cols.get("date"),
+        
+                # DISTRIBUTIONS
+                "los_distribution": cols.get("los"),
+                "wait_time_split": cols.get("duration"),
+                "inventory_turn": cols.get("supply"),
+        
+                # COMPOSITION
+                "facility_mix": cols.get("facility"),
+                "therapeutic_spend": cols.get("facility"),
             }
         
-            DIST_DRIVERS = {
-                "los_distribution": "los",
-                "wait_time_split": "duration",
-                "inventory_turn": "supply",
-                "generic_rate": "flag",
-            }
-        
-            return TIME_DRIVERS.get(visual_key) or DIST_DRIVERS.get(visual_key) or visual_key
+            return f"{axis}:{DRIVER_MAP.get(visual_key, visual_key)}"
         # -------------------------------------------------
         # VISUAL DISPATCH
         # -------------------------------------------------
@@ -795,7 +795,17 @@ class HealthcareDomain(BaseDomain):
             
             if axes_present == {"time"}:
                 continue  # 🚫 reject time-only narratives
-                
+
+        axes_present = {v["axis"] for v in deduped_pool}
+
+        # Reject time-only narratives
+        if axes_present == {"time"}:
+            continue
+        
+        # Soft enforce diversity
+        if "distribution" not in axes_present:
+            deduped_pool = [v for v in deduped_pool if v["axis"] != "time"] + deduped_pool
+            
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE + DRIVER BALANCED)
         # -------------------------------------------------
@@ -806,13 +816,13 @@ class HealthcareDomain(BaseDomain):
             # --- DRIVER DEDUP (prevent same story twice) ---
             used_drivers = set()
             deduped_pool = []
-        
-            for v in pool:
-                sig = driver_signature(v["visual_key"], v["axis"])
+            
+            for v in sorted(pool, key=lambda x: -x["importance"]):
+                sig = driver_signature(v["visual_key"], v["axis"], self.cols)
                 if sig not in used_drivers:
                     used_drivers.add(sig)
                     deduped_pool.append(v)
-        
+
             # --- ROLE BALANCED SELECTION ---
             selected = []
             used_roles = set()
@@ -847,23 +857,14 @@ class HealthcareDomain(BaseDomain):
         sub_domain: str,
         register_visual,
     ):
-
-        """
-        Concrete visual implementations.
-        One visual_key = one visual.
-        Must call register_visual().
-        """
     
         c = self.cols
-        if axis == "time":
-            if time_col is None or time_col not in df.columns:
-                raise ValueError("Time axis required but missing")
-
         time_col = getattr(self, "time_col", None)
+    
         if axis == "time":
             if time_col is None or time_col not in df.columns:
                 raise ValueError("Time axis required but missing")
-
+    
         if df is None or len(df) < 10:
             raise ValueError("Insufficient data")
     
@@ -1097,7 +1098,7 @@ class HealthcareDomain(BaseDomain):
         # =================================================
         # ---------------- PHARMACY -----------------------
         # =================================================
-        if sub == HealthcareSubDomain.PHARMACY.value:
+        if sub_domain == HealthcareSubDomain.PHARMACY.value:
             axes = {v["axis"] for v in candidates.get(sub, [])}
             if axes == {"time"}:
                 continue  # 🚫 reject time-only pharmacy story
