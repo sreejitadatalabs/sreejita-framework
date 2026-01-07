@@ -25,7 +25,7 @@ log = logging.getLogger("sreejita.orchestrator")
 
 MIN_DOMAIN_CONFIDENCE = 0.40
 MAX_EXECUTIVE_VISUALS = 6
-FALLBACK_DOMAIN = "generic"
+fallback_domain = best_detected_domain
 
 # =====================================================
 # SAFE FILE LOADER (NEVER CRASH)
