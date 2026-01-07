@@ -52,7 +52,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "mortality_trend", "role": "quality"},
         {"key": "hospital_revenue_proxy", "role": "financial"},
         {"key": "admission_volume_trend", "role": "volume"},
-        {"key": "payer_mix", "role": "financial"},
+        {"key": ""facility_mix", "role": "financial"},
     ],
 
     HealthcareSubDomain.CLINIC.value: [
@@ -775,7 +775,13 @@ class HealthcareDomain(BaseDomain):
                     )
                     selected.append(best)
                     used_roles.add(role)
-    
+
+            seen_paths = set(v["path"] for v in published)
+            for v in selected:
+                if v["path"] not in seen_paths:
+                    published.append(v)
+                    seen_paths.add(v["path"])
+
             published.extend(selected[:6])
     
         return published
@@ -800,7 +806,9 @@ class HealthcareDomain(BaseDomain):
     
         c = self.cols
         time_col = getattr(self, "time_col", None)
-    
+        if time_col is None or time_col not in df.columns:
+            raise ValueError("No valid time column for visual")
+
         if df is None or len(df) < 10:
             raise ValueError("Insufficient data")
     
@@ -882,10 +890,10 @@ class HealthcareDomain(BaseDomain):
                 register_visual(fig, "hospital_revenue", "Hospital revenue proxy", 0.9, 0.85, sub_domain, role)
                 return
     
-            if visual_key == "payer_mix":
+            if visual_key == ""facility_mix":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="pie", ax=ax)
-                register_visual(fig, "hospital_payer_mix", "Payer mix proxy", 0.8, 0.7, sub_domain, role)
+                register_visual(fig, "hospital_facility_mix", "facility mix proxy", 0.8, 0.7, sub_domain, role)
                 return
     
         # =================================================
@@ -962,7 +970,10 @@ class HealthcareDomain(BaseDomain):
                 df[c.get("admit_type")].value_counts().plot(kind="pie", ax=ax)
                 register_visual(fig, "clinic_telehealth", "Telehealth mix", 0.75, 0.7, sub_domain, role)
                 return
-    
+
+            if visual_key == "clinic_revenue_proxy" and cost_col not in df.columns:
+                raise ValueError("Clinic revenue proxy requires cost")
+
         # =================================================
         # ---------------- DIAGNOSTICS --------------------
         # =================================================
@@ -1007,6 +1018,8 @@ class HealthcareDomain(BaseDomain):
                 return
     
             if visual_key == "order_heatmap":
+                if doc_col not in df.columns:
+                    raise ValueError("Doctor column missing")
                 fig, ax = plt.subplots()
                 pd.crosstab(df[doc_col], df[time_col].dt.hour).plot(ax=ax)
                 register_visual(fig, "diag_heatmap", "Ordering heatmap", 0.9, 0.85, sub_domain, role)
