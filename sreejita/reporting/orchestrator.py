@@ -1,6 +1,6 @@
 # =====================================================
-# ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE, LOCKED)
-# Sreejita Framework v3.6.1 STABILIZED
+# ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE)
+# Sreejita Framework v3.6.2
 # =====================================================
 
 import logging
@@ -25,26 +25,6 @@ log = logging.getLogger("sreejita.orchestrator")
 
 MIN_DOMAIN_CONFIDENCE = 0.40
 MAX_EXECUTIVE_VISUALS = 6
-# -------------------------------------------------
-# DOMAIN SELECTION — CONFIDENCE DRIVEN (UNIVERSAL)
-# -------------------------------------------------
-
-# detection_results: List[DomainDetectionResult]
-valid_results = [
-    r for r in detection_results
-    if r.domain is not None and r.confidence is not None
-]
-
-if not valid_results:
-    raise RuntimeError(
-        "No valid domain detected. Please select a domain manually."
-    )
-
-# Select highest-confidence domain
-best_result = max(valid_results, key=lambda r: r.confidence)
-
-selected_domain = best_result.domain
-selected_confidence = best_result.confidence
 
 # =====================================================
 # SAFE FILE LOADER (NEVER CRASH)
@@ -112,10 +92,10 @@ def generate_report_payload(
     Universal report payload generator.
 
     GUARANTEES:
-    - Auto-detect never hard-fails
-    - Domain fallback is safe
-    - KPIs precede visuals
-    - Executive output is board-safe
+    - Auto-detect never references undefined variables
+    - No 'generic' domain assumption
+    - Highest-confidence domain always wins
+    - Domain execution is isolated and safe
     """
 
     # -------------------------------------------------
@@ -129,7 +109,7 @@ def generate_report_payload(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------
-    # 1. LOAD DATA (IMMUTABLE SOURCE)
+    # 1. LOAD DATA
     # -------------------------------------------------
     raw_df = _read_tabular_file_safe(input_path)
     if raw_df.empty:
@@ -144,41 +124,39 @@ def generate_report_payload(
     shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
-    # 3. DOMAIN DECISION (NON-FATAL, FALLBACK SAFE)
+    # 3. DOMAIN DETECTION (OPTION B — CONFIDENCE WINNER)
     # -------------------------------------------------
     domain_hint = config.get("domain_hint")
 
-    detection = detect_domain(
+    detection_result = detect_domain(
         df,
         domain_hint=domain_hint,
         strict=False,
     )
 
-    domain: str = FALLBACK_DOMAIN
-
-    if detection and detection.domain:
-        if detection.confidence >= MIN_DOMAIN_CONFIDENCE:
-            domain = detection.domain
-        else:
-            log.warning(
-                f"Low domain confidence "
-                f"(domain={detection.domain}, confidence={detection.confidence}). "
-                f"Falling back to '{FALLBACK_DOMAIN}'."
-            )
-    else:
-        log.warning(
-            "No confident domain detected. "
-            f"Falling back to '{FALLBACK_DOMAIN}'."
+    if not detection_result or not detection_result.domain:
+        raise RuntimeError(
+            "No domain detected. Please select a domain manually."
         )
+
+    if detection_result.confidence < MIN_DOMAIN_CONFIDENCE:
+        log.warning(
+            f"Low domain confidence detected "
+            f"(domain={detection_result.domain}, "
+            f"confidence={detection_result.confidence}). "
+            "Proceeding with detected domain."
+        )
+
+    domain = detection_result.domain
 
     engine = registry.get_domain(domain)
     if engine is None:
         raise RuntimeError(
-            f"Fallback domain '{domain}' is not registered. "
+            f"Detected domain '{domain}' is not registered. "
             "This is a framework configuration error."
         )
 
-    # 🔒 RESET ENGINE STATE (NO LEAKAGE ACROSS RUNS)
+    # 🔒 RESET ENGINE STATE
     if hasattr(engine, "_last_kpis"):
         engine._last_kpis = None
 
@@ -189,14 +167,14 @@ def generate_report_payload(
         # PREPROCESS
         df = engine.preprocess(df)
 
-        # KPIs — SINGLE SOURCE OF TRUTH
+        # KPIs
         kpis = engine.calculate_kpis(df)
         if not isinstance(kpis, dict):
-            raise TypeError("calculate_kpis must return dict")
+            raise TypeError("calculate_kpis must return a dict")
 
         engine._last_kpis = kpis
 
-        # VISUALS — KPI-LOCKED
+        # VISUALS
         try:
             visuals = engine.generate_visuals(
                 df=df,
@@ -259,7 +237,7 @@ def generate_report_payload(
     )[:MAX_EXECUTIVE_VISUALS]
 
     # -------------------------------------------------
-    # 8. BOARD READINESS TREND (NON-BLOCKING)
+    # 8. BOARD READINESS TREND
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -278,7 +256,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 9. FINAL PAYLOAD (DOMAIN-SCOPED, SAFE)
+    # 9. FINAL PAYLOAD
     # -------------------------------------------------
     return {
         domain: {
