@@ -139,82 +139,10 @@ def _eligible_subdomain(
     return all(_has_signal(df, cols.get(col)) for col in required)
 
 # =====================================================
-# STRONG SUB-DOMAIN INTELLIGENCE (CAPABILITY-BASED)
+# UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE (FINAL)
 # =====================================================
-def infer_healthcare_subdomain(semantics: dict) -> dict:
-    """
-    Returns normalized sub-domain confidence scores based on capabilities.
-    Uses resolve_semantics output for clean, deterministic inference.
-    """
-    scores = {
-        "hospital": 0.0,
-        "clinic": 0.0,
-        "diagnostics": 0.0,
-        "pharmacy": 0.0,
-        "public_health": 0.0,
-    }
 
-    # ---------------- HOSPITAL ----------------
-    if semantics.get("has_admission_date"):
-        scores["hospital"] += 0.4
-    if semantics.get("has_discharge_date"):
-        scores["hospital"] += 0.4
-    if semantics.get("has_cost"):
-        scores["hospital"] += 0.2
-
-    # ---------------- CLINIC ----------------
-    if semantics.get("has_duration"):
-        scores["clinic"] += 0.5
-    if semantics.get("has_patient_id"):
-        scores["clinic"] += 0.3
-    if not semantics.get("has_admission_date"):
-        scores["clinic"] += 0.2
-
-    # ---------------- DIAGNOSTICS ----------------
-    if semantics.get("has_duration") and not semantics.get("has_cost"):
-        scores["diagnostics"] += 0.6
-    if semantics.get("has_patient_id"):
-        scores["diagnostics"] += 0.4
-
-    # ---------------- PHARMACY (HARD GATE) ----------------
-    if semantics.get("has_supply"):
-        scores["pharmacy"] = 1.0
-
-    # ---------------- PUBLIC HEALTH (HARD GATE) ----------------
-    if semantics.get("has_population"):
-        scores["public_health"] = 1.0
-
-    # ---------------- NORMALIZATION ----------------
-    max_score = max(scores.values())
-
-    if max_score == 0:
-        return {"unknown": 1.0}
-
-    normalized = {
-        k: round(v / max_score, 2)
-        for k, v in scores.items()
-        if v > 0
-    }
-
-    return normalized
-
-
-def select_primary_subdomain(subdomain_scores: dict) -> str:
-    """
-    Selects ONE primary sub-domain from confidence scores.
-    Returns 'mixed' only if no clear winner.
-    """
-    if not subdomain_scores:
-        return "unknown"
-
-    best, score = max(subdomain_scores.items(), key=lambda x: x[1])
-
-    # If confidence too weak → mixed
-    if score < 0.6:
-        return "mixed"
-
-    return best
-
+def infer_healthcare_subdomains(
     df: pd.DataFrame,
     cols: Dict[str, Optional[str]],
 ) -> Dict[str, float]:
@@ -318,7 +246,7 @@ def select_primary_subdomain(subdomain_scores: dict) -> str:
     # FINAL RESOLUTION
     # -------------------------------
     if not scores:
-        return {HealthcareSubDomain.UNKNOWN.value: 1.0}
+        return {HealthcareSubDomain.MIXED.value: 0.4}
 
     if len(scores) == 1:
         return scores
@@ -368,17 +296,6 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # CANONICAL COLUMN RESOLUTION (AUTHORITATIVE)
         # -------------------------------------------------
-
-                # -------------------------------------------------
-        # CAPABILITY-BASED SUB-DOMAIN INTELLIGENCE
-        # -------------------------------------------------
-        semantics = resolve_semantics(df)
-        
-        subdomain_scores = infer_healthcare_subdomain(semantics)
-        primary_subdomain = select_primary_subdomain(subdomain_scores)
-        
-        self.sub_domain = primary_subdomain
-        self.sub_domain_confidence = subdomain_scores
         self.cols: Dict[str, Optional[str]] = {
             # ---------------- IDENTITY ----------------
             "pid": resolve_column(df, "patient_id"),
@@ -489,9 +406,12 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         inferred = infer_healthcare_subdomains(df, self.cols)
     
-        if not inferred or HealthcareSubDomain.UNKNOWN.value in inferred:
-            active_subs: Dict[str, float] = {}
-            primary_sub = HealthcareSubDomain.UNKNOWN.value
+        if not inferred:
+            active_subs = {}
+            primary_sub = HealthcareSubDomain.MIXED.value
+        elif HealthcareSubDomain.UNKNOWN.value in inferred:
+            active_subs = {}
+            primary_sub = HealthcareSubDomain.MIXED.value
             is_mixed = False
         else:
             ordered = sorted(inferred.items(), key=lambda x: x[1], reverse=True)
@@ -2554,90 +2474,12 @@ class HealthcareDomain(BaseDomain):
         return recommendations[:8]
 
 # =====================================================
-# DETECTOR-LEVEL CANONICAL SIGNALS (LIGHTWEIGHT & FAST)
-# =====================================================
-def _detect_semantic_signals(df: pd.DataFrame) -> Dict[str, bool]:
-    if df is None or df.empty:
-        return {}
-
-    def norm(c: str) -> str:
-        return str(c).lower().replace(" ", "").replace("_", "")
-
-    cols = {norm(c): c for c in df.columns}
-
-    def has_any(aliases, min_coverage=0.25):
-        for a in aliases:
-            a = norm(a)
-            for k, original in cols.items():
-                if a in k:
-                    if df[original].notna().mean() >= min_coverage:
-                        return True
-        return False
-
-    return {
-        # ---------------- IDENTITY ----------------
-        "patient": has_any([
-            "patientid", "patient_mrn", "patntid",
-            "mrn", "pid", "uhid"
-        ]),
-
-        # ---------------- ENCOUNTER / VISIT ----------------
-        "admission": has_any([
-            "admissiondate", "dateofadmission",
-            "visitdate", "apptdat", "appointmentdate"
-        ]),
-
-        "discharge": has_any([
-            "dischargedate"
-        ]),
-
-        # ---------------- DURATION ----------------
-        "los": has_any([
-            "lengthofstay", "los"
-        ]),
-
-        "duration": has_any([
-            "waittime", "waittimemins",
-            "duration", "turnaroundtime"
-        ]),
-
-        # ---------------- CLINICAL ----------------
-        "diagnosis": has_any([
-            "diagnosis", "medicalcondition", "icd"
-        ]),
-
-        # ---------------- OPERATIONS ----------------
-        "facility": has_any([
-            "hospital", "clinic", "clinicloc",
-            "facility", "branch"
-        ]),
-
-        # ---------------- FINANCIAL ----------------
-        "cost": has_any([
-            "billingamount", "billamt",
-            "totalcharges", "cost"
-        ]),
-
-        # ---------------- PHARMACY (HARD GATE) ----------------
-        "pharmacy_time": has_any([
-            "rxfilldate", "filldate"
-        ]),
-        "pharmacy_supply": has_any([
-            "dayssupply", "dispenseddayssupply"
-        ]),
-
-        # ---------------- FLAGS ----------------
-        "flag": has_any([
-            "safetyalert", "alertflag", "readmit", "re-admit"
-        ]),
-    }
-
-# =====================================================
 # HEALTHCARE DOMAIN DETECTOR (ALIAS + COVERAGE AWARE)
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
+    semantics = resolve_semantics(df)
 
     def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
         """
