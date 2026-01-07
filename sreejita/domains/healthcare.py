@@ -249,7 +249,9 @@ def infer_healthcare_subdomains(
     # FINAL RESOLUTION
     # -------------------------------
     if not scores:
-        return {HealthcareSubDomain.MIXED.value: 0.4}
+        # If healthcare domain is confirmed but subdomain is weak,
+        # assume ambulatory care by default
+        return {HealthcareSubDomain.CLINIC.value: 0.55}
 
     if len(scores) == 1:
         return scores
@@ -317,7 +319,12 @@ class HealthcareDomain(BaseDomain):
 
             # ---------------- DURATION ----------------
             "los": resolve_column(df, "length_of_stay"),
-            "duration": resolve_column(df, "duration"),
+            "duration": (
+                resolve_column(df, "duration")
+                or resolve_column(df, "wait_time")
+                or resolve_column(df, "wait_time_minutes")
+                or resolve_column(df, "wait_time_mins")
+            ),
 
             # ---------------- COST ----------------
             "cost": resolve_column(df, "cost"),
@@ -328,7 +335,10 @@ class HealthcareDomain(BaseDomain):
 
             # ---------------- OPERATIONS ----------------
             "facility": resolve_column(df, "facility"),
-            "doctor": resolve_column(df, "doctor"),
+            "doctor": (
+                resolve_column(df, "doctor")
+                or resolve_column(df, "provider")
+            ),
             "admit_type": resolve_column(df, "admission_type"),
             "bed_id": resolve_column(df, "bed_id"),
 
