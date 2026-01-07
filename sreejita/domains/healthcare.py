@@ -48,7 +48,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "los_distribution", "role": "quality", "axis": "distribution"},
         {"key": "bed_turnover", "role": "utilization", "axis": "distribution"},
         {"key": "readmission_risk", "role": "quality", "axis": "distribution"},
-        {"key": "discharge_hour", "role": "flow"},
+        {"key": "discharge_hour", "role": "flow", "axis": "distribution"},
         {"key": "acuity_vs_staffing", "role": "financial", "axis": "correlation"},
         {"key": "facility_mix", "role": "financial", "axis": "composition"},
         {"key": "mortality_trend", "role": "quality", "axis": "time"},
@@ -67,25 +67,24 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     ],
 
     HealthcareSubDomain.DIAGNOSTICS.value: [
-        {"key": "order_volume_trend", "role": "volume"},
-        {"key": "tat_percentiles", "role": "flow"},
-        {"key": "critical_alert_time", "role": "quality"},
-        {"key": "specimen_rejection", "role": "quality"},
-        {"key": "device_downtime", "role": "utilization"},
-        {"key": "order_heatmap", "role": "flow"},
-        {"key": "repeat_scan", "role": "quality"},
-        {"key": "test_revenue_proxy", "role": "financial"},
+        {"key": "order_volume_trend", "role": "volume", "axis": "time"},
+        {"key": "tat_percentiles", "role": "flow", "axis": "distribution"},
+        {"key": "critical_alert_time", "role": "quality", "axis": "time"},
+        {"key": "specimen_rejection", "role": "quality", "axis": "distribution"},
+        {"key": "device_downtime", "role": "utilization", "axis": "distribution"},
+        {"key": "order_heatmap", "role": "flow", "axis": "entity"},
+        {"key": "repeat_scan", "role": "quality", "axis": "distribution"},
+        {"key": "test_revenue_proxy", "role": "financial", "axis": "composition"},
     ],
 
     HealthcareSubDomain.PHARMACY.value: [
-        {"key": "dispense_volume_trend", "role": "volume", "axis": "time"},
-        {"key": "spend_velocity", "role": "financial", "axis": "time"},
-        {"key": "therapeutic_spend", "role": "financial", "axis": "composition"},
-        {"key": "inventory_turn", "role": "utilization", "axis": "distribution"},
-        {"key": "generic_rate", "role": "quality", "axis": "distribution"},
-        {"key": "prescribing_variance", "role": "quality", "axis": "entity"},
-        {"key": "drug_alerts", "role": "experience", "axis": "distribution"},
-        {"key": "refill_gap", "role": "experience", "axis": "distribution"},
+        {"key": "incidence_geo", "role": "volume", "axis": "distribution"},
+        {"key": "cohort_growth", "role": "flow", "axis": "time"},
+        {"key": "prevalence_age", "role": "quality", "axis": "distribution"},
+        {"key": "access_gap", "role": "experience", "axis": "distribution"},
+        {"key": "program_effect", "role": "quality", "axis": "distribution"},
+        {"key": "sdoh_overlay", "role": "experience", "axis": "distribution"},
+        {"key": "immunization_rate", "role": "quality", "axis": "distribution"},
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
@@ -764,6 +763,11 @@ class HealthcareDomain(BaseDomain):
                     )
                 except Exception:
                     continue
+
+        # Ensure at least one non-time visual exists per sub-domain
+        for sub, pool in candidates.items():
+            if not any(v["axis"] != "time" for v in pool):
+                pool[:] = []  # hard fail: better no visuals than misleading ones
     
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE-BALANCED)
@@ -828,8 +832,9 @@ class HealthcareDomain(BaseDomain):
     
         c = self.cols
         time_col = getattr(self, "time_col", None)
-        if time_col is None or time_col not in df.columns:
-            raise ValueError("No valid time column for visual")
+        if axis == "time":
+            if time_col is None or time_col not in df.columns:
+                raise ValueError("Time axis required but missing")
 
         if df is None or len(df) < 10:
             raise ValueError("Insufficient data")
@@ -899,7 +904,7 @@ class HealthcareDomain(BaseDomain):
                 return
     
             if visual_key == "admission_volume_trend":
-                s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
+                s = df[time_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
                 register_visual(fig, "hospital_volume", "Admission volume trend", 0.95, 0.9, sub_domain, role, axis,)
@@ -909,7 +914,7 @@ class HealthcareDomain(BaseDomain):
                 s = df[[time_col, cost_col]].dropna().groupby(df[time_col].dt.to_period("M"))[cost_col].sum()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "hospital_revenue", "Hospital revenue proxy", 0.9, 0.85, sub_domain, role, axis,)
+                register_visual(fig, "hospital_revenue", "Hospital cost trend (proxy)", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "facility_mix":
@@ -929,7 +934,7 @@ class HealthcareDomain(BaseDomain):
             flag_col = c.get("readmitted")
     
             if visual_key == "visit_volume_trend":
-                s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
+                s = df[time_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
                 register_visual(fig, "clinic_visit_volume", "Clinic visit volume trend", 0.95, 0.9, sub_domain, role, axis,)
@@ -955,7 +960,7 @@ class HealthcareDomain(BaseDomain):
                 return
     
             if visual_key == "no_show_by_day":
-                s = df[[time_col, flag_col]].dropna().set_index(time_col)[flag_col].resample("D").mean()
+                s = df[[time_col, flag_col]].dropna().set_index(time_col)[flag_col].resample("M").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
                 register_visual(fig, "clinic_no_show", "No-show rate by day", 0.9, 0.85, sub_domain, role, axis,)
@@ -1007,7 +1012,7 @@ class HealthcareDomain(BaseDomain):
             cost_col = c.get("cost")
     
             if visual_key == "order_volume_trend":
-                s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
+                s = df[time_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
                 register_visual(fig, "diag_volume", "Diagnostic order volume", 0.95, 0.9, sub_domain, role, axis,)
@@ -1072,7 +1077,7 @@ class HealthcareDomain(BaseDomain):
             flag_col = c.get("flag")
     
             if visual_key == "dispense_volume_trend":
-                s = df[fill_col].dropna().dt.to_period("D").value_counts().sort_index()
+                s = df[fill_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
                 register_visual(fig, "pharm_volume", "Prescription volume trend", 0.95, 0.9, sub_domain, role, axis,)
