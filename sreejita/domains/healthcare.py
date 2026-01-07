@@ -2471,13 +2471,68 @@ class HealthcareDomain(BaseDomain):
         return recommendations[:8]
 
 # =====================================================
-# HEALTHCARE DOMAIN DETECTOR (FIXED, OPERATIONALLY SAFE)
+# DETECTOR-LEVEL CANONICAL SIGNALS (LIGHTWEIGHT & FAST)
+# =====================================================
+
+def _detect_semantic_signals(df: pd.DataFrame) -> Dict[str, bool]:
+    """
+    Lightweight semantic detection for DOMAIN DETECTORS ONLY.
+    - Alias-aware
+    - Coverage-aware (cheap)
+    - No dtype inference
+    - No domain leakage
+    """
+
+    if df is None or df.empty:
+        return {}
+
+    def norm(c: str) -> str:
+        return str(c).lower().replace(" ", "").replace("_", "")
+
+    cols = {norm(c): c for c in df.columns}
+
+    def has_any(aliases, min_coverage=0.25):
+        for a in aliases:
+            a = norm(a)
+            for k, original in cols.items():
+                if a in k:
+                    coverage = df[original].notna().mean()
+                    if coverage >= min_coverage:
+                        return True
+        return False
+
+    return {
+        # Identity
+        "patient": has_any(["patientid", "mrn", "pid", "uhid"]),
+
+        # Encounter lifecycle
+        "admission": has_any(["admissiondate", "visitdate", "encounterdate"]),
+        "discharge": has_any(["dischargedate"]),
+        "los": has_any(["lengthofstay", "los"]),
+
+        # Clinical context
+        "diagnosis": has_any(["diagnosis", "icd"]),
+
+        # Operations
+        "facility": has_any(["hospital", "clinic", "facility", "branch"]),
+
+        # Financial / population (supporting only)
+        "cost": has_any(["billingamount", "totalcharges", "cost"]),
+        "population": has_any(["population", "coveredlives"]),
+
+        # Explicit pharmacy (DO NOT SOFTEN)
+        "pharmacy_time": has_any(["rxfilleddate", "filldate"]),
+        "pharmacy_supply": has_any(["dayssupply", "quantitydispensed"]),
+    }
+
+# =====================================================
+# HEALTHCARE DOMAIN DETECTOR (ALIAS + COVERAGE AWARE)
 # =====================================================
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
 
-    def detect(self, df: pd.DataFrame):
+    def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
 
         if df is None or df.empty:
             return DomainDetectionResult(
@@ -2485,82 +2540,39 @@ class HealthcareDomainDetector(BaseDomainDetector):
                 confidence=0.0,
                 signals={},
             )
-        cols = {c.lower() for c in df.columns}
 
-        def has_any(candidates):
-            return any(c in cols for c in candidates)
+        signals = _detect_semantic_signals(df)
 
-        # -------------------------------------------------
-        # PRESENCE SIGNALS (INTENTIONAL, OPERATIONAL)
-        # -------------------------------------------------
-        signals = {
-            # Identity
-            "pid": has_any([
-                "patient_id", "patientid", "mrn", "medical_record_number"
-            ]),
-
-            # Time / lifecycle
-            "admission": has_any([
-                "admission_date", "visit_date", "encounter_date"
-            ]),
-            "discharge": has_any([
-                "discharge_date"
-            ]),
-            "los": has_any([
-                "length_of_stay", "los"
-            ]),
-
-            # Clinical (supporting, NOT mandatory)
-            "diagnosis": has_any([
-                "diagnosis", "icd_code", "primary_diagnosis"
-            ]),
-
-            # Facility context
-            "facility": has_any([
-                "hospital", "facility", "clinic"
-            ]),
-
-            # Financial / population (supporting only)
-            "cost": has_any([
-                "cost", "billing_amount", "total_charges"
-            ]),
-            "population": has_any([
-                "population", "catchment_population"
-            ]),
-        }
+        if not signals:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=0.0,
+                signals={},
+            )
 
         # -------------------------------------------------
-        # 🚑 HARD HEALTHCARE ACTIVATION RULE (IMPROVED)
+        # HEALTHCARE ANCHOR (SOFT, NON-BINARY)
         # -------------------------------------------------
-        # More flexible: Accept partial healthcare signals
-        healthcare_anchor = any([
-            # Core hospital ops (strongest signals)
-            signals["los"],
-            signals["discharge"],
-            # Patient + any clinical signal
-            signals["pid"] and any([signals["admission"], signals["los"], signals["diagnosis"]]),
-            # Admission + facility (operations signal)
-            signals["admission"] and signals["facility"],
-            # Clinical diagnosis alone (sufficient)
-            signals["diagnosis"],
-            # Patient + time, even without los
-            signals["pid"] and signals["admission"],
-            # Cost + admission (financial signals)
-            signals["admission"] and signals["cost"],
+        anchor_score = sum([
+            signals.get("los", False),
+            signals.get("discharge", False),
+            signals.get("diagnosis", False),
+            signals.get("patient", False) and signals.get("admission", False),
+            signals.get("admission", False) and signals.get("facility", False),
         ])
-        
-        if not healthcare_anchor:
+
+        if anchor_score == 0:
             return DomainDetectionResult(
                 domain=None,
                 confidence=0.0,
                 signals=signals,
             )
-            
+
         # -------------------------------------------------
-        # CONFIDENCE SCORING (HONEST, NON-INFLATING)
+        # CONFIDENCE SCORING (ADDITIVE, BOUNDED)
         # -------------------------------------------------
         weights = {
-            "pid": 0.18,
+            "patient": 0.18,
             "admission": 0.16,
             "discharge": 0.14,
             "los": 0.16,
@@ -2570,25 +2582,31 @@ class HealthcareDomainDetector(BaseDomainDetector):
             "population": 0.04,
         }
 
-        # Calculate base confidence
-        base_confidence = sum(weights[k] for k, v in signals.items() if v)
-        
-        # Bonus: if healthcare anchor is strong, boost confidence
-        strong_signal_count = sum([
-            signals["los"],
-            signals["discharge"],
-            signals["diagnosis"],
-            signals["pid"] and signals["admission"],
-        ])
-        
-        if strong_signal_count >= 2:
-            base_confidence = min(0.95, base_confidence + 0.15)  # Boost for strong signals
-        elif strong_signal_count >= 1 and base_confidence > 0.25:
-            base_confidence = min(0.95, base_confidence + 0.10)  # Moderate boost
-        
-        confidence = round(base_confidence, 2)
+        confidence = 0.0
+        for k, w in weights.items():
+            if signals.get(k):
+                confidence += w
 
-        # Absolute safety floor
+        # -------------------------------------------------
+        # STRENGTH BOOST (NO INFLATION)
+        # -------------------------------------------------
+        strong_signals = sum([
+            signals.get("los", False),
+            signals.get("discharge", False),
+            signals.get("diagnosis", False),
+            signals.get("patient", False) and signals.get("admission", False),
+        ])
+
+        if strong_signals >= 2:
+            confidence += 0.12
+        elif strong_signals == 1:
+            confidence += 0.06
+
+        confidence = round(min(0.95, confidence), 2)
+
+        # -------------------------------------------------
+        # SAFETY FLOOR
+        # -------------------------------------------------
         if confidence < 0.35:
             return DomainDetectionResult(
                 domain=None,
