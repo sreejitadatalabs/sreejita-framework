@@ -1,6 +1,12 @@
 """
 Bootstrap v2 — Domain Registration (Authoritative)
 Sreejita Framework v3.6
+
+Purpose:
+- Deterministic domain registration
+- Explicit imports (NO dynamic discovery)
+- Safe for CLI, UI, batch, scheduler
+- Idempotent (can be imported many times)
 """
 
 from typing import Iterable
@@ -11,9 +17,11 @@ from sreejita.domains.registry import registry
 log = logging.getLogger("sreejita.bootstrap")
 
 
-# -------------------------------------------------
+# =====================================================
 # DOMAIN MODULE IMPORTS (EXPLICIT & ORDERED)
-# -------------------------------------------------
+# =====================================================
+# ⚠️ Order matters only for logging readability
+# Registry itself is order-agnostic
 
 from sreejita.domains import (
     retail,
@@ -27,42 +35,61 @@ from sreejita.domains import (
 )
 
 
-# -------------------------------------------------
+# =====================================================
 # SAFE REGISTRATION HELPER
-# -------------------------------------------------
-
+# =====================================================
 def _safe_register(domain_module, registry):
     """
     Register a domain module safely.
 
     Guarantees:
-    - No duplicate registration
-    - Clear logging
-    - Never crashes production
+    - No duplicate domain overwrite
+    - Clear structured logging
+    - NEVER crashes runtime
     """
-    name = getattr(domain_module, "__name__", str(domain_module))
+
+    module_name = getattr(domain_module, "__name__", str(domain_module))
 
     try:
         if not hasattr(domain_module, "register"):
-            raise AttributeError(f"{name} has no register() function")
+            raise AttributeError(
+                f"{module_name} does not expose register(registry)"
+            )
 
+        # Let registry itself guard duplicates
         domain_module.register(registry)
-        log.info(f"✅ Registered domain: {name}")
+
+        log.info("✅ Domain registered: %s", module_name)
+
+    except RuntimeError as e:
+        # Expected case: already registered
+        log.debug(
+            "ℹ️ Domain already registered: %s (%s)",
+            module_name,
+            str(e),
+        )
 
     except Exception as e:
-        # Fail loudly in logs, but do not crash runtime
-        log.error(f"❌ Failed to register domain {name}: {e}", exc_info=True)
+        # Hard failure — log loudly, continue safely
+        log.error(
+            "❌ Domain registration failed: %s | %s",
+            module_name,
+            str(e),
+            exc_info=True,
+        )
 
 
-# -------------------------------------------------
+# =====================================================
 # BOOTSTRAP ENTRYPOINT (IDEMPOTENT)
-# -------------------------------------------------
-
+# =====================================================
 def bootstrap_domains():
     """
-    Bootstrap all domain registrations.
+    Bootstrap all domains.
 
-    Safe to call multiple times.
+    SAFE:
+    - Can be called multiple times
+    - Registry guarantees no duplicates
+    - Never raises
     """
 
     domain_modules: Iterable = [
@@ -80,13 +107,13 @@ def bootstrap_domains():
         _safe_register(module, registry)
 
 
-# -------------------------------------------------
-# AUTO-BOOTSTRAP (SAFE)
-# -------------------------------------------------
-
+# =====================================================
+# AUTO-BOOTSTRAP (CRITICAL)
+# =====================================================
 # Ensures:
 # - CLI works
 # - UI works
-# - Tests work
-# - Multiple imports are safe
+# - Batch works
+# - Scheduler works
+# - Importing multiple times is safe
 bootstrap_domains()
