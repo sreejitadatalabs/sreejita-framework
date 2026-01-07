@@ -117,7 +117,7 @@ def _has_signal(
 
 SUBDOMAIN_REQUIRED_COLUMNS: Dict[str, List[str]] = {
     HealthcareSubDomain.HOSPITAL.value: ["date", "discharge_date", "los"],
-    HealthcareSubDomain.CLINIC.value: ["doctor", "duration"],
+    HealthcareSubDomain.CLINIC.value: ["duration"],
     HealthcareSubDomain.DIAGNOSTICS.value: ["duration", "encounter"],
     HealthcareSubDomain.PHARMACY.value: ["fill_date", "supply"],
     HealthcareSubDomain.PUBLIC_HEALTH.value: ["population"],
@@ -183,12 +183,15 @@ def infer_healthcare_subdomains(
     # -------------------------------
     if _eligible_subdomain(df, cols, HealthcareSubDomain.CLINIC.value):
         signals = sum([
-            int(_has_signal(df, cols.get("doctor"))),
             int(_has_signal(df, cols.get("duration"))),
-            int(_has_signal(df, cols.get("facility"))),
+            int(
+                _has_signal(df, cols.get("doctor"))
+                or _has_signal(df, cols.get("facility"))
+            ),
         ])
+
         scores[HealthcareSubDomain.CLINIC.value] = round(
-            min(0.85, 0.30 + 0.15 * signals), 2
+            min(0.85, 0.40 + 0.20 * signals), 2
         )
 
     # -------------------------------
