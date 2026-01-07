@@ -1,6 +1,5 @@
 """
 Router v2.1 — Universal, Detector-Authoritative, Hint-Aware
-
 Sreejita Framework v3.6.1
 
 RULES:
@@ -9,6 +8,7 @@ RULES:
 - Router RESPECTS detector confidence
 - Router HONORS user hint ONLY if domain exists
 - Router NEVER forces healthcare
+- Router NEVER raises on auto-detect
 """
 
 from typing import Optional
@@ -22,9 +22,9 @@ from sreejita.domains.contracts import DomainDetectionResult
 # GOVERNANCE CONSTANTS
 # =====================================================
 
-MIN_CONFIDENCE_ACCEPT = 0.40     # below this → reject
-HINT_CONFIDENCE = 0.95           # user-selected trust
-FALLBACK_CONFIDENCE = 0.35       # informational only
+MIN_CONFIDENCE_ACCEPT = 0.40     # authoritative acceptance gate
+HINT_CONFIDENCE = 0.95           # explicit user trust
+FALLBACK_CONFIDENCE = 0.35       # informational only (non-blocking)
 
 
 # =====================================================
@@ -43,15 +43,16 @@ def detect_domain(
     Priority order:
     1. User hint (if valid & registered)
     2. Detector-based scoring
-    3. Safe fallback (UNKNOWN)
+    3. Safe fallback (NO domain)
 
     Returns DomainDetectionResult ALWAYS.
+    NEVER raises.
     """
 
     # -------------------------------------------------
     # SAFETY: INVALID INPUT
     # -------------------------------------------------
-    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+    if not isinstance(df, pd.DataFrame) or df.empty:
         return DomainDetectionResult(
             domain=None,
             confidence=0.0,
@@ -61,6 +62,8 @@ def detect_domain(
     # -------------------------------------------------
     # STEP 1: USER DOMAIN HINT (TRUSTED BUT VERIFIED)
     # -------------------------------------------------
+    hint_signal = {}
+
     if isinstance(domain_hint, str) and domain_hint.strip():
         hint = domain_hint.strip().lower()
 
@@ -71,13 +74,11 @@ def detect_domain(
                 signals={"user_hint": hint},
             )
         else:
-            # Invalid hint — record but do NOT force
+            # Invalid hint — recorded, never forced
             hint_signal = {"invalid_user_hint": hint}
-    else:
-        hint_signal = {}
 
     # -------------------------------------------------
-    # STEP 2: DETECTOR-BASED RESOLUTION (PRIMARY PATH)
+    # STEP 2: DETECTOR-BASED RESOLUTION
     # -------------------------------------------------
     best: Optional[DomainDetectionResult] = None
 
@@ -92,24 +93,29 @@ def detect_domain(
             if not isinstance(result, DomainDetectionResult):
                 continue
 
-            # Normalize engine ownership (router only)
+            # Router owns engine lifecycle — strip defensively
             result.engine = None
 
             if best is None or result.confidence > best.confidence:
                 best = result
 
         except Exception:
-            # Detectors must never crash router
+            # Detector failure must NEVER break routing
             continue
 
     # -------------------------------------------------
     # STEP 3: CONFIDENCE GOVERNANCE
     # -------------------------------------------------
-    if best and best.domain and best.confidence >= MIN_CONFIDENCE_ACCEPT:
+    if (
+        best
+        and isinstance(best.domain, str)
+        and best.domain
+        and best.confidence >= MIN_CONFIDENCE_ACCEPT
+    ):
         return best
 
     if strict:
-        # Strict mode → reject weak detections
+        # Strict mode → explicit rejection
         return DomainDetectionResult(
             domain=None,
             confidence=best.confidence if best else 0.0,
@@ -140,17 +146,26 @@ def detect_domain(
 # LEGACY HELPER — PREPROCESS ONLY (SAFE)
 # =====================================================
 
-def apply_domain(df: pd.DataFrame, *, domain_hint: Optional[str] = None) -> pd.DataFrame:
+def apply_domain(
+    df: pd.DataFrame,
+    *,
+    domain_hint: Optional[str] = None,
+) -> pd.DataFrame:
     """
     Applies domain preprocessing ONLY if detection is confident.
 
-    NEVER forces domain logic.
-    NEVER crashes pipeline.
+    - NEVER forces a domain
+    - NEVER raises
+    - NEVER mutates original df
     """
 
     result = detect_domain(df, domain_hint=domain_hint)
 
-    if not result or not result.domain or result.confidence < MIN_CONFIDENCE_ACCEPT:
+    if (
+        not result
+        or not result.domain
+        or result.confidence < MIN_CONFIDENCE_ACCEPT
+    ):
         return df
 
     domain = registry.get_domain(result.domain)
