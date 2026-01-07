@@ -890,7 +890,7 @@ class HealthcareDomain(BaseDomain):
                 register_visual(fig, "hospital_revenue", "Hospital revenue proxy", 0.9, 0.85, sub_domain, role)
                 return
     
-            if visual_key == ""facility_mix":
+            if visual_key == "facility_mix":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="pie", ax=ax)
                 register_visual(fig, "hospital_facility_mix", "facility mix proxy", 0.8, 0.7, sub_domain, role)
