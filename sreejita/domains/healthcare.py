@@ -52,7 +52,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "mortality_trend", "role": "quality"},
         {"key": "hospital_revenue_proxy", "role": "financial"},
         {"key": "admission_volume_trend", "role": "volume"},
-        {"key": ""facility_mix", "role": "financial"},
+        {"key": "facility_mix", "role": "financial"},
     ],
 
     HealthcareSubDomain.CLINIC.value: [
