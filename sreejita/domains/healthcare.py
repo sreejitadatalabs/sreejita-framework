@@ -205,16 +205,30 @@ def infer_healthcare_subdomains(
         )
 
     # -------------------------------
-    # PHARMACY (STRICT)
+    # PHARMACY (STRICT — HARD GATED)
     # -------------------------------
     if _eligible_subdomain(df, cols, HealthcareSubDomain.PHARMACY.value):
-        signals = sum([
-            int(_has_signal(df, cols.get("fill_date"))),
-            int(_has_signal(df, cols.get("supply"))),
-        ])
-        scores[HealthcareSubDomain.PHARMACY.value] = round(
-            min(0.80, 0.35 + 0.20 * signals), 2
-        )
+    
+        # 🚫 HARD PHARMACY GATE (NON-NEGOTIABLE)
+        if not (
+            cols.get("fill_date")
+            and cols.get("supply")
+            and cols.get("cost")
+            and cols.get("fill_date") in df.columns
+            and cols.get("supply") in df.columns
+            and cols.get("cost") in df.columns
+        ):
+            pass  # 🚫 DO NOT ACTIVATE PHARMACY
+        else:
+            signals = sum([
+                int(_has_signal(df, cols.get("fill_date"))),
+                int(_has_signal(df, cols.get("supply"))),
+                int(_has_signal(df, cols.get("cost"))),
+            ])
+    
+            scores[HealthcareSubDomain.PHARMACY.value] = round(
+                min(0.80, 0.35 + 0.15 * signals), 2
+            )
 
     # -------------------------------
     # PUBLIC HEALTH
@@ -457,7 +471,7 @@ class HealthcareDomain(BaseDomain):
         # STEP 3: KPI COMPUTATION (SUB-DOMAIN HARD LOCKED)
         # -------------------------------------------------
         for sub, sub_conf in active_subs.items():
-            prefix = f"{sub}_" if is_mixed else ""
+            prefix = f"{sub}_"
     
             # ---------------- HOSPITAL ----------------
             if sub == HealthcareSubDomain.HOSPITAL.value:
@@ -545,12 +559,47 @@ class HealthcareDomain(BaseDomain):
                 if pop and cases_rate is not None:
                     kpis[f"{prefix}incidence_per_100k"] = min(cases_rate * 100_000, 100_000)
 
-        kpis["_confidence"] = {
-            k: round(min(0.85, v), 2)
-            for k, v in kpis.items()
-            if isinstance(v, (int, float)) and not k.startswith("_")
-        }
+        kpis["_confidence"] = {}
 
+        for k, v in kpis.items():
+            if not isinstance(v, (int, float)):
+                continue
+            if k.startswith("_"):
+                continue
+        
+            # Base confidence by data availability
+            base = 0.6
+        
+            # Penalize small samples
+            if volume < MIN_SAMPLE_SIZE:
+                base -= 0.15
+        
+            # Penalize derived KPIs
+            if "derived" in k or "proxy" in k:
+                base -= 0.1
+        
+            # Bound confidence
+            kpis["_confidence"][k] = round(
+                max(0.35, min(0.85, base)),
+                2,
+            )
+
+        kpis["_kpi_capabilities"] = {
+            "avg_los": "time_flow",
+            "long_stay_rate": "quality",
+            "readmission_rate": "quality",
+            "mortality_rate": "quality",
+            "avg_wait_time": "time_flow",
+            "avg_tat": "time_flow",
+            "cost_per_rx": "cost",
+            "incidence_per_100k": "quality",
+            "record_count": "volume",
+        }
+        
+        kpis["_domain_kpi_map"] = {
+            sub: [k for k in kpis if k.startswith(f"{sub}_")]
+            for sub in active_subs
+        }
         # -------------------------------------------------
         # STEP 4: CACHE + RETURN
         # -------------------------------------------------
@@ -688,7 +737,7 @@ class HealthcareDomain(BaseDomain):
                 reverse=True,
             )
     
-            published.extend(pool[:6])  # 🔒 HARD CAP
+            published.extend(pool[:3])  # 🔒 HARD CAP
     
         return published
 
@@ -2073,6 +2122,9 @@ class HealthcareDomain(BaseDomain):
             # STRENGTHS
             # -------------------------------
             if sub == HOSP:
+                if score < 0.6:
+                    continue
+                    
                 avg_los = self.get_kpi(kpis, sub, "avg_los")
                 if isinstance(avg_los, (int, float)):
                     sub_insights.append({
@@ -2091,6 +2143,9 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == CLIN:
+                if score < 0.6:
+                    continue
+                    
                 wait = self.get_kpi(kpis, sub, "avg_wait_time")
                 if isinstance(wait, (int, float)):
                     sub_insights.append({
@@ -2109,6 +2164,9 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == DIAG:
+                if score < 0.6:
+                    continue
+                    
                 tat = self.get_kpi(kpis, sub, "avg_tat")
                 if isinstance(tat, (int, float)):
                     sub_insights.append({
@@ -2127,6 +2185,9 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == PHAR:
+                if score < 0.6:
+                    continue
+                    
                 cost = self.get_kpi(kpis, sub, "cost_per_rx")
                 if isinstance(cost, (int, float)):
                     sub_insights.append({
@@ -2144,6 +2205,9 @@ class HealthcareDomain(BaseDomain):
                     })
     
             if sub == PUBH:
+                if score < 0.6:
+                    continue
+                    
                 inc = self.get_kpi(kpis, sub, "incidence_per_100k")
                 if isinstance(inc, (int, float)):
                     sub_insights.append({
