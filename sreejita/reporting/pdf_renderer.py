@@ -36,6 +36,9 @@ def _safe_float(v, default=0.0):
 
 
 def format_value(v: Any) -> str:
+    """
+    Executive-safe numeric formatting.
+    """
     if v is None:
         return "—"
     try:
@@ -53,6 +56,7 @@ def format_value(v: Any) -> str:
 
 
 def confidence_badge(conf: float) -> str:
+    conf = _safe_float(conf)
     if conf >= 0.85:
         return "High"
     if conf >= 0.70:
@@ -70,9 +74,9 @@ class ExecutivePDFRenderer:
 
     GUARANTEES:
     - Never computes intelligence
-    - Never assumes domain shape
-    - Never crashes on weak data
-    - Board / CXO safe output
+    - Never assumes domain structure
+    - Never crashes on weak / partial data
+    - Board & CXO safe
     """
 
     BORDER = HexColor("#e5e7eb")
@@ -139,7 +143,7 @@ class ExecutivePDFRenderer:
         raw_kpis = payload.get("kpis") or {}
 
         # -------------------------------------------------
-        # NORMALIZE INSIGHTS
+        # NORMALIZE INSIGHTS (LIST ONLY)
         # -------------------------------------------------
         insights: List[Dict[str, Any]] = []
 
