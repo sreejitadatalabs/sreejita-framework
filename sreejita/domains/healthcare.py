@@ -680,7 +680,7 @@ class HealthcareDomain(BaseDomain):
             axis: str,
         ):
 
-            fname = f"{sub_domain}_{visual_key}_{role}.png"
+            fname = f"{sub_domain}__{visual_key}__{role}__{axis}.png"
             path = output_dir / fname
     
             fig.savefig(path, dpi=120, bbox_inches="tight")
@@ -712,24 +712,25 @@ class HealthcareDomain(BaseDomain):
 
         def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
             DRIVER_MAP = {
-                # TIME DRIVERS
-                "admission_volume_trend": cols.get("date"),
-                "avg_los_trend": cols.get("los"),
-                "dispense_volume_trend": cols.get("fill_date"),
-                "spend_velocity": f"{cols.get('fill_date')}_cost",
-                "visit_volume_trend": cols.get("date"),
+                # ---- TIME DRIVERS ----
+                "admission_volume_trend": f"time:{cols.get('date')}",
+                "avg_los_trend": f"time:{cols.get('los')}",
+                "dispense_volume_trend": f"time:{cols.get('fill_date')}",
+                "spend_velocity": f"time:{cols.get('fill_date')}_cost",
+                "visit_volume_trend": f"time:{cols.get('date')}",
         
-                # DISTRIBUTIONS
-                "los_distribution": cols.get("los"),
-                "wait_time_split": cols.get("duration"),
-                "inventory_turn": cols.get("supply"),
+                # ---- DISTRIBUTION DRIVERS ----
+                "los_distribution": f"dist:{cols.get('los')}",
+                "wait_time_split": f"dist:{cols.get('duration')}",
+                "inventory_turn": f"dist:{cols.get('supply')}",
         
-                # COMPOSITION
-                "facility_mix": cols.get("facility"),
-                "therapeutic_spend": cols.get("facility"),
+                # ---- COMPOSITION DRIVERS ----
+                "facility_mix": f"comp:{cols.get('facility')}",
+                "therapeutic_spend": f"comp:{cols.get('facility')}",
+                "telehealth_mix": f"comp:{cols.get('admit_type')}",
             }
         
-            return f"{axis}:{DRIVER_MAP.get(visual_key, visual_key)}"
+            return DRIVER_MAP.get(visual_key, f"{axis}:{visual_key}")
         # -------------------------------------------------
         # VISUAL DISPATCH
         # -------------------------------------------------
@@ -809,36 +810,52 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE + DRIVER BALANCED)
         # -------------------------------------------------
-        ROLE_PRIORITY = ["volume", "flow", "quality", "financial", "utilization", "experience"]
+        ROLE_PRIORITY = [
+            "volume", "flow", "quality", "financial", "utilization", "experience"
+        ]
         
         for sub, pool in candidates.items():
         
-            # --- DRIVER DEDUP (prevent same story twice) ---
+            # ---------- DRIVER DEDUP ----------
             used_drivers = set()
             deduped_pool = []
-            
+        
             for v in sorted(pool, key=lambda x: -x["importance"]):
                 sig = driver_signature(v["visual_key"], v["axis"], self.cols)
                 if sig not in used_drivers:
                     used_drivers.add(sig)
                     deduped_pool.append(v)
-
-            # --- ROLE BALANCED SELECTION ---
+        
+            # ---------- AXIS BALANCE ----------
+            axis_groups = {}
+            for v in deduped_pool:
+                axis_groups.setdefault(v["axis"], []).append(v)
+        
+            # Enforce narrative minimum
+            if "time" not in axis_groups:
+                continue
+        
+            if len(axis_groups) == 1 and "time" in axis_groups:
+                continue  # 🚫 reject time-only story
+        
             selected = []
             used_roles = set()
         
+            # Prefer diversity over importance
             for role in ROLE_PRIORITY:
-                role_candidates = [
-                    v for v in deduped_pool
-                    if v["role"] == role and v["confidence"] >= 0.4
-                ]
-                if role_candidates:
-                    best = max(
-                        role_candidates,
-                        key=lambda v: v["importance"] * v["confidence"]
-                    )
-                    selected.append(best)
-                    used_roles.add(role)
+                for axis in ("time", "distribution", "composition", "entity"):
+                    candidates_axis = [
+                        v for v in axis_groups.get(axis, [])
+                        if v["role"] == role and v["confidence"] >= 0.4
+                    ]
+                    if candidates_axis:
+                        best = max(
+                            candidates_axis,
+                            key=lambda v: v["importance"] * v["confidence"]
+                        )
+                        selected.append(best)
+                        used_roles.add(role)
+                        break
         
             published.extend(selected[:6])
         
