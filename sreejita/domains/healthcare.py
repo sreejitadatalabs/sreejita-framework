@@ -123,20 +123,17 @@ SUBDOMAIN_REQUIRED_COLUMNS: Dict[str, List[str]] = {
     HealthcareSubDomain.PUBLIC_HEALTH.value: ["population"],
 }
 
-def _eligible_subdomain(
-    df: pd.DataFrame,
-    cols: Dict[str, Optional[str]],
-    sub: str,
-) -> bool:
-    """
-    A sub-domain is eligible ONLY if ALL required
-    columns exist and have signal.
-    """
+def _eligible_subdomain(df, cols, sub):
     required = SUBDOMAIN_REQUIRED_COLUMNS.get(sub, [])
     if not required:
         return False
 
-    return all(_has_signal(df, cols.get(col)) for col in required)
+    for col in required:
+        min_cov = 0.15 if sub == HealthcareSubDomain.CLINIC.value else 0.3
+        if not _has_signal(df, cols.get(col), min_coverage=min_cov):
+            return False
+
+    return True
 
 # =====================================================
 # UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE (FINAL)
@@ -245,6 +242,9 @@ def infer_healthcare_subdomains(
             min(0.90, 0.40 + 0.20 * signals), 2
         )
 
+    if HealthcareSubDomain.CLINIC.value in scores and scores[HealthcareSubDomain.CLINIC.value] >= 0.6:
+        return {HealthcareSubDomain.CLINIC.value: scores[HealthcareSubDomain.CLINIC.value]}
+
     # -------------------------------
     # FINAL RESOLUTION
     # -------------------------------
@@ -307,7 +307,11 @@ class HealthcareDomain(BaseDomain):
             "encounter": resolve_column(df, "encounter"),
 
             # ---------------- TIME ----------------
-            "date": resolve_column(df, "admission_date"),
+            "date": (
+                resolve_column(df, "admission_date")
+                or resolve_column(df, "appointment_date")
+                or resolve_column(df, "visit_date")
+            ),
             "discharge_date": resolve_column(df, "discharge_date"),
             "fill_date": resolve_column(df, "fill_date"),
 
