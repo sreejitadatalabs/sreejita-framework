@@ -1,6 +1,6 @@
 # =====================================================
 # ORCHESTRATOR — UNIVERSAL (AUTHORITATIVE, LOCKED)
-# Sreejita Framework v3.6 STABILIZED
+# Sreejita Framework v3.6.1 STABILIZED
 # =====================================================
 
 import logging
@@ -11,12 +11,22 @@ from typing import Dict, Any, List, Optional
 import pandas as pd
 
 from sreejita.domains.router_v2 import detect_domain
+from sreejita.domains.registry import registry
 
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 from sreejita.core.fingerprint import dataframe_fingerprint
 
 log = logging.getLogger("sreejita.orchestrator")
+
+
+# =====================================================
+# GOVERNANCE CONSTANTS
+# =====================================================
+
+MIN_DOMAIN_CONFIDENCE = 0.40   # 🚨 hard gate
+MAX_EXECUTIVE_VISUALS = 6
+
 
 # =====================================================
 # SAFE FILE LOADER (NEVER CRASH)
@@ -39,8 +49,9 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
 
     raise RuntimeError(f"Unsupported file type: {path.suffix}")
 
+
 # =====================================================
-# BOARD READINESS HISTORY (SAFE)
+# BOARD READINESS HISTORY (SAFE, NON-BLOCKING)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -72,6 +83,7 @@ def _trend(prev: Optional[int], curr: Optional[int]) -> str:
         return "↓"
     return "→"
 
+
 # =====================================================
 # CANONICAL ENTRY POINT (ONLY ENTRY)
 # =====================================================
@@ -80,7 +92,19 @@ def generate_report_payload(
     input_path: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """
+    Universal report payload generator.
 
+    GUARANTEES:
+    - Domain is confidence-gated
+    - KPIs precede visuals
+    - Visuals are evidence-backed
+    - Executive output is board-safe
+    """
+
+    # -------------------------------------------------
+    # 0. INPUT VALIDATION
+    # -------------------------------------------------
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(input_path)
@@ -99,32 +123,38 @@ def generate_report_payload(
     dataset_key = dataframe_fingerprint(df)
 
     # -------------------------------------------------
-    # 2. DATASET SHAPE (CONTEXT ONLY — NEVER DRIVES LOGIC)
+    # 2. DATASET SHAPE (CONTEXT ONLY)
     # -------------------------------------------------
     shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
-    # 3. DOMAIN DECISION (ENGINE ALWAYS ATTACHED)
+    # 3. DOMAIN DECISION (CONFIDENCE-GATED)
     # -------------------------------------------------
-    # Extract domain hint from config
     domain_hint = config.get("domain_hint")
-    
-    # Detect domain with hint
-    detection_result = detect_domain(df, domain_hint=domain_hint, strict=False)
-    
-    # Get domain from result
-    domain = detection_result.domain
-    
-    # Get engine from registry
-    from sreejita.domains.registry import registry
+
+    detection = detect_domain(
+        df,
+        domain_hint=domain_hint,
+        strict=False,
+    )
+
+    if (
+        detection is None
+        or not detection.domain
+        or detection.confidence < MIN_DOMAIN_CONFIDENCE
+    ):
+        raise RuntimeError(
+            f"No confident domain detected "
+            f"(confidence={getattr(detection, 'confidence', 0.0)})"
+        )
+
+    domain = detection.domain
+
     engine = registry.get_domain(domain)
     if engine is None:
-        raise RuntimeError(f"Domain '{domain}' not found in registry")
+        raise RuntimeError(f"Resolved domain '{domain}' is not registered")
 
-    if engine is None or not isinstance(domain, str):
-        raise RuntimeError("Domain resolution failed")
-
-    # 🔒 CRITICAL: RESET DOMAIN STATE (NO LEAKAGE)
+    # 🔒 CRITICAL: RESET DOMAIN STATE (NO LEAKAGE ACROSS RUNS)
     if hasattr(engine, "_last_kpis"):
         engine._last_kpis = None
 
@@ -132,14 +162,17 @@ def generate_report_payload(
     # 4. DOMAIN EXECUTION (STRICT ORDER — NEVER CHANGE)
     # -------------------------------------------------
     try:
-        # PREPROCESS (COPY SAFE)
+        # PREPROCESS (COPY-SAFE)
         df = engine.preprocess(df)
 
         # KPIs — SINGLE SOURCE OF TRUTH
         kpis = engine.calculate_kpis(df)
+        if not isinstance(kpis, dict):
+            raise TypeError("calculate_kpis must return dict")
+
         engine._last_kpis = kpis
 
-        # VISUALS — MUST COME AFTER KPIs
+        # VISUALS — KPI-LOCKED
         try:
             visuals = engine.generate_visuals(
                 df=df,
@@ -148,14 +181,14 @@ def generate_report_payload(
         except Exception:
             visuals = []
 
-        # INSIGHTS — KPI BOUND
+        # INSIGHTS — KPI-BOUND
         insights = engine.generate_insights(df, kpis)
 
-        # RECOMMENDATIONS — INSIGHT BOUND
+        # RECOMMENDATIONS — INSIGHT-BOUND
         raw_recs = engine.generate_recommendations(df, kpis, insights)
         recommendations = enrich_recommendations(raw_recs)
 
-        # EXECUTIVE COGNITION — LAST
+        # EXECUTIVE COGNITION — FINAL
         executive = engine.build_executive(
             kpis=kpis,
             insights=insights,
@@ -176,7 +209,7 @@ def generate_report_payload(
     for v in visuals:
         try:
             path = Path(v.get("path", ""))
-            conf = float(v.get("confidence", 0))
+            conf = float(v.get("confidence", 0.0))
             if path.exists() and conf >= 0.30:
                 valid_visuals.append(v)
         except Exception:
@@ -192,13 +225,14 @@ def generate_report_payload(
     )
 
     # -------------------------------------------------
-    # 7. EXECUTIVE SAFE SELECTION (MAX 6)
+    # 7. EXECUTIVE VISUAL SELECTION (MAX 6)
     # -------------------------------------------------
     valid_visuals = sorted(
         valid_visuals,
-        key=lambda v: float(v.get("importance", 0)) * float(v.get("confidence", 1)),
+        key=lambda v: float(v.get("importance", 0.0))
+        * float(v.get("confidence", 1.0)),
         reverse=True,
-    )[:6]
+    )[:MAX_EXECUTIVE_VISUALS]
 
     # -------------------------------------------------
     # 8. BOARD READINESS TREND (NON-BLOCKING)
@@ -220,7 +254,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 9. FINAL PAYLOAD (STRICT CONTRACT)
+    # 9. FINAL PAYLOAD (STRICT, DOMAIN-SCOPED)
     # -------------------------------------------------
     return {
         domain: {
