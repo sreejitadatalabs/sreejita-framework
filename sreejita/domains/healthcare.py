@@ -43,29 +43,27 @@ class HealthcareSubDomain(str, Enum):
 
 HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     HealthcareSubDomain.HOSPITAL.value: [
-        {"key": "avg_los_trend", "role": "flow"},
-        {"key": "bed_turnover", "role": "utilization"},
-        {"key": "readmission_risk", "role": "quality"},
+        {"key": "admission_volume_trend", "role": "volume", "axis": "time"},
+        {"key": "avg_los_trend", "role": "flow", "axis": "time"},
+        {"key": "los_distribution", "role": "quality", "axis": "distribution"},
+        {"key": "bed_turnover", "role": "utilization", "axis": "distribution"},
+        {"key": "readmission_risk", "role": "quality", "axis": "distribution"},
         {"key": "discharge_hour", "role": "flow"},
-        {"key": "acuity_vs_staffing", "role": "utilization"},
-        {"key": "ed_boarding", "role": "experience"},
-        {"key": "mortality_trend", "role": "quality"},
-        {"key": "hospital_revenue_proxy", "role": "financial"},
-        {"key": "admission_volume_trend", "role": "volume"},
-        {"key": "facility_mix", "role": "financial"},
+        {"key": "acuity_vs_staffing", "role": "financial", "axis": "correlation"},
+        {"key": "facility_mix", "role": "financial", "axis": "composition"},
+        {"key": "mortality_trend", "role": "quality", "axis": "time"},
+        {"key": "ed_boarding", "role": "experience", "axis": "time"},
     ],
 
     HealthcareSubDomain.CLINIC.value: [
-        {"key": "visit_volume_trend", "role": "volume"},
-        {"key": "wait_time_split", "role": "flow"},
-        {"key": "appointment_lag", "role": "flow"},
-        {"key": "provider_utilization", "role": "utilization"},
-        {"key": "no_show_by_day", "role": "experience"},
-        {"key": "care_gap_proxy", "role": "quality"},
-        {"key": "clinic_revenue_proxy", "role": "financial"},
-        {"key": "demographic_reach", "role": "experience"},
-        {"key": "referral_funnel", "role": "flow"},
-        {"key": "telehealth_mix", "role": "experience"},
+        {"key": "visit_volume_trend", "role": "volume", "axis": "time"},
+        {"key": "wait_time_split", "role": "flow", "axis": "distribution"},
+        {"key": "appointment_lag", "role": "flow", "axis": "distribution"},
+        {"key": "provider_utilization", "role": "utilization", "axis": "entity"},
+        {"key": "no_show_by_day", "role": "experience", "axis": "time"},
+        {"key": "clinic_revenue_proxy", "role": "financial", "axis": "time"},
+        {"key": "care_gap_proxy", "role": "quality", "axis": "distribution"},
+        {"key": "telehealth_mix", "role": "experience", "axis": "composition"},
     ],
 
     HealthcareSubDomain.DIAGNOSTICS.value: [
@@ -80,14 +78,14 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     ],
 
     HealthcareSubDomain.PHARMACY.value: [
-        {"key": "dispense_volume_trend", "role": "volume"},
-        {"key": "spend_velocity", "role": "financial"},
-        {"key": "therapeutic_spend", "role": "financial"},
-        {"key": "generic_rate", "role": "quality"},
-        {"key": "prescribing_variance", "role": "quality"},
-        {"key": "inventory_turn", "role": "utilization"},
-        {"key": "drug_alerts", "role": "experience"},
-        {"key": "refill_gap", "role": "experience"},
+        {"key": "dispense_volume_trend", "role": "volume", "axis": "time"},
+        {"key": "spend_velocity", "role": "financial", "axis": "time"},
+        {"key": "therapeutic_spend", "role": "financial", "axis": "composition"},
+        {"key": "inventory_turn", "role": "utilization", "axis": "distribution"},
+        {"key": "generic_rate", "role": "quality", "axis": "distribution"},
+        {"key": "prescribing_variance", "role": "quality", "axis": "entity"},
+        {"key": "drug_alerts", "role": "experience", "axis": "distribution"},
+        {"key": "refill_gap", "role": "experience", "axis": "distribution"},
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
@@ -680,7 +678,9 @@ class HealthcareDomain(BaseDomain):
             base_confidence: float,
             sub_domain: str,
             role: str,
+            axis: str,
         ):
+
             fname = f"{sub_domain}_{visual_key}_{role}.png"
             path = output_dir / fname
     
@@ -698,8 +698,10 @@ class HealthcareDomain(BaseDomain):
                 return  # 🚫 hard dedup
     
             candidates.setdefault(sub_domain, []).append({
-                "visual_id": visual_id,
+                "visual_id": f"{sub_domain}:{visual_key}:{role}",
                 "visual_key": visual_key,
+                "axis": axis,
+                "role": role,
                 "path": str(path),
                 "caption": caption,
                 "importance": float(importance),
@@ -707,14 +709,8 @@ class HealthcareDomain(BaseDomain):
                     min(0.95, base_confidence * sub_domain_weight(sub_domain)), 2
                 ),
                 "sub_domain": sub_domain,
-                "role": role,
-                "inference_type": (
-                    "derived" if "trend" in caption.lower()
-                    else "proxy" if "proxy" in caption.lower()
-                    else "direct"
-                ),
             })
-    
+
         # -------------------------------------------------
         # VISUAL DISPATCH
         # -------------------------------------------------
@@ -750,6 +746,7 @@ class HealthcareDomain(BaseDomain):
             for visual_def in visual_defs:
                 visual_key = visual_def["key"]
                 role = visual_def["role"]
+                axis = visual_def["axis"]
     
                 if visual_key in rendered_keys:
                     continue
@@ -759,6 +756,7 @@ class HealthcareDomain(BaseDomain):
                     self._render_visual_by_key(
                         visual_key=visual_key,
                         role=role,
+                        axis=axis,
                         df=df,
                         output_dir=output_dir,
                         sub_domain=sub,
@@ -770,50 +768,43 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE-BALANCED)
         # -------------------------------------------------
-        ROLE_ORDER = [
-            "volume",
-            "flow",
-            "utilization",
-            "quality",
-            "financial",
-            "experience",
-        ]
-    
+        MAX_AXIS_PER_SUB = {
+            "time": 2,
+            "distribution": 2,
+            "entity": 1,
+            "correlation": 1,
+            "composition": 1,
+        }
+        
         for sub, pool in candidates.items():
+        
             pool = [
                 v for v in pool
                 if Path(v["path"]).exists() and v["confidence"] >= 0.35
             ]
-    
-            selected: List[Dict[str, Any]] = []
-            used_roles = set()
-    
-            for role in ROLE_ORDER:
-                role_candidates = [
-                    v for v in pool
-                    if v["role"] == role and role not in used_roles
-                ]
-                if role_candidates:
-                    best = max(
-                        role_candidates,
-                        key=lambda v: v["importance"] * v["confidence"],
-                    )
-                    selected.append(best)
-                    used_roles.add(role)
-    
-            # 🔒 Dedup by (sub_domain, role)
-            seen = {
-                (v["sub_domain"], v["role"])
-                for v in published
-            }
-    
-            for v in selected:
-                key = (v["sub_domain"], v["role"])
-                if key not in seen:
-                    published.append(v)
-                    seen.add(key)
-    
-        return published
+        
+            pool.sort(
+                key=lambda v: v["importance"] * v["confidence"],
+                reverse=True
+            )
+        
+            selected = []
+            axis_count = {}
+        
+            for v in pool:
+                axis = v["axis"]
+                limit = MAX_AXIS_PER_SUB.get(axis, 1)
+        
+                if axis_count.get(axis, 0) >= limit:
+                    continue
+        
+                selected.append(v)
+                axis_count[axis] = axis_count.get(axis, 0) + 1
+        
+                if len(selected) == 6:
+                    break
+        
+            published.extend(selected)
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
@@ -822,11 +813,13 @@ class HealthcareDomain(BaseDomain):
         self,
         visual_key: str,
         role: str,
+        axis: str,
         df: pd.DataFrame,
         output_dir: Path,
         sub_domain: str,
         register_visual,
     ):
+
         """
         Concrete visual implementations.
         One visual_key = one visual.
@@ -860,69 +853,69 @@ class HealthcareDomain(BaseDomain):
                 s = df[[time_col, los_col]].dropna().set_index(time_col)[los_col].resample("M").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "hospital_avg_los_trend", "Average LOS trend", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "hospital_avg_los_trend", "Average LOS trend", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "bed_turnover":
                 counts = df[bed_col].dropna().value_counts()
                 fig, ax = plt.subplots()
                 counts.plot(kind="hist", bins=20, ax=ax)
-                register_visual(fig, "hospital_bed_turnover", "Bed turnover distribution", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "hospital_bed_turnover", "Bed turnover distribution", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "readmission_risk":
                 rates = df[c.get("readmitted")].dropna().value_counts(normalize=True)
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
-                register_visual(fig, "hospital_readmission", "Readmission risk", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "hospital_readmission", "Readmission risk", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "discharge_hour":
                 hours = df[discharge_col].dt.hour.dropna()
                 fig, ax = plt.subplots()
                 hours.value_counts().sort_index().plot(kind="bar", ax=ax)
-                register_visual(fig, "hospital_discharge_hour", "Discharge hour distribution", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "hospital_discharge_hour", "Discharge hour distribution", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "acuity_vs_staffing":
                 tmp = df[[los_col, cost_col]].dropna()
                 fig, ax = plt.subplots()
                 ax.scatter(tmp[los_col], tmp[cost_col], alpha=0.3)
-                register_visual(fig, "hospital_acuity_staffing", "Acuity vs staffing proxy", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "hospital_acuity_staffing", "Acuity vs staffing proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "ed_boarding":
                 s = df[[admit_col, dur_col]].dropna().set_index(admit_col)[dur_col].resample("M").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "hospital_ed_boarding", "ED boarding time trend", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "hospital_ed_boarding", "ED boarding time trend", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "mortality_trend":
                 s = df[[admit_col, flag_col]].dropna().set_index(admit_col)[flag_col].resample("M").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "hospital_mortality", "Mortality proxy trend", 0.9, 0.8, sub_domain, role)
+                register_visual(fig, "hospital_mortality", "Mortality proxy trend", 0.9, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "admission_volume_trend":
                 s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "hospital_volume", "Admission volume trend", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "hospital_volume", "Admission volume trend", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "hospital_revenue_proxy":
                 s = df[[time_col, cost_col]].dropna().groupby(df[time_col].dt.to_period("M"))[cost_col].sum()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "hospital_revenue", "Hospital revenue proxy", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "hospital_revenue", "Hospital revenue proxy", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "facility_mix":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="pie", ax=ax)
-                register_visual(fig, "hospital_facility_mix", "facility mix proxy", 0.8, 0.7, sub_domain, role)
+                register_visual(fig, "hospital_facility_mix", "facility mix proxy", 0.8, 0.7, sub_domain, role, axis,)
                 return
     
         # =================================================
@@ -939,65 +932,65 @@ class HealthcareDomain(BaseDomain):
                 s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "clinic_visit_volume", "Clinic visit volume trend", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "clinic_visit_volume", "Clinic visit volume trend", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "wait_time_split":
                 fig, ax = plt.subplots()
                 df[dur_col].dropna().plot(kind="hist", bins=20, ax=ax)
-                register_visual(fig, "clinic_wait_time", "Clinic wait time distribution", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "clinic_wait_time", "Clinic wait time distribution", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "appointment_lag":
                 fig, ax = plt.subplots()
                 df[dur_col].dropna().plot(kind="box", ax=ax)
-                register_visual(fig, "clinic_cycle_time", "Visit cycle time", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "clinic_cycle_time", "Visit cycle time", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "provider_utilization":
                 s = df[doc_col].value_counts()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "clinic_provider_util", "Provider utilization", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "clinic_provider_util", "Provider utilization", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "no_show_by_day":
                 s = df[[time_col, flag_col]].dropna().set_index(time_col)[flag_col].resample("D").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "clinic_no_show", "No-show rate by day", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "clinic_no_show", "No-show rate by day", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "clinic_revenue_proxy":
                 s = df[[time_col, cost_col]].dropna().groupby(df[time_col].dt.to_period("M"))[cost_col].sum()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "clinic_revenue", "Clinic revenue proxy", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "clinic_revenue", "Clinic revenue proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "care_gap_proxy":
                 rate = 1 - df[flag_col].dropna().mean()
                 fig, ax = plt.subplots()
                 ax.bar(["Care Gap Closure"], [rate])
-                register_visual(fig, "clinic_care_gap", "Care gap closure proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "clinic_care_gap", "Care gap closure proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "demographic_reach":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
-                register_visual(fig, "clinic_reach", "Clinic demographic reach", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "clinic_reach", "Clinic demographic reach", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "referral_funnel":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
-                register_visual(fig, "clinic_referral", "Referral funnel proxy", 0.75, 0.7, sub_domain, role)
+                register_visual(fig, "clinic_referral", "Referral funnel proxy", 0.75, 0.7, sub_domain, role, axis,)
                 return
     
             if visual_key == "telehealth_mix":
                 fig, ax = plt.subplots()
                 df[c.get("admit_type")].value_counts().plot(kind="pie", ax=ax)
-                register_visual(fig, "clinic_telehealth", "Telehealth mix", 0.75, 0.7, sub_domain, role)
+                register_visual(fig, "clinic_telehealth", "Telehealth mix", 0.75, 0.7, sub_domain, role, axis,)
                 return
 
             if visual_key == "clinic_revenue_proxy" and cost_col not in df.columns:
@@ -1017,33 +1010,33 @@ class HealthcareDomain(BaseDomain):
                 s = df[time_col].dropna().dt.to_period("D").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "diag_volume", "Diagnostic order volume", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "diag_volume", "Diagnostic order volume", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "tat_percentiles":
                 fig, ax = plt.subplots()
                 df[dur_col].dropna().plot(kind="box", ax=ax)
-                register_visual(fig, "diag_tat", "Turnaround time distribution", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "diag_tat", "Turnaround time distribution", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "critical_alert_time":
                 s = df[[time_col, flag_col]].dropna().set_index(time_col)[flag_col].resample("M").mean()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "diag_alerts", "Critical alert timing", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "diag_alerts", "Critical alert timing", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "specimen_rejection":
                 rates = df[flag_col].dropna().value_counts(normalize=True)
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
-                register_visual(fig, "diag_reject", "Specimen rejection rate", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "diag_reject", "Specimen rejection rate", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "device_downtime":
                 fig, ax = plt.subplots()
                 df[dur_col].dropna().plot(kind="hist", ax=ax)
-                register_visual(fig, "diag_downtime", "Device downtime proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "diag_downtime", "Device downtime proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "order_heatmap":
@@ -1051,21 +1044,21 @@ class HealthcareDomain(BaseDomain):
                     raise ValueError("Doctor column missing")
                 fig, ax = plt.subplots()
                 pd.crosstab(df[doc_col], df[time_col].dt.hour).plot(ax=ax)
-                register_visual(fig, "diag_heatmap", "Ordering heatmap", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "diag_heatmap", "Ordering heatmap", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "repeat_scan":
                 rates = df[flag_col].dropna().value_counts(normalize=True)
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
-                register_visual(fig, "diag_repeat", "Repeat scan rate", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "diag_repeat", "Repeat scan rate", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "test_revenue_proxy":
                 s = df[[time_col, cost_col]].dropna().groupby(df[time_col].dt.to_period("M"))[cost_col].sum()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "diag_revenue", "Diagnostics revenue proxy", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "diag_revenue", "Diagnostics revenue proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
         # =================================================
@@ -1082,52 +1075,52 @@ class HealthcareDomain(BaseDomain):
                 s = df[fill_col].dropna().dt.to_period("D").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "pharm_volume", "Prescription volume trend", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "pharm_volume", "Prescription volume trend", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "spend_velocity":
                 s = df[[fill_col, cost_col]].dropna().groupby(df[fill_col].dt.to_period("M"))[cost_col].sum()
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
-                register_visual(fig, "pharm_spend", "Drug spend velocity", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "pharm_spend", "Drug spend velocity", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "therapeutic_spend":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
-                register_visual(fig, "pharm_therapeutic", "Therapeutic class spend", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "pharm_therapeutic", "Therapeutic class spend", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "generic_rate":
                 rates = df[flag_col].dropna().value_counts(normalize=True)
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
-                register_visual(fig, "pharm_generic", "Generic substitution rate", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "pharm_generic", "Generic substitution rate", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "prescribing_variance":
                 fig, ax = plt.subplots()
                 df[c.get("doctor")].value_counts().plot(kind="bar", ax=ax)
-                register_visual(fig, "pharm_variance", "Prescribing variance", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "pharm_variance", "Prescribing variance", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "inventory_turn":
                 fig, ax = plt.subplots()
                 df[supply_col].dropna().plot(kind="hist", ax=ax)
-                register_visual(fig, "pharm_inventory", "Inventory turnover proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "pharm_inventory", "Inventory turnover proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "drug_alerts":
                 rates = df[flag_col].dropna().value_counts(normalize=True)
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
-                register_visual(fig, "pharm_alerts", "Drug safety alerts", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "pharm_alerts", "Drug safety alerts", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "refill_gap":
                 fig, ax = plt.subplots()
                 df[supply_col].dropna().plot(kind="box", ax=ax)
-                register_visual(fig, "pharm_refill", "Refill gap proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "pharm_refill", "Refill gap proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
         # =================================================
@@ -1141,45 +1134,45 @@ class HealthcareDomain(BaseDomain):
             if visual_key == "incidence_geo":
                 fig, ax = plt.subplots()
                 df[pop_col].dropna().plot(kind="hist", ax=ax)
-                register_visual(fig, "ph_incidence", "Population incidence distribution", 0.95, 0.9, sub_domain, role)
+                register_visual(fig, "ph_incidence", "Population incidence distribution", 0.95, 0.9, sub_domain, role, axis,)
                 return
     
             if visual_key == "cohort_growth":
                 s = df[time_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
                 s.plot(ax=ax)
-                register_visual(fig, "ph_cohort", "Cohort growth trend", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "ph_cohort", "Cohort growth trend", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
             if visual_key == "prevalence_age":
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
-                register_visual(fig, "ph_prevalence", "Prevalence by group proxy", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "ph_prevalence", "Prevalence by group proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "access_gap":
                 fig, ax = plt.subplots()
                 df[flag_col].dropna().value_counts(normalize=True).plot(kind="bar", ax=ax)
-                register_visual(fig, "ph_access", "Access gap proxy", 0.85, 0.8, sub_domain, role)
+                register_visual(fig, "ph_access", "Access gap proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
             if visual_key == "program_effect":
                 fig, ax = plt.subplots()
                 df[flag_col].dropna().plot(kind="hist", ax=ax)
-                register_visual(fig, "ph_program", "Program effect proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "ph_program", "Program effect proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "sdoh_overlay":
                 fig, ax = plt.subplots()
                 df[pop_col].dropna().plot(kind="box", ax=ax)
-                register_visual(fig, "ph_sdoh", "SDOH overlay proxy", 0.8, 0.75, sub_domain, role)
+                register_visual(fig, "ph_sdoh", "SDOH overlay proxy", 0.8, 0.75, sub_domain, role, axis,)
                 return
     
             if visual_key == "immunization_rate":
                 rate = df[flag_col].dropna().mean()
                 fig, ax = plt.subplots()
                 ax.bar(["Immunized"], [rate])
-                register_visual(fig, "ph_immunization", "Immunization rate proxy", 0.9, 0.85, sub_domain, role)
+                register_visual(fig, "ph_immunization", "Immunization rate proxy", 0.9, 0.85, sub_domain, role, axis,)
                 return
     
         raise ValueError(f"Unhandled visual key: {visual_key}")
