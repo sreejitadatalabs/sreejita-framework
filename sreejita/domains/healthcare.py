@@ -90,13 +90,13 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
-        {"key": "incidence_geo", "role": "volume"},
-        {"key": "cohort_growth", "role": "flow"},
-        {"key": "prevalence_age", "role": "quality"},
-        {"key": "access_gap", "role": "experience"},
-        {"key": "program_effect", "role": "quality"},
-        {"key": "sdoh_overlay", "role": "experience"},
-        {"key": "immunization_rate", "role": "quality"},
+        {"key": "incidence_geo", "role": "volume", "axis": "distribution"},
+        {"key": "cohort_growth", "role": "flow", "axis": "time"},
+        {"key": "prevalence_age", "role": "quality", "axis": "distribution"},
+        {"key": "access_gap", "role": "experience", "axis": "distribution"},
+        {"key": "program_effect", "role": "quality", "axis": "time"},
+        {"key": "sdoh_overlay", "role": "experience", "axis": "distribution"},
+        {"key": "immunization_rate", "role": "quality", "axis": "distribution"},
     ],
 }
 
@@ -722,21 +722,21 @@ class HealthcareDomain(BaseDomain):
 
         def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
             """
-            Unique narrative driver identity.
-            If two visuals share this → only one allowed.
+            Strong narrative driver identity.
+            Prevents date-only storytelling dominance.
             """
+        
             DRIVER_MAP = {
-                # -------- TIME --------
-                "admission_volume_trend": ("time", cols.get("date")),
-                "avg_los_trend": ("time", cols.get("date"), cols.get("los")),
-                "ed_boarding": ("time", cols.get("date"), cols.get("duration")),
-                "mortality_trend": ("time", cols.get("date"), cols.get("flag")),
+                # -------- TIME (metric + time) --------
+                "admission_volume_trend": ("time", "count", cols.get("date")),
+                "visit_volume_trend": ("time", "count", cols.get("date")),
+                "dispense_volume_trend": ("time", "count", cols.get("fill_date")),
         
-                "visit_volume_trend": ("time", cols.get("date")),
-                "clinic_revenue_proxy": ("time", cols.get("date"), cols.get("cost")),
-        
-                "dispense_volume_trend": ("time", cols.get("fill_date")),
-                "spend_velocity": ("time", cols.get("fill_date"), cols.get("cost")),
+                "avg_los_trend": ("time", "mean", cols.get("los")),
+                "ed_boarding": ("time", "mean", cols.get("duration")),
+                "mortality_trend": ("time", "rate", cols.get("flag")),
+                "clinic_revenue_proxy": ("time", "sum", cols.get("cost")),
+                "spend_velocity": ("time", "sum", cols.get("cost")),
         
                 # -------- DISTRIBUTION --------
                 "los_distribution": ("dist", cols.get("los")),
@@ -852,9 +852,10 @@ class HealthcareDomain(BaseDomain):
             # FIX 3 — FORCE CLINIC NON-TIME VISUALS
             # -------------------------------------------------
             if sub == HealthcareSubDomain.CLINIC.value:
-                non_time = [v for v in pool if v.get("axis") != "time"]
-                if len(non_time) < 2:
-                    continue  # 🚫 clinic must explain flow & experience
+                required_roles = {"flow", "experience"}
+                roles_present = {v.get("role") for v in pool if v.get("axis") != "time"}
+                if not required_roles.issubset(roles_present):
+                    continue  # 🚫 clinic must explain flow + experience
         
             # -------------------------------------------------
             # DRIVER DEDUP (PREVENT SAME STORY TWICE)
@@ -944,12 +945,17 @@ class HealthcareDomain(BaseDomain):
             # -------------------------------------------------
             # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
             # -------------------------------------------------
-            selected.sort(
-                key=lambda v: (
-                    ROLE_PRIORITY.index(v["role"])
-                    if v.get("role") in ROLE_PRIORITY else 99
-                )
-            )
+            def story_rank(v):
+                role = v.get("role")
+                axis = v.get("axis")
+            
+                # Volume-over-time first ONLY if volume role
+                if role == "volume" and axis == "time":
+                    return 0
+            
+                return ROLE_PRIORITY.index(role) if role in ROLE_PRIORITY else 99
+            
+            selected.sort(key=story_rank)
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
