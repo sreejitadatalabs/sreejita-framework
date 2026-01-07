@@ -1,11 +1,13 @@
 """
 Sreejita Framework CLI
-v3.5.1 — Markdown + ReportLab PDF (STABLE)
+v3.6 — Universal Domain Intelligence
+Markdown + ReportLab PDF (STABLE, LOCKED)
 """
+
 import argparse
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import importlib
@@ -16,7 +18,8 @@ from sreejita.automation.batch_runner import run_batch
 from sreejita.automation.file_watcher import start_watcher
 from sreejita.automation.scheduler import start_scheduler
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("sreejita.cli")
+
 
 # =====================================================
 # PROGRAMMATIC ENTRY (CLI / UI / API)
@@ -29,7 +32,8 @@ def run_single_file(
     domain_hint: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
     """
-    v3.5.1 Programmatic Entry (STABLE)
+    Programmatic entry point.
+
     Returns:
     {
         "markdown": <path>,
@@ -37,118 +41,109 @@ def run_single_file(
         "run_dir": <path>
     }
     """
+
     # -------------------------------------------------
-    # Bootstrap domains (lazy & safe)
+    # Bootstrap domains (MANDATORY)
     # -------------------------------------------------
     importlib.import_module("sreejita.domains.bootstrap_v2")
     hybrid = importlib.import_module("sreejita.reporting.hybrid")
 
     # -------------------------------------------------
-    # Config & run directory (AUTHORITATIVE)
+    # CONFIG & RUN DIRECTORY (AUTHORITATIVE)
     # -------------------------------------------------
-    if config:
+    if config is not None:
         final_config = dict(config)
         run_dir = Path(final_config["run_dir"])
     else:
         final_config = load_config(config_path)
-        run_dir = Path("runs") / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+        run_dir = (
+            Path("runs")
+            / datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+        )
         final_config["run_dir"] = str(run_dir)
 
     run_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Run directory: %s", run_dir)
 
     # -------------------------------------------------
-    # Domain hint (from UI / CLI) — CRITICAL FIX
+    # DOMAIN HINT (UI / CLI OVERRIDE)
     # -------------------------------------------------
     if domain_hint:
         final_config["domain_hint"] = domain_hint
-        logger.info("Domain hint provided: %s", domain_hint)
+        logger.info("Domain hint applied: %s", domain_hint)
 
     # -------------------------------------------------
     # HYBRID REPORT (MARKDOWN + DOMAIN RESULTS)
     # -------------------------------------------------
     result = hybrid.run(input_path, final_config)
 
-    # -------------------------------------------------
-    # CONTRACT VALIDATION (NON-NEGOTIABLE)
-    # -------------------------------------------------
     if not isinstance(result, dict):
-        raise RuntimeError(
-            f"Hybrid.run() returned invalid type: {type(result)}"
-        )
+        raise RuntimeError("Hybrid report returned invalid payload")
 
-    required_keys = {
+    required = {
         "markdown",
         "domain_results",
         "primary_domain",
         "run_dir",
     }
-    missing = required_keys - set(result.keys())
+    missing = required - set(result.keys())
     if missing:
         raise RuntimeError(
-            f"Hybrid.run() returned invalid contract. Missing keys: {missing}"
+            f"Hybrid report missing required keys: {missing}"
         )
 
     domain_results = result["domain_results"]
     primary_domain = result["primary_domain"]
 
-    if not isinstance(domain_results, dict):
-        raise RuntimeError("domain_results must be a dict")
-
     if primary_domain not in domain_results:
         raise RuntimeError(
-            f"Primary domain '{primary_domain}' missing in domain_results"
+            f"Primary domain '{primary_domain}' missing in results"
         )
 
     primary_payload = domain_results[primary_domain]
     if not isinstance(primary_payload, dict):
-        raise RuntimeError(
-            f"Primary domain payload corrupted: {type(primary_payload)}"
-        )
+        raise RuntimeError("Primary domain payload corrupted")
 
     md_path = Path(result["markdown"])
     pdf_path: Optional[Path] = None
 
     # -------------------------------------------------
-    # EXECUTIVE PDF (ReportLab — FINAL)
+    # EXECUTIVE PDF (STRICT CONTRACT)
     # -------------------------------------------------
     if generate_pdf:
         try:
             pdf_mod = importlib.import_module(
                 "sreejita.reporting.pdf_renderer"
             )
-            if not hasattr(pdf_mod, "ExecutivePDFRenderer"):
-                raise ImportError("ExecutivePDFRenderer not found")
 
-            pdf_renderer = pdf_mod.ExecutivePDFRenderer()
+            renderer = pdf_mod.ExecutivePDFRenderer()
             pdf_path = run_dir / "Sreejita_Executive_Report.pdf"
 
             # 🔒 AUTHORITATIVE PDF PAYLOAD
             pdf_payload = {
+                "domain": primary_domain,
                 "executive": primary_payload.get("executive", {}),
                 "visuals": primary_payload.get("visuals", []),
-                "insights": primary_payload
-                .get("executive", {})
-                .get("insights", {}),
-                "recommendations": primary_payload.get("recommendations", []),
-                "domain": primary_domain,
-                "kpis": primary_payload
-                .get("executive", {})
-                .get("primary_kpis", []),
+                "insights": primary_payload.get("insights", []),
+                "recommendations": primary_payload.get(
+                    "recommendations", []
+                ),
+                "kpis": primary_payload.get("kpis", {}),
             }
 
-            pdf_renderer.render(
+            renderer.render(
                 payload=pdf_payload,
                 output_path=pdf_path,
             )
-            logger.info("PDF generated successfully: %s", pdf_path)
+
+            logger.info("PDF generated: %s", pdf_path)
 
         except Exception:
             logger.exception("PDF generation failed")
             pdf_path = None
 
     # -------------------------------------------------
-    # FINAL RETURN (UI / API SAFE)
+    # FINAL RETURN (UI SAFE)
     # -------------------------------------------------
     return {
         "markdown": str(md_path),
@@ -164,13 +159,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=f"Sreejita Framework v{__version__}"
     )
-    parser.add_argument("input", nargs="?", help="Input CSV or Excel file")
-    parser.add_argument("--config", required=False, help="Path to config YAML")
-    parser.add_argument("--batch", help="Run batch processing")
+
+    parser.add_argument("input", nargs="?", help="CSV or Excel file")
+    parser.add_argument("--config", required=False, help="Config YAML path")
+    parser.add_argument("--batch", help="Batch input folder")
     parser.add_argument("--watch", help="Watch folder for new files")
     parser.add_argument("--schedule", action="store_true")
-    parser.add_argument("--pdf", action="store_true", help="Export Executive PDF")
-    parser.add_argument("--domain", help="Domain hint (healthcare, retail, generic)")
+    parser.add_argument("--pdf", action="store_true", help="Generate PDF")
+    parser.add_argument("--domain", help="Domain hint")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -229,11 +225,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         domain_hint=args.domain,
     )
 
-    print("\n✅ Report generated")
+    print("\n✅ Report generated successfully")
     print(f"📝 Markdown: {result['markdown']}")
     if result["pdf"]:
         print(f"📄 PDF: {result['pdf']}")
     print(f"📁 Run folder: {result['run_dir']}")
+
     return 0
 
 
