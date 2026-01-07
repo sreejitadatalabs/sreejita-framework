@@ -670,24 +670,36 @@ class HealthcareDomain(BaseDomain):
             return round(min(1.0, max(0.3, active_subs.get(sub, 0.3))), 2)
     
         # -------------------------------------------------
-        # VISUAL REGISTRATION
+        # VISUAL REGISTRATION (DEDUP SAFE)
         # -------------------------------------------------
         def register_visual(
             fig,
-            name: str,
+            visual_key: str,
             caption: str,
             importance: float,
             base_confidence: float,
             sub_domain: str,
             role: str,
         ):
-            fname = f"{sub_domain}_{name}.png"
+            fname = f"{sub_domain}_{visual_key}_{role}.png"
             path = output_dir / fname
     
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
     
+            visual_id = f"{sub_domain}:{visual_key}:{role}"
+    
+            existing_ids = {
+                v["visual_id"]
+                for v in candidates.get(sub_domain, [])
+            }
+    
+            if visual_id in existing_ids:
+                return  # 🚫 hard dedup
+    
             candidates.setdefault(sub_domain, []).append({
+                "visual_id": visual_id,
+                "visual_key": visual_key,
                 "path": str(path),
                 "caption": caption,
                 "importance": float(importance),
@@ -708,9 +720,13 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         for sub in visual_subs:
     
-            # KPI gate (clinic allowed without KPIs)
-            if not sub_has_any_kpi(sub) and sub != HealthcareSubDomain.CLINIC.value:
+            # KPI gate (clinic is permissive but not blind)
+            if sub != HealthcareSubDomain.CLINIC.value and not sub_has_any_kpi(sub):
                 continue
+    
+            if sub == HealthcareSubDomain.CLINIC.value:
+                if not _has_signal(df, self.cols.get("duration"), min_coverage=0.20):
+                    continue
     
             # Pharmacy hard gate
             if sub == HealthcareSubDomain.PHARMACY.value:
@@ -729,11 +745,20 @@ class HealthcareDomain(BaseDomain):
             if not visual_defs:
                 continue
     
+            rendered_keys = set()
+    
             for visual_def in visual_defs:
+                visual_key = visual_def["key"]
+                role = visual_def["role"]
+    
+                if visual_key in rendered_keys:
+                    continue
+                rendered_keys.add(visual_key)
+    
                 try:
                     self._render_visual_by_key(
-                        visual_key=visual_def["key"],
-                        role=visual_def["role"],
+                        visual_key=visual_key,
+                        role=role,
                         df=df,
                         output_dir=output_dir,
                         sub_domain=sub,
@@ -743,7 +768,7 @@ class HealthcareDomain(BaseDomain):
                     continue
     
         # -------------------------------------------------
-        # FINAL SELECTION (MAX 6, ROLE-COVERAGE)
+        # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE-BALANCED)
         # -------------------------------------------------
         ROLE_ORDER = [
             "volume",
@@ -766,7 +791,7 @@ class HealthcareDomain(BaseDomain):
             for role in ROLE_ORDER:
                 role_candidates = [
                     v for v in pool
-                    if v["role"] == role and v["confidence"] >= 0.35
+                    if v["role"] == role and role not in used_roles
                 ]
                 if role_candidates:
                     best = max(
@@ -775,23 +800,21 @@ class HealthcareDomain(BaseDomain):
                     )
                     selected.append(best)
                     used_roles.add(role)
-
-            seen_paths = set(v["path"] for v in published)
+    
+            # 🔒 Dedup by (sub_domain, role)
+            seen = {
+                (v["sub_domain"], v["role"])
+                for v in published
+            }
+    
             for v in selected:
-                if v["path"] not in seen_paths:
+                key = (v["sub_domain"], v["role"])
+                if key not in seen:
                     published.append(v)
-                    seen_paths.add(v["path"])
+                    seen.add(key)
+    
+        return published
 
-        global_roles = set()
-        final_published = []
-        
-        for v in published:
-            role = v.get("role")
-            if role not in global_roles:
-                final_published.append(v)
-                global_roles.add(role)
-        
-        return final_published
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
     # -------------------------------------------------
