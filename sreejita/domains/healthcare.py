@@ -141,7 +141,7 @@ def _eligible_subdomain(df, cols, sub):
         return False
 
     for col in required:
-        min_cov = 0.15 if sub == HealthcareSubDomain.CLINIC.value else 0.3
+        min_cov = 0.20 if sub == HealthcareSubDomain.CLINIC.value else 0.3
         if not _has_signal(df, cols.get(col), min_coverage=min_cov):
             return False
 
@@ -681,7 +681,7 @@ class HealthcareDomain(BaseDomain):
             sub_domain: str,
             role: str,
         ):
-            fname = name if name.endswith(".png") else f"{name}.png"
+            fname = f"{sub_domain}_{name}.png"
             path = output_dir / fname
     
             fig.savefig(path, dpi=120, bbox_inches="tight")
@@ -709,7 +709,7 @@ class HealthcareDomain(BaseDomain):
         for sub in visual_subs:
     
             # KPI gate (clinic allowed without KPIs)
-            if sub != HealthcareSubDomain.CLINIC.value and not sub_has_any_kpi(sub):
+            if not sub_has_any_kpi(sub) and sub != HealthcareSubDomain.CLINIC.value:
                 continue
     
             # Pharmacy hard gate
@@ -782,10 +782,16 @@ class HealthcareDomain(BaseDomain):
                     published.append(v)
                     seen_paths.add(v["path"])
 
-            published.extend(selected[:6])
-    
-        return published
-
+        global_roles = set()
+        final_published = []
+        
+        for v in published:
+            role = v.get("role")
+            if role not in global_roles:
+                final_published.append(v)
+                global_roles.add(role)
+        
+        return final_published
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
     # -------------------------------------------------
