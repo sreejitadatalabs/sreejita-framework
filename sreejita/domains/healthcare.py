@@ -139,12 +139,6 @@ def _eligible_subdomain(
     return all(_has_signal(df, cols.get(col)) for col in required)
 
 # =====================================================
-# UNIVERSAL SUB-DOMAIN INFERENCE — HEALTHCARE (FINAL)
-# =====================================================
-
-def infer_healthcare_subdomains(
-    
-# =====================================================
 # STRONG SUB-DOMAIN INTELLIGENCE (CAPABILITY-BASED)
 # =====================================================
 def infer_healthcare_subdomain(semantics: dict) -> dict:
