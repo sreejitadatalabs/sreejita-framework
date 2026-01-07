@@ -59,6 +59,9 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[str]] = {
         "demographic_reach",
         "referral_funnel",
         "telehealth_mix",
+        "visit_volume_trend", 
+        "clinic_revenue_proxy", 
+        "care_gap_proxy",   
     ],
     HealthcareSubDomain.DIAGNOSTICS.value: [
         "tat_percentiles",
@@ -711,7 +714,7 @@ class HealthcareDomain(BaseDomain):
         for sub in visual_subs:
     
             # 🚫 HARD KPI GATE — NO KPI, NO VISUALS
-            if not sub_has_any_kpi(sub):
+            if sub != "clinic" and not sub_has_any_kpi(sub):
                 continue
     
             # 🚫 PHARMACY HARD GATE
@@ -752,12 +755,32 @@ class HealthcareDomain(BaseDomain):
                 if Path(v["path"]).exists() and v["confidence"] >= 0.35
             ]
     
-            pool.sort(
-                key=lambda v: v["importance"] * v["confidence"],
-                reverse=True,
-            )
-    
-            published.extend(pool[:3])  # 🔒 HARD CAP
+            ROLE_ORDER = [
+                "volume",
+                "flow",
+                "utilization",
+                "quality",
+                "financial",
+                "experience",
+            ]
+            
+            selected = []
+            used_roles = set()
+            
+            for role in ROLE_ORDER:
+                candidates_for_role = [
+                    v for v in pool
+                    if v.get("role") == role and v["confidence"] >= 0.35
+                ]
+                if candidates_for_role:
+                    best = max(
+                        candidates_for_role,
+                        key=lambda v: v["importance"] * v["confidence"],
+                    )
+                    selected.append(best)
+                    used_roles.add(role)
+            
+            published.extend(selected[:6])
     
         return published
 
@@ -1082,7 +1105,73 @@ class HealthcareDomain(BaseDomain):
                     sub_domain,
                 )
                 return
-        
+
+            #Visit Volume Trend
+            elif key == "visit_volume_trend":
+                visit_col = cols.get("date")
+                if not visit_col or visit_col not in df.columns:
+                    raise ValueError("Clinic visit date missing")
+            
+                ts = (
+                    df[visit_col]
+                    .dropna()
+                    .dt.to_period("D")
+                    .value_counts()
+                    .sort_index()
+                )
+            
+                if len(ts) < 5:
+                    raise ValueError("Insufficient visit history")
+            
+                fig, ax = plt.subplots()
+                ts.plot(ax=ax)
+                ax.set_title("Clinic Visit Volume Trend")
+                ax.set_ylabel("Number of Visits")
+                ax.set_xlabel("Date")
+            
+                return fig, 0.6, 0.9
+
+            # Clinic Revenue Proxy
+            elif key == "clinic_revenue_proxy":
+                visit_col = cols.get("date")
+                cost_col = cols.get("cost")
+            
+                if not visit_col or not cost_col:
+                    raise ValueError("Date or cost missing")
+            
+                ts = (
+                    df.dropna(subset=[visit_col, cost_col])
+                      .groupby(df[visit_col].dt.to_period("M"))[cost_col]
+                      .sum()
+                )
+            
+                if ts.empty:
+                    raise ValueError("No revenue data")
+            
+                fig, ax = plt.subplots()
+                ts.plot(ax=ax, kind="bar")
+                ax.set_title("Clinic Revenue Trend (Proxy)")
+                ax.set_ylabel("Total Charges")
+                ax.set_xlabel("Month")
+            
+                return fig, 0.5, 0.7
+
+            # Care Gap Proxy
+            elif key == "care_gap_proxy":
+                follow_col = cols.get("readmitted")  # reused as proxy
+            
+                if not follow_col or follow_col not in df.columns:
+                    raise ValueError("Follow-up indicator missing")
+            
+                rate = 1.0 - df[follow_col].fillna(0).mean()
+            
+                fig, ax = plt.subplots()
+                ax.bar(["Care Gaps Closed"], [rate])
+                ax.set_ylim(0, 1)
+                ax.set_title("Care Gap Closure Proxy")
+            
+                return fig, 0.4, 0.6
+                
             # -------------------------------------------------
             # 2. WAIT TIME TRAJECTORY
             # -------------------------------------------------
