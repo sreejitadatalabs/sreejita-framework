@@ -64,6 +64,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "clinic_revenue_proxy", "role": "financial", "axis": "time"},
         {"key": "care_gap_proxy", "role": "quality", "axis": "distribution"},
         {"key": "telehealth_mix", "role": "experience", "axis": "composition"},
+        {"key": "visit_day_pattern", "role": "experience", "axis": "distribution"},
     ],
 
     HealthcareSubDomain.DIAGNOSTICS.value: [
@@ -85,6 +86,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "prescribing_variance", "role": "utilization", "axis": "entity"},
         {"key": "therapeutic_spend", "role": "financial", "axis": "composition"},
         {"key": "drug_alerts", "role": "quality", "axis": "distribution"},
+        {"key": "cost_per_rx_distribution", "role": "financial", "axis": "distribution"},
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
@@ -712,25 +714,36 @@ class HealthcareDomain(BaseDomain):
 
         def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
             DRIVER_MAP = {
-                # ---- TIME DRIVERS ----
+                # -------- TIME DRIVERS --------
                 "admission_volume_trend": f"time:{cols.get('date')}",
-                "avg_los_trend": f"time:{cols.get('los')}",
-                "dispense_volume_trend": f"time:{cols.get('fill_date')}",
-                "spend_velocity": f"time:{cols.get('fill_date')}_cost",
-                "visit_volume_trend": f"time:{cols.get('date')}",
+                "avg_los_trend": f"time:{cols.get('date')}:{cols.get('los')}",
+                "ed_boarding": f"time:{cols.get('date')}:{cols.get('duration')}",
+                "mortality_trend": f"time:{cols.get('date')}:{cols.get('flag')}",
         
-                # ---- DISTRIBUTION DRIVERS ----
+                "visit_volume_trend": f"time:{cols.get('date')}",
+                "clinic_revenue_proxy": f"time:{cols.get('date')}:{cols.get('cost')}",
+        
+                "dispense_volume_trend": f"time:{cols.get('fill_date')}",
+                "spend_velocity": f"time:{cols.get('fill_date')}:{cols.get('cost')}",
+        
+                # -------- DISTRIBUTION --------
                 "los_distribution": f"dist:{cols.get('los')}",
                 "wait_time_split": f"dist:{cols.get('duration')}",
                 "inventory_turn": f"dist:{cols.get('supply')}",
         
-                # ---- COMPOSITION DRIVERS ----
+                # -------- COMPOSITION --------
                 "facility_mix": f"comp:{cols.get('facility')}",
                 "therapeutic_spend": f"comp:{cols.get('facility')}",
                 "telehealth_mix": f"comp:{cols.get('admit_type')}",
+        
+                # -------- ENTITY --------
+                "provider_utilization": f"entity:{cols.get('doctor')}",
+                "prescribing_variance": f"entity:{cols.get('doctor')}",
+                "order_heatmap": f"entity:{cols.get('doctor')}",
             }
         
             return DRIVER_MAP.get(visual_key, f"{axis}:{visual_key}")
+
         # -------------------------------------------------
         # VISUAL DISPATCH
         # -------------------------------------------------
@@ -796,16 +809,6 @@ class HealthcareDomain(BaseDomain):
             
             if axes_present == {"time"}:
                 continue  # 🚫 reject time-only narratives
-
-        axes_present = {v["axis"] for v in deduped_pool}
-
-        # Reject time-only narratives
-        if axes_present == {"time"}:
-            continue
-        
-        # Soft enforce diversity
-        if "distribution" not in axes_present:
-            deduped_pool = [v for v in deduped_pool if v["axis"] != "time"] + deduped_pool
             
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE + DRIVER BALANCED)
@@ -906,7 +909,18 @@ class HealthcareDomain(BaseDomain):
                 s.plot(ax=ax)
                 register_visual(fig, "hospital_avg_los_trend", "Average LOS trend", 0.95, 0.9, sub_domain, role, axis,)
                 return
-    
+
+            if visual_key == "los_distribution":
+                s = df[c.get("los")].dropna()
+                fig, ax = plt.subplots()
+                s.plot(kind="hist", bins=20, ax=ax)
+                register_visual(
+                    fig, "hospital_los_distribution",
+                    "Length of stay distribution",
+                    0.9, 0.85, sub_domain, role, axis
+                )
+                return
+
             if visual_key == "bed_turnover":
                 counts = df[bed_col].dropna().value_counts()
                 fig, ax = plt.subplots()
@@ -948,7 +962,17 @@ class HealthcareDomain(BaseDomain):
                 s.plot(ax=ax)
                 register_visual(fig, "hospital_mortality", "Mortality proxy trend", 0.9, 0.8, sub_domain, role, axis,)
                 return
-    
+
+            if visual_key == "facility_mix":
+                fig, ax = plt.subplots()
+                df[c.get("facility")].dropna().value_counts().plot(kind="pie", ax=ax)
+                register_visual(
+                    fig, "hospital_facility_mix",
+                    "Facility mix distribution",
+                    0.8, 0.75, sub_domain, role, axis
+                )
+                return
+
             if visual_key == "admission_volume_trend":
                 s = df[time_col].dropna().dt.to_period("M").value_counts().sort_index()
                 fig, ax = plt.subplots()
@@ -1004,7 +1028,18 @@ class HealthcareDomain(BaseDomain):
                 s.plot(kind="bar", ax=ax)
                 register_visual(fig, "clinic_provider_util", "Provider utilization", 0.9, 0.85, sub_domain, role, axis,)
                 return
-    
+
+            if visual_key == "visit_day_pattern":
+                s = df[time_col].dt.day_name().value_counts()
+                fig, ax = plt.subplots()
+                s.plot(kind="bar", ax=ax)
+                register_visual(
+                    fig, "clinic_visit_pattern",
+                    "Visit distribution by day of week",
+                    0.85, 0.8, sub_domain, role, axis
+                )
+                return
+
             if visual_key == "no_show_by_day":
                 s = df[[time_col, flag_col]].dropna().set_index(time_col)[flag_col].resample("M").mean()
                 fig, ax = plt.subplots()
@@ -1116,11 +1151,7 @@ class HealthcareDomain(BaseDomain):
         # ---------------- PHARMACY -----------------------
         # =================================================
         if sub_domain == HealthcareSubDomain.PHARMACY.value:
-            axes = {v["axis"] for v in candidates.get(sub, [])}
-            if axes == {"time"}:
-                continue  # 🚫 reject time-only pharmacy story
-
-    
+            
             fill_col = c.get("fill_date")
             supply_col = c.get("supply")
             cost_col = c.get("cost")
@@ -1151,6 +1182,16 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots()
                 rates.plot(kind="bar", ax=ax)
                 register_visual(fig, "pharm_generic", "Generic substitution rate", 0.85, 0.8, sub_domain, role, axis,)
+                return
+
+            if visual_key == "cost_per_rx_distribution":
+                fig, ax = plt.subplots()
+                df[c.get("cost")].dropna().plot(kind="hist", bins=20, ax=ax)
+                register_visual(
+                    fig, "pharm_cost_dist",
+                    "Cost per prescription distribution",
+                    0.85, 0.8, sub_domain, role, axis
+                )
                 return
     
             if visual_key == "prescribing_variance":
