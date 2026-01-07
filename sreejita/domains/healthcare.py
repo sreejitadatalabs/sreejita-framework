@@ -2479,7 +2479,6 @@ class HealthcareDomain(BaseDomain):
 
 class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
-    semantics = resolve_semantics(df)
 
     def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
         """
