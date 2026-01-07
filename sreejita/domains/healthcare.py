@@ -143,6 +143,84 @@ def _eligible_subdomain(
 # =====================================================
 
 def infer_healthcare_subdomains(
+    
+# =====================================================
+# STRONG SUB-DOMAIN INTELLIGENCE (CAPABILITY-BASED)
+# =====================================================
+def infer_healthcare_subdomain(semantics: dict) -> dict:
+    """
+    Returns normalized sub-domain confidence scores based on capabilities.
+    Uses resolve_semantics output for clean, deterministic inference.
+    """
+    scores = {
+        "hospital": 0.0,
+        "clinic": 0.0,
+        "diagnostics": 0.0,
+        "pharmacy": 0.0,
+        "public_health": 0.0,
+    }
+
+    # ---------------- HOSPITAL ----------------
+    if semantics.get("has_admission_date"):
+        scores["hospital"] += 0.4
+    if semantics.get("has_discharge_date"):
+        scores["hospital"] += 0.4
+    if semantics.get("has_cost"):
+        scores["hospital"] += 0.2
+
+    # ---------------- CLINIC ----------------
+    if semantics.get("has_duration"):
+        scores["clinic"] += 0.5
+    if semantics.get("has_patient_id"):
+        scores["clinic"] += 0.3
+    if not semantics.get("has_admission_date"):
+        scores["clinic"] += 0.2
+
+    # ---------------- DIAGNOSTICS ----------------
+    if semantics.get("has_duration") and not semantics.get("has_cost"):
+        scores["diagnostics"] += 0.6
+    if semantics.get("has_patient_id"):
+        scores["diagnostics"] += 0.4
+
+    # ---------------- PHARMACY (HARD GATE) ----------------
+    if semantics.get("has_supply"):
+        scores["pharmacy"] = 1.0
+
+    # ---------------- PUBLIC HEALTH (HARD GATE) ----------------
+    if semantics.get("has_population"):
+        scores["public_health"] = 1.0
+
+    # ---------------- NORMALIZATION ----------------
+    max_score = max(scores.values())
+
+    if max_score == 0:
+        return {"unknown": 1.0}
+
+    normalized = {
+        k: round(v / max_score, 2)
+        for k, v in scores.items()
+        if v > 0
+    }
+
+    return normalized
+
+
+def select_primary_subdomain(subdomain_scores: dict) -> str:
+    """
+    Selects ONE primary sub-domain from confidence scores.
+    Returns 'mixed' only if no clear winner.
+    """
+    if not subdomain_scores:
+        return "unknown"
+
+    best, score = max(subdomain_scores.items(), key=lambda x: x[1])
+
+    # If confidence too weak → mixed
+    if score < 0.6:
+        return "mixed"
+
+    return best
+
     df: pd.DataFrame,
     cols: Dict[str, Optional[str]],
 ) -> Dict[str, float]:
@@ -296,6 +374,17 @@ class HealthcareDomain(BaseDomain):
         # -------------------------------------------------
         # CANONICAL COLUMN RESOLUTION (AUTHORITATIVE)
         # -------------------------------------------------
+
+                # -------------------------------------------------
+        # CAPABILITY-BASED SUB-DOMAIN INTELLIGENCE
+        # -------------------------------------------------
+        semantics = resolve_semantics(df)
+        
+        subdomain_scores = infer_healthcare_subdomain(semantics)
+        primary_subdomain = select_primary_subdomain(subdomain_scores)
+        
+        self.sub_domain = primary_subdomain
+        self.sub_domain_confidence = subdomain_scores
         self.cols: Dict[str, Optional[str]] = {
             # ---------------- IDENTITY ----------------
             "pid": resolve_column(df, "patient_id"),
