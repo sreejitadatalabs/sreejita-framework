@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from enum import Enum
 
-from sreejita.core.column_resolver import resolve_column
+from sreejita.core.column_resolver import resolve_column, resolve_semantics
 from sreejita.core.dataset_shape import detect_dataset_shape
 from .base import BaseDomain
 from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
@@ -2557,7 +2557,19 @@ class HealthcareDomainDetector(BaseDomainDetector):
     domain_name = "healthcare"
 
     def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
+        """
+        Universal, capability-based healthcare domain detector.
 
+        Guarantees:
+        - Alias-aware (via column_resolver)
+        - Pharmacy / clinic / hospital safe
+        - Never drops domain once anchored
+        - Confidence reflects strength, not existence
+        """
+
+        # -------------------------------------------------
+        # SAFETY
+        # -------------------------------------------------
         if df is None or df.empty:
             return DomainDetectionResult(
                 domain=None,
@@ -2565,85 +2577,50 @@ class HealthcareDomainDetector(BaseDomainDetector):
                 signals={},
             )
 
-        signals = _detect_semantic_signals(df)
-
-        if not signals:
-            return DomainDetectionResult(
-                domain=None,
-                confidence=0.0,
-                signals={},
-            )
+        # -------------------------------------------------
+        # SEMANTIC CAPABILITIES (AUTHORITATIVE)
+        # -------------------------------------------------
+        semantics = resolve_semantics(df)
 
         # -------------------------------------------------
-        # HEALTHCARE ANCHOR (SOFT, NON-BINARY)
+        # HEALTHCARE DOMAIN ANCHOR (CAPABILITY-BASED)
         # -------------------------------------------------
         anchor_score = sum([
-            signals.get("patient", False),
-            signals.get("admission", False),
-            signals.get("facility", False),
-            signals.get("diagnosis", False),
-            signals.get("pharmacy_time", False),
+            semantics.get("has_patient_id", False),
+            semantics.get("has_admission_date", False),
+            semantics.get("has_discharge_date", False),
+            semantics.get("has_duration", False),   # clinic / diagnostics
+            semantics.get("has_cost", False),       # billing / pharmacy
+            semantics.get("has_supply", False),     # pharmacy
+            semantics.get("has_population", False), # public health
         ])
 
-        if anchor_score < 2:
+        # ❗ If no healthcare signal at all → not healthcare
+        if anchor_score == 0:
             return DomainDetectionResult(
                 domain=None,
                 confidence=0.0,
-                signals=signals,
+                signals=semantics,
             )
 
         # -------------------------------------------------
-        # CONFIDENCE SCORING (ADDITIVE, BOUNDED)
+        # CONFIDENCE SCORING (LINEAR, HONEST)
         # -------------------------------------------------
-        weights = {
-            "patient": 0.18,
-            "admission": 0.16,
-            "discharge": 0.14,
-            "los": 0.16,
-            "facility": 0.12,
-            "diagnosis": 0.14,
-            "cost": 0.06,
-            "population": 0.04,
-        }
+        # Base confidence once healthcare is anchored
+        confidence = 0.30
 
-        confidence = 0.0
-        for k, w in weights.items():
-            if signals.get(k):
-                confidence += w
+        # Each additional capability strengthens confidence
+        confidence += min(anchor_score * 0.10, 0.55)
+
+        confidence = round(min(confidence, 0.95), 2)
 
         # -------------------------------------------------
-        # STRENGTH BOOST (NO INFLATION)
+        # RETURN — NEVER DROP DOMAIN AFTER ANCHOR
         # -------------------------------------------------
-        strong_signals = sum([
-            signals.get("los", False),
-            signals.get("discharge", False),
-            signals.get("diagnosis", False),
-            signals.get("patient", False) and signals.get("admission", False),
-        ])
-
-        if strong_signals >= 2:
-            confidence += 0.12
-        elif strong_signals == 1:
-            confidence += 0.06
-
-        confidence = round(min(0.95, confidence), 2)
-        
-        # -------------------------------------------------
-        # SAFETY FLOOR — NEVER DROP DOMAIN ONCE ANCHORED
-        # -------------------------------------------------
-        confidence = max(0.30, confidence)
-        
         return DomainDetectionResult(
             domain=self.domain_name,
             confidence=confidence,
-            signals=signals,
-        )
-
-
-        return DomainDetectionResult(
-            domain=self.domain_name,
-            confidence=confidence,
-            signals=signals,
+            signals=semantics,
         )
 
 # -----------------------------------------------------
