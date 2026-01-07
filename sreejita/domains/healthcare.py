@@ -682,6 +682,14 @@ class HealthcareDomain(BaseDomain):
             axis: str,
         ):
 
+            # 🚫 No KPI → no visual
+            if not any(
+                k.startswith(f"{sub_domain}_")
+                for k in kpis.keys()
+            ):
+                plt.close(fig)
+                return
+
             fname = f"{sub_domain}__{visual_key}__{role}__{axis}.png"
             path = output_dir / fname
     
@@ -818,7 +826,14 @@ class HealthcareDomain(BaseDomain):
         ]
         
         for sub, pool in candidates.items():
-        
+            # 🚫 Reject clinic narratives without non-time visuals
+            if sub == HealthcareSubDomain.CLINIC.value:
+                has_non_time = any(
+                    v["axis"] != "time" for v in pool
+                )
+                if not has_non_time:
+                    continue  # reject clinic story
+
             # ---------- DRIVER DEDUP ----------
             used_drivers = set()
             deduped_pool = []
@@ -841,6 +856,15 @@ class HealthcareDomain(BaseDomain):
             if len(axis_groups) == 1 and "time" in axis_groups:
                 continue  # 🚫 reject time-only story
         
+            # 🚫 Reject narratives driven by only one column  
+            driver_cols = {
+                v["axis"]: driver_signature(v["visual_key"], v["axis"], self.cols)
+                for v in deduped_pool
+            }
+            
+            if len(set(driver_cols.values())) < 2:
+                continue  # narrative too thin
+
             selected = []
             used_roles = set()
         
@@ -889,6 +913,21 @@ class HealthcareDomain(BaseDomain):
             raise ValueError("Insufficient data")
     
         df = df.copy(deep=False)
+        # 🚫 REQUIRED COLUMN VALIDATION
+        REQUIRED_COLS = {
+            "avg_los_trend": ["los"],
+            "clinic_revenue_proxy": ["cost"],
+            "spend_velocity": ["cost"],
+            "dispense_volume_trend": ["fill_date"],
+            "inventory_turn": ["supply"],
+            "cost_per_rx_distribution": ["cost"],
+        }
+        
+        req = REQUIRED_COLS.get(visual_key)
+        if req:
+            for r in req:
+                if not self.cols.get(r) or self.cols[r] not in df.columns:
+                    raise ValueError(f"Missing required column: {r}")
     
         # =================================================
         # ---------------- HOSPITAL -----------------------
@@ -985,12 +1024,6 @@ class HealthcareDomain(BaseDomain):
                 fig, ax = plt.subplots()
                 s.plot(kind="bar", ax=ax)
                 register_visual(fig, "hospital_revenue", "Hospital cost trend (proxy)", 0.9, 0.85, sub_domain, role, axis,)
-                return
-    
-            if visual_key == "facility_mix":
-                fig, ax = plt.subplots()
-                df[c.get("facility")].value_counts().plot(kind="pie", ax=ax)
-                register_visual(fig, "hospital_facility_mix", "facility mix proxy", 0.8, 0.7, sub_domain, role, axis,)
                 return
     
         # =================================================
@@ -1624,6 +1657,7 @@ class HealthcareDomain(BaseDomain):
                     },
                     {
                         "sub_domain": sub,
+                        "display_order": ROLE_PRIORITY.index(role),
                         "level": "STRENGTH",
                         "title": "Public Health Intelligence Maturity",
                         "so_what": "Foundational analytics capabilities are in place.",
