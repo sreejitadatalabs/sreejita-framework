@@ -78,13 +78,13 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     ],
 
     HealthcareSubDomain.PHARMACY.value: [
-        {"key": "incidence_geo", "role": "volume", "axis": "distribution"},
-        {"key": "cohort_growth", "role": "flow", "axis": "time"},
-        {"key": "prevalence_age", "role": "quality", "axis": "distribution"},
-        {"key": "access_gap", "role": "experience", "axis": "distribution"},
-        {"key": "program_effect", "role": "quality", "axis": "distribution"},
-        {"key": "sdoh_overlay", "role": "experience", "axis": "distribution"},
-        {"key": "immunization_rate", "role": "quality", "axis": "distribution"},
+        {"key": "dispense_volume_trend", "role": "volume", "axis": "time"},
+        {"key": "spend_velocity", "role": "financial", "axis": "time"},
+        {"key": "inventory_turn", "role": "utilization", "axis": "distribution"},
+        {"key": "generic_rate", "role": "quality", "axis": "distribution"},
+        {"key": "prescribing_variance", "role": "utilization", "axis": "entity"},
+        {"key": "therapeutic_spend", "role": "financial", "axis": "composition"},
+        {"key": "drug_alerts", "role": "quality", "axis": "distribution"},
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
@@ -710,6 +710,28 @@ class HealthcareDomain(BaseDomain):
                 "sub_domain": sub_domain,
             })
 
+        used_drivers = set()
+
+        def driver_signature(visual_key: str, axis: str) -> str:
+            """
+            Prevents visuals that tell the same story with same data driver.
+            """
+            TIME_DRIVERS = {
+                "admission_volume_trend": "admission_date",
+                "avg_los_trend": "los",
+                "dispense_volume_trend": "fill_date",
+                "spend_velocity": "cost_time",
+                "visit_volume_trend": "visit_date",
+            }
+        
+            DIST_DRIVERS = {
+                "los_distribution": "los",
+                "wait_time_split": "duration",
+                "inventory_turn": "supply",
+                "generic_rate": "flag",
+            }
+        
+            return TIME_DRIVERS.get(visual_key) or DIST_DRIVERS.get(visual_key) or visual_key
         # -------------------------------------------------
         # VISUAL DISPATCH
         # -------------------------------------------------
@@ -766,49 +788,31 @@ class HealthcareDomain(BaseDomain):
 
         # Ensure at least one non-time visual exists per sub-domain
         for sub, pool in candidates.items():
-            if not any(v["axis"] != "time" for v in pool):
-                pool[:] = []  # hard fail: better no visuals than misleading ones
+            required_axes = {"time", "distribution"}
+            axes_present = {v["axis"] for v in pool}
+            
+            if not required_axes.issubset(axes_present):
+                continue  # fail this sub-domain gracefully
     
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE-BALANCED)
         # -------------------------------------------------
-        MAX_AXIS_PER_SUB = {
-            "time": 2,
-            "distribution": 2,
-            "entity": 1,
-            "correlation": 1,
-            "composition": 1,
-        }
+        ROLE_PRIORITY = ["volume", "flow", "quality", "financial", "utilization", "experience"]
+
+        selected = []
+        seen_roles = set()
         
-        for sub, pool in candidates.items():
-        
-            pool = [
+        for role in ROLE_PRIORITY:
+            role_candidates = [
                 v for v in pool
-                if Path(v["path"]).exists() and v["confidence"] >= 0.35
+                if v["role"] == role and v["confidence"] >= 0.4
             ]
+            if role_candidates:
+                best = max(role_candidates, key=lambda v: v["importance"] * v["confidence"])
+                selected.append(best)
+                seen_roles.add(role)
         
-            pool.sort(
-                key=lambda v: v["importance"] * v["confidence"],
-                reverse=True
-            )
-        
-            selected = []
-            axis_count = {}
-        
-            for v in pool:
-                axis = v["axis"]
-                limit = MAX_AXIS_PER_SUB.get(axis, 1)
-        
-                if axis_count.get(axis, 0) >= limit:
-                    continue
-        
-                selected.append(v)
-                axis_count[axis] = axis_count.get(axis, 0) + 1
-        
-                if len(selected) == 6:
-                    break
-        
-            published.extend(selected)
+        published.extend(selected[:6])
 
     # -------------------------------------------------
     # VISUAL RENDERER DISPATCH (REAL INTELLIGENCE)
@@ -831,6 +835,12 @@ class HealthcareDomain(BaseDomain):
         """
     
         c = self.cols
+        if axis == "time":
+            if visual_key in {"avg_los_trend", "spend_velocity"}:
+                pass
+            elif time_col is None:
+                raise ValueError("Time axis required but missing")
+
         time_col = getattr(self, "time_col", None)
         if axis == "time":
             if time_col is None or time_col not in df.columns:
