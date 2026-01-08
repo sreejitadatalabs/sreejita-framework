@@ -66,6 +66,8 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "care_gap_proxy", "role": "quality", "axis": "distribution"},
         {"key": "telehealth_mix", "role": "experience", "axis": "composition"},
         {"key": "visit_day_pattern", "role": "experience", "axis": "distribution"},
+        {"key": "demographic_reach", "role": "experience", "axis": "distribution"},
+        {"key": "referral_funnel", "role": "flow", "axis": "entity"},
     ],
 
     HealthcareSubDomain.DIAGNOSTICS.value: [
@@ -91,7 +93,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
     ],
 
     HealthcareSubDomain.PUBLIC_HEALTH.value: [
-        {"key": "incidence_geo", "role": "volume", "axis": "distribution"},
+        {"key": "population_distribution", "role": "volume", "axis": "distribution"},
         {"key": "cohort_growth", "role": "flow", "axis": "time"},
         {"key": "prevalence_age", "role": "quality", "axis": "distribution"},
         {"key": "access_gap", "role": "experience", "axis": "distribution"},
@@ -747,7 +749,7 @@ class HealthcareDomain(BaseDomain):
                 # ENTITY
                 "provider_utilization": ("entity", "doctor", cols.get("doctor")),
                 "prescribing_variance": ("entity", "doctor", cols.get("doctor")),
-                "order_heatmap": ("entity", "doctor_time", cols.get("doctor"), cols.get("date")),
+                "order_heatmap": ("entity", "doctor_hour", cols.get("doctor")),,
         
                 # COMPOSITION
                 "facility_mix": ("comp", "facility", cols.get("facility")),
@@ -1050,6 +1052,7 @@ class HealthcareDomain(BaseDomain):
             "dispense_volume_trend": ["fill_date"],
             "inventory_turn": ["supply"],
             "cost_per_rx_distribution": ["cost"],
+            "hospital_revenue_proxy": ["cost"],
         }
         
         req = REQUIRED_COLS.get(visual_key)
@@ -1245,9 +1248,6 @@ class HealthcareDomain(BaseDomain):
                 df[c.get("admit_type")].value_counts().plot(kind="pie", ax=ax)
                 register_visual(fig, "clinic_telehealth", "Telehealth mix", 0.75, 0.7, sub_domain, role, axis,)
                 return
-
-            if visual_key == "clinic_revenue_proxy" and cost_col not in df.columns:
-                raise ValueError("Clinic revenue proxy requires cost")
 
         # =================================================
         # ---------------- DIAGNOSTICS --------------------
