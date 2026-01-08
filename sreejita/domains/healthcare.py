@@ -975,15 +975,15 @@ class HealthcareDomain(BaseDomain):
                 non_entity = [v for v in selected if v.get("axis") != "entity"]
                 entity_only = [v for v in selected if v.get("axis") == "entity"]
                 selected = non_entity + entity_only[:2]
-                        # -------------------------------------------------
-                        # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
-                        # -------------------------------------------------
-                        selected.sort(
-                            key=lambda v: (
-                                ROLE_PRIORITY.index(v["role"])
-                                if v.get("role") in ROLE_PRIORITY else 99
-                            )
-                        )
+            # -------------------------------------------------
+            # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
+            # -------------------------------------------------
+            selected.sort(
+                key=lambda v: (
+                ROLE_PRIORITY.index(v["role"])
+                if v.get("role") in ROLE_PRIORITY else 99
+                )
+            )
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
