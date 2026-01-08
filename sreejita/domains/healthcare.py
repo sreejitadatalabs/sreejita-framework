@@ -684,10 +684,7 @@ class HealthcareDomain(BaseDomain):
         ):
 
             # 🚫 No KPI → no visual
-            if not any(
-                k.startswith(f"{sub_domain}_")
-                for k in kpis.keys()
-            ):
+            if sub_domain not in kpis.get("sub_domains", {}):
                 plt.close(fig)
                 return
 
@@ -760,11 +757,7 @@ class HealthcareDomain(BaseDomain):
             if not sig:
                 return f"{axis}|{visual_key}"
         
-            return "::".join([
-                visual_key,      # 👈 ADD THIS
-                axis,
-                str(cols.get("date")),
-            ])
+            return f"{visual_key}|{axis}"
 
         # -------------------------------------------------
         # VISUAL DISPATCH
@@ -803,7 +796,7 @@ class HealthcareDomain(BaseDomain):
                 role = visual_def["role"]
                 axis = visual_def["axis"]
             
-                sig = driver_signature(v.get("visual_key"), v.get("axis"), self.cols)
+                sig = driver_signature(visual_key, axis, self.cols)
                 if sig in used_drivers:
                     continue
             
@@ -818,7 +811,6 @@ class HealthcareDomain(BaseDomain):
                     sub_domain=sub,
                     register_visual=register_visual,
                 )
-
 
         # Ensure at least one non-time visual exists per sub-domain
         for sub, pool in candidates.items():
