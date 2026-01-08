@@ -1343,7 +1343,7 @@ class HealthcareDomain(BaseDomain):
                 if not fac_col or fac_col not in df.columns:
                     raise ValueError("Facility column missing")
                 fig, ax = plt.subplots()
-                df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
+                df[fac_col].value_counts().plot(kind="bar", ax=ax)
                 register_visual(fig, "pharm_therapeutic", "Therapeutic class spend", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
@@ -1415,7 +1415,7 @@ class HealthcareDomain(BaseDomain):
                 if not fac_col or fac_col not in df.columns:
                     raise ValueError("Facility column missing")
                 fig, ax = plt.subplots()
-                df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
+                df[fac_col].value_counts().plot(kind="bar", ax=ax)
                 register_visual(fig, "ph_prevalence", "Prevalence by group proxy", 0.85, 0.8, sub_domain, role, axis,)
                 return
     
