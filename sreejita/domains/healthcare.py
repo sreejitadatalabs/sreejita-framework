@@ -758,10 +758,6 @@ class HealthcareDomain(BaseDomain):
             sig = DRIVER_MAP.get(visual_key)
             if not sig:
                 return f"{axis}|{visual_key}"
-        
-            sig = DRIVER_MAP.get(visual_key)
-            if not sig:
-                return f"{axis}|{visual_key}"
             
             return f"{visual_key}|{axis}|{sig[-1]}"
 
@@ -848,7 +844,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.CLINIC.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    pass  # 🚫 clinic must explain flow & experience
+                    continue  # 🚫 clinic must explain flow & experience
         
             # -------------------------------------------------
             # FIX 3 — FORCE PHARMACY NON-TIME VISUALS
@@ -856,7 +852,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.PHARMACY.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    pass  # 🚫 pharmacy must explain cost & safety
+                    continue  # 🚫 pharmacy must explain cost & safety
 
             # -------------------------------------------------
             # FIX 4 — FORCE PUBLIC HEALTH NON-TIME VISUALS
@@ -864,7 +860,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    pass  # 🚫 public health must explain distribution & equity
+                    continue  # 🚫 public health must explain distribution & equity
         
             # -------------------------------------------------
             # DRIVER DEDUP (PREVENT SAME STORY TWICE)
@@ -937,8 +933,12 @@ class HealthcareDomain(BaseDomain):
                 time_only = [v for v in selected if v.get("axis") == "time"]
             
                 # force at least 2 non-time visuals if available
-                selected = non_time[:2] + time_only[:2]
-        
+                selected = []
+                selected.extend(non_time[:2])
+                selected.extend(time_only[:2])
+
+            selected = selected[:6]
+    
             # -------------------------------------------------
             # FIX 2 — HARD CAP TIME AXIS DOMINANCE
             # -------------------------------------------------
@@ -1132,10 +1132,15 @@ class HealthcareDomain(BaseDomain):
                 return
 
             if visual_key == "facility_mix":
+                fac_col = c.get("facility")
+                if not fac_col or fac_col not in df.columns:
+                    raise ValueError("Facility column missing")
+            
                 fig, ax = plt.subplots()
-                df[c.get("facility")].dropna().value_counts().plot(kind="pie", ax=ax)
+                df[fac_col].dropna().value_counts().plot(kind="pie", ax=ax)
                 register_visual(
-                    fig, "hospital_facility_mix",
+                    fig,
+                    "hospital_facility_mix",
                     "Facility mix distribution",
                     0.8, 0.75, sub_domain, role, axis
                 )
@@ -1334,6 +1339,9 @@ class HealthcareDomain(BaseDomain):
                 return
     
             if visual_key == "therapeutic_spend":
+                fac_col = c.get("facility")
+                if not fac_col or fac_col not in df.columns:
+                    raise ValueError("Facility column missing")
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
                 register_visual(fig, "pharm_therapeutic", "Therapeutic class spend", 0.85, 0.8, sub_domain, role, axis,)
@@ -1389,7 +1397,7 @@ class HealthcareDomain(BaseDomain):
             pop_col = c.get("population")
             flag_col = c.get("flag")
     
-            if visual_key == "incidence_geo":
+            if visual_key == "population_distribution":
                 fig, ax = plt.subplots()
                 df[pop_col].dropna().plot(kind="hist", ax=ax)
                 register_visual(fig, "ph_incidence", "Population incidence distribution", 0.95, 0.9, sub_domain, role, axis,)
@@ -1403,6 +1411,9 @@ class HealthcareDomain(BaseDomain):
                 return
     
             if visual_key == "prevalence_age":
+                fac_col = c.get("facility")
+                if not fac_col or fac_col not in df.columns:
+                    raise ValueError("Facility column missing")
                 fig, ax = plt.subplots()
                 df[c.get("facility")].value_counts().plot(kind="bar", ax=ax)
                 register_visual(fig, "ph_prevalence", "Prevalence by group proxy", 0.85, 0.8, sub_domain, role, axis,)
