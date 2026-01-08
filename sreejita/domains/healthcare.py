@@ -863,6 +863,14 @@ class HealthcareDomain(BaseDomain):
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
                     continue  # 🚫 pharmacy must explain cost & safety
+
+            # -------------------------------------------------
+            # FIX 4 — FORCE PUBLIC HEALTH NON-TIME VISUALS
+            # -------------------------------------------------
+            if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
+                non_time = [v for v in pool if v.get("axis") != "time"]
+                if len(non_time) < 2:
+                    continue  # 🚫 public health must explain distribution & equity
         
             # -------------------------------------------------
             # DRIVER DEDUP (PREVENT SAME STORY TWICE)
@@ -903,7 +911,7 @@ class HealthcareDomain(BaseDomain):
             selected = []
         
             for role in ROLE_PRIORITY:
-                for axis in ("time", "distribution", "composition", "entity"):
+                for axis in ("time", "distribution", "composition", "entity", "correlation"):
                     role_axis_candidates = [
                         v for v in axis_groups.get(axis, [])
                         if v.get("role") == role and v.get("confidence", 0) >= 0.4
@@ -921,6 +929,19 @@ class HealthcareDomain(BaseDomain):
         
             if not selected:
                 continue
+
+            # -------------------------------------------------
+            # FIX 3 — TIME AXIS MUST USE ≥2 DIFFERENT DRIVERS
+            # -------------------------------------------------
+            time_drivers = {
+                driver_signature(v.get("visual_key"), v.get("axis"), self.cols)
+                for v in selected if v.get("axis") == "time"
+            }
+            
+            if len(time_drivers) < 2:
+                non_time = [v for v in selected if v.get("axis") != "time"]
+                time_only = [v for v in selected if v.get("axis") == "time"]
+                selected = non_time + time_only[:2]
         
             # -------------------------------------------------
             # FIX 2 — HARD CAP TIME AXIS DOMINANCE
@@ -945,16 +966,24 @@ class HealthcareDomain(BaseDomain):
                 filtered.append(v)
         
             selected = filtered
-        
+
             # -------------------------------------------------
-            # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
+            # FIX 2 — FACILITY / CATEGORY OVERUSE PROTECTION
             # -------------------------------------------------
-            selected.sort(
-                key=lambda v: (
-                    ROLE_PRIORITY.index(v["role"])
-                    if v.get("role") in ROLE_PRIORITY else 99
-                )
-            )
+            entity_count = sum(1 for v in selected if v.get("axis") == "entity")
+            if entity_count > 2:
+                non_entity = [v for v in selected if v.get("axis") != "entity"]
+                entity_only = [v for v in selected if v.get("axis") == "entity"]
+                selected = non_entity + entity_only[:2]
+                        # -------------------------------------------------
+                        # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
+                        # -------------------------------------------------
+                        selected.sort(
+                            key=lambda v: (
+                                ROLE_PRIORITY.index(v["role"])
+                                if v.get("role") in ROLE_PRIORITY else 99
+                            )
+                        )
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
@@ -1732,7 +1761,6 @@ class HealthcareDomain(BaseDomain):
                     },
                     {
                         "sub_domain": sub,
-                        "display_order": ROLE_PRIORITY.index(role),
                         "level": "STRENGTH",
                         "title": "Public Health Intelligence Maturity",
                         "so_what": "Foundational analytics capabilities are in place.",
