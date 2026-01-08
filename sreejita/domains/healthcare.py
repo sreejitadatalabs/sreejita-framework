@@ -749,8 +749,14 @@ class HealthcareDomain(BaseDomain):
                 # ENTITY
                 "provider_utilization": ("entity", "doctor", cols.get("doctor")),
                 "prescribing_variance": ("entity", "doctor", cols.get("doctor")),
-                "order_heatmap": ("entity", "doctor_hour", cols.get("doctor")),,
-        
+                "order_heatmap": ("entity", "doctor_hour", cols.get("doctor")),
+
+                # -------- CLINIC EXPERIENCE / FLOW --------
+                "demographic_reach": ("dist", "facility", cols.get("facility")),
+                "referral_funnel": ("entity", "facility", cols.get("facility")),
+                "visit_day_pattern": ("dist", "weekday", cols.get("date")),
+                "no_show_by_day": ("time", "rate", cols.get("readmitted"))
+                
                 # COMPOSITION
                 "facility_mix": ("comp", "facility", cols.get("facility")),
                 "telehealth_mix": ("comp", "admit_type", cols.get("admit_type")),
@@ -769,7 +775,10 @@ class HealthcareDomain(BaseDomain):
         for sub in visual_subs:
     
             # KPI gate (clinic is permissive but not blind)
-            if sub != HealthcareSubDomain.CLINIC.value and not sub_has_any_kpi(sub):
+            if (
+                sub != HealthcareSubDomain.CLINIC.value
+                and not sub_has_any_kpi(sub)
+            ):
                 continue
     
             if sub == HealthcareSubDomain.CLINIC.value:
