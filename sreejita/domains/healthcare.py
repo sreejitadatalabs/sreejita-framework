@@ -755,7 +755,7 @@ class HealthcareDomain(BaseDomain):
                 "demographic_reach": ("dist", "facility", cols.get("facility")),
                 "referral_funnel": ("entity", "facility", cols.get("facility")),
                 "visit_day_pattern": ("dist", "weekday", cols.get("date")),
-                "no_show_by_day": ("time", "rate", cols.get("readmitted"))
+                "no_show_by_day": ("time", "rate", cols.get("readmitted")),
                 
                 # COMPOSITION
                 "facility_mix": ("comp", "facility", cols.get("facility")),
