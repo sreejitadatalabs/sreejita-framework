@@ -53,6 +53,7 @@ HEALTHCARE_VISUAL_MAP: Dict[str, List[Dict[str, str]]] = {
         {"key": "facility_mix", "role": "financial", "axis": "composition"},
         {"key": "mortality_trend", "role": "quality", "axis": "time"},
         {"key": "ed_boarding", "role": "experience", "axis": "time"},
+        {"key": "hospital_revenue_proxy", "role": "financial", "axis": "time"},
     ],
 
     HealthcareSubDomain.CLINIC.value: [
@@ -759,7 +760,11 @@ class HealthcareDomain(BaseDomain):
             if not sig:
                 return f"{axis}|{visual_key}"
         
-            return "::".join(str(x) for x in sig if x)
+            return "::".join([
+                visual_key,      # 👈 ADD THIS
+                axis,
+                str(cols.get("date")),
+            ])
 
         # -------------------------------------------------
         # VISUAL DISPATCH
@@ -798,9 +803,9 @@ class HealthcareDomain(BaseDomain):
                 role = visual_def["role"]
                 axis = visual_def["axis"]
             
-                sig = driver_signature(visual_key, axis, self.cols)
+                sig = driver_signature(v.get("visual_key"), v.get("axis"), self.cols)
                 if sig in used_drivers:
-                    continue  # 🚫 same story, skip early
+                    continue
             
                 used_drivers.add(sig)
             
@@ -939,9 +944,11 @@ class HealthcareDomain(BaseDomain):
             }
             
             if len(time_drivers) < 2:
-                non_time = [v for v in selected if v.get("axis") != "time"]
+                non_time = [v for v in pool if v.get("axis") != "time" and v.get("confidence", 0) >= 0.4]
                 time_only = [v for v in selected if v.get("axis") == "time"]
-                selected = non_time + time_only[:2]
+            
+                # force at least 2 non-time visuals if available
+                selected = non_time[:2] + time_only[:2]
         
             # -------------------------------------------------
             # FIX 2 — HARD CAP TIME AXIS DOMINANCE
@@ -975,6 +982,15 @@ class HealthcareDomain(BaseDomain):
                 non_entity = [v for v in selected if v.get("axis") != "entity"]
                 entity_only = [v for v in selected if v.get("axis") == "entity"]
                 selected = non_entity + entity_only[:2]
+
+            # -------------------------------------------------
+            # FIX — CORRELATION (SCATTER) OVERUSE PROTECTION
+            # -------------------------------------------------
+            corr_count = sum(1 for v in selected if v.get("axis") == "correlation")
+            if corr_count > 1:
+                non_corr = [v for v in selected if v.get("axis") != "correlation"]
+                corr_only = [v for v in selected if v.get("axis") == "correlation"]
+                selected = non_corr + corr_only[:1]
             # -------------------------------------------------
             # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
             # -------------------------------------------------
@@ -995,7 +1011,13 @@ class HealthcareDomain(BaseDomain):
             
             # Require at least 3 distinct drivers for a valid story
             if len(driver_set) < 3:
-                continue  # 🚫 narrative too repetitive
+                # try to enrich from pool
+                extras = [
+                    v for v in pool
+                    if driver_signature(v["visual_key"], v["axis"], self.cols) not in driver_set
+                    and v.get("confidence", 0) >= 0.4
+                ]
+                selected.extend(extras[: (3 - len(driver_set))])
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
