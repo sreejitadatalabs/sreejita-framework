@@ -759,7 +759,11 @@ class HealthcareDomain(BaseDomain):
             if not sig:
                 return f"{axis}|{visual_key}"
         
-            return f"{visual_key}|{axis}"
+            sig = DRIVER_MAP.get(visual_key)
+            if not sig:
+                return f"{axis}|{visual_key}"
+            
+            return f"{visual_key}|{axis}|{sig[-1]}"
 
         # -------------------------------------------------
         # VISUAL DISPATCH
@@ -810,16 +814,12 @@ class HealthcareDomain(BaseDomain):
                     continue
 
         # Ensure at least one non-time visual exists per sub-domain
-        for sub, pool in candidates.items():
-            required_axes = {"time", "distribution"}
-            axes_present = {v["axis"] for v in pool}
-            
-            # Enforce at least one time + one non-time visual
-            if "time" not in axes_present:
-                continue
-            
-            if axes_present == {"time"}:
-                continue  # 🚫 reject time-only narratives
+        # 🚫 Remove time-only narratives early
+        for sub in list(candidates.keys()):
+            pool = candidates[sub]
+            axes = {v["axis"] for v in pool}
+            if axes == {"time"}:
+                del candidates[sub]
             
         # -------------------------------------------------
         # FINAL SELECTION (MAX 6 PER SUBDOMAIN, ROLE + DRIVER BALANCED)
@@ -998,7 +998,7 @@ class HealthcareDomain(BaseDomain):
                 for v in selected
             }
             
-            # Require at least 3 distinct drivers for a valid story
+            # Require at least 2 distinct drivers for a valid story
             if len(driver_set) < 2:
                 # try to enrich from pool
                 extras = [
@@ -1007,6 +1007,8 @@ class HealthcareDomain(BaseDomain):
                     and v.get("confidence", 0) >= 0.4
                 ]
                 selected.extend(extras[: (3 - len(driver_set))])
+
+            selected = selected[:6]
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
