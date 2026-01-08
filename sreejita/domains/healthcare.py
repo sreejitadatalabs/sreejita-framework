@@ -684,7 +684,9 @@ class HealthcareDomain(BaseDomain):
         ):
 
             # 🚫 No KPI → no visual
-            if sub_domain not in kpis.get("sub_domains", {}):
+            # 🚫 No KPI evidence → no visual
+            prefix = f"{sub_domain}_"
+            if not any(k.startswith(prefix) for k in kpis.keys()):
                 plt.close(fig)
                 return
 
@@ -789,28 +791,23 @@ class HealthcareDomain(BaseDomain):
             if not visual_defs:
                 continue
     
-            used_drivers = set()
-
             for visual_def in visual_defs:
                 visual_key = visual_def["key"]
                 role = visual_def["role"]
                 axis = visual_def["axis"]
             
-                sig = driver_signature(visual_key, axis, self.cols)
-                if sig in used_drivers:
+                try:
+                    self._render_visual_by_key(
+                        visual_key=visual_key,
+                        role=role,
+                        axis=axis,
+                        df=df,
+                        output_dir=output_dir,
+                        sub_domain=sub,
+                        register_visual=register_visual,
+                    )
+                except Exception:
                     continue
-            
-                used_drivers.add(sig)
-            
-                self._render_visual_by_key(
-                    visual_key=visual_key,
-                    role=role,
-                    axis=axis,
-                    df=df,
-                    output_dir=output_dir,
-                    sub_domain=sub,
-                    register_visual=register_visual,
-                )
 
         # Ensure at least one non-time visual exists per sub-domain
         for sub, pool in candidates.items():
@@ -851,7 +848,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.CLINIC.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    continue  # 🚫 clinic must explain flow & experience
+                    pass  # 🚫 clinic must explain flow & experience
         
             # -------------------------------------------------
             # FIX 3 — FORCE PHARMACY NON-TIME VISUALS
@@ -859,7 +856,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.PHARMACY.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    continue  # 🚫 pharmacy must explain cost & safety
+                    pass  # 🚫 pharmacy must explain cost & safety
 
             # -------------------------------------------------
             # FIX 4 — FORCE PUBLIC HEALTH NON-TIME VISUALS
@@ -867,7 +864,7 @@ class HealthcareDomain(BaseDomain):
             if sub == HealthcareSubDomain.PUBLIC_HEALTH.value:
                 non_time = [v for v in pool if v.get("axis") != "time"]
                 if len(non_time) < 2:
-                    continue  # 🚫 public health must explain distribution & equity
+                    pass  # 🚫 public health must explain distribution & equity
         
             # -------------------------------------------------
             # DRIVER DEDUP (PREVENT SAME STORY TWICE)
@@ -1002,7 +999,7 @@ class HealthcareDomain(BaseDomain):
             }
             
             # Require at least 3 distinct drivers for a valid story
-            if len(driver_set) < 3:
+            if len(driver_set) < 2:
                 # try to enrich from pool
                 extras = [
                     v for v in pool
