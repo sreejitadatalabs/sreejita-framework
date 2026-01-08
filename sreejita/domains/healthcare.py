@@ -984,6 +984,18 @@ class HealthcareDomain(BaseDomain):
                 if v.get("role") in ROLE_PRIORITY else 99
                 )
             )
+            
+            # -------------------------------------------------
+            # FINAL DRIVER DIVERSITY ENFORCEMENT (CRITICAL)
+            # -------------------------------------------------
+            driver_set = {
+                driver_signature(v["visual_key"], v["axis"], self.cols)
+                for v in selected
+            }
+            
+            # Require at least 3 distinct drivers for a valid story
+            if len(driver_set) < 3:
+                continue  # 🚫 narrative too repetitive
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
