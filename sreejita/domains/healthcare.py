@@ -722,12 +722,12 @@ class HealthcareDomain(BaseDomain):
 
         def driver_signature(visual_key: str, axis: str, cols: Dict[str, str]) -> str:
             """
-            Strong narrative driver identity.
-            Prevents date-only storytelling dominance.
+            HARD narrative identity.
+            Same column + same aggregation == SAME STORY.
             """
         
             DRIVER_MAP = {
-                # -------- TIME (metric + time) --------
+                # TIME
                 "admission_volume_trend": ("time", "count", cols.get("date")),
                 "visit_volume_trend": ("time", "count", cols.get("date")),
                 "dispense_volume_trend": ("time", "count", cols.get("fill_date")),
@@ -738,28 +738,28 @@ class HealthcareDomain(BaseDomain):
                 "clinic_revenue_proxy": ("time", "sum", cols.get("cost")),
                 "spend_velocity": ("time", "sum", cols.get("cost")),
         
-                # -------- DISTRIBUTION --------
-                "los_distribution": ("dist", cols.get("los")),
-                "wait_time_split": ("dist", cols.get("duration")),
-                "inventory_turn": ("dist", cols.get("supply")),
-                "cost_per_rx_distribution": ("dist", cols.get("cost")),
+                # DISTRIBUTION
+                "los_distribution": ("dist", "los", cols.get("los")),
+                "wait_time_split": ("dist", "duration", cols.get("duration")),
+                "inventory_turn": ("dist", "supply", cols.get("supply")),
+                "cost_per_rx_distribution": ("dist", "cost", cols.get("cost")),
         
-                # -------- ENTITY --------
-                "provider_utilization": ("entity", cols.get("doctor")),
-                "prescribing_variance": ("entity", cols.get("doctor")),
-                "order_heatmap": ("entity", cols.get("doctor")),
+                # ENTITY
+                "provider_utilization": ("entity", "doctor", cols.get("doctor")),
+                "prescribing_variance": ("entity", "doctor", cols.get("doctor")),
+                "order_heatmap": ("entity", "doctor_time", cols.get("doctor"), cols.get("date")),
         
-                # -------- COMPOSITION --------
-                "facility_mix": ("comp", cols.get("facility")),
-                "telehealth_mix": ("comp", cols.get("admit_type")),
-                "therapeutic_spend": ("comp", cols.get("facility")),
+                # COMPOSITION
+                "facility_mix": ("comp", "facility", cols.get("facility")),
+                "telehealth_mix": ("comp", "admit_type", cols.get("admit_type")),
+                "therapeutic_spend": ("comp", "facility", cols.get("facility")),
             }
         
             sig = DRIVER_MAP.get(visual_key)
             if not sig:
-                return f"{axis}:{visual_key}"
+                return f"{axis}|{visual_key}"
         
-            return "|".join(str(x) for x in sig if x)
+            return "::".join(str(x) for x in sig if x)
 
         # -------------------------------------------------
         # VISUAL DISPATCH
@@ -852,10 +852,17 @@ class HealthcareDomain(BaseDomain):
             # FIX 3 — FORCE CLINIC NON-TIME VISUALS
             # -------------------------------------------------
             if sub == HealthcareSubDomain.CLINIC.value:
-                required_roles = {"flow", "experience"}
-                roles_present = {v.get("role") for v in pool if v.get("axis") != "time"}
-                if not required_roles.issubset(roles_present):
-                    continue  # 🚫 clinic must explain flow + experience
+                non_time = [v for v in pool if v.get("axis") != "time"]
+                if len(non_time) < 2:
+                    continue  # 🚫 clinic must explain flow & experience
+        
+            # -------------------------------------------------
+            # FIX 3 — FORCE PHARMACY NON-TIME VISUALS
+            # -------------------------------------------------
+            if sub == HealthcareSubDomain.PHARMACY.value:
+                non_time = [v for v in pool if v.get("axis") != "time"]
+                if len(non_time) < 2:
+                    continue  # 🚫 pharmacy must explain cost & safety
         
             # -------------------------------------------------
             # DRIVER DEDUP (PREVENT SAME STORY TWICE)
@@ -884,23 +891,11 @@ class HealthcareDomain(BaseDomain):
             for v in deduped_pool:
                 axis_groups.setdefault(v.get("axis"), []).append(v)
         
-            # Must have time + at least one non-time axis
             if "time" not in axis_groups:
                 continue
         
             if set(axis_groups.keys()) == {"time"}:
                 continue  # 🚫 reject time-only narrative
-        
-            # -------------------------------------------------
-            # REJECT NARRATIVES DRIVEN BY SINGLE COLUMN
-            # -------------------------------------------------
-            driver_set = {
-                driver_signature(v.get("visual_key"), v.get("axis"), self.cols)
-                for v in deduped_pool
-            }
-        
-            if len(driver_set) < 2:
-                continue  # 🚫 narrative too thin
         
             # -------------------------------------------------
             # ROLE + AXIS DIVERSITY SELECTION
@@ -919,7 +914,7 @@ class HealthcareDomain(BaseDomain):
                             key=lambda v: v.get("importance", 0) * v.get("confidence", 0),
                         )
                         selected.append(best)
-                        break  # move to next role
+                        break
         
                 if len(selected) >= 6:
                     break
@@ -928,7 +923,16 @@ class HealthcareDomain(BaseDomain):
                 continue
         
             # -------------------------------------------------
-            # FIX 4 — HARD LIMIT HISTOGRAM (DISTRIBUTION) VISUALS
+            # FIX 2 — HARD CAP TIME AXIS DOMINANCE
+            # -------------------------------------------------
+            time_count = sum(1 for v in selected if v.get("axis") == "time")
+            if time_count > 3:
+                non_time = [v for v in selected if v.get("axis") != "time"]
+                time_only = [v for v in selected if v.get("axis") == "time"]
+                selected = non_time + time_only[:3]
+        
+            # -------------------------------------------------
+            # FIX 4 — HARD LIMIT DISTRIBUTION (HISTOGRAM) VISUALS
             # -------------------------------------------------
             filtered = []
             hist_count = 0
@@ -937,7 +941,7 @@ class HealthcareDomain(BaseDomain):
                 if v.get("axis") == "distribution":
                     hist_count += 1
                     if hist_count > 2:
-                        continue  # 🚫 skip extra histograms
+                        continue
                 filtered.append(v)
         
             selected = filtered
@@ -945,17 +949,12 @@ class HealthcareDomain(BaseDomain):
             # -------------------------------------------------
             # FIX 5 — ENSURE EXECUTIVE STORY ARC ORDER
             # -------------------------------------------------
-            def story_rank(v):
-                role = v.get("role")
-                axis = v.get("axis")
-            
-                # Volume-over-time first ONLY if volume role
-                if role == "volume" and axis == "time":
-                    return 0
-            
-                return ROLE_PRIORITY.index(role) if role in ROLE_PRIORITY else 99
-            
-            selected.sort(key=story_rank)
+            selected.sort(
+                key=lambda v: (
+                    ROLE_PRIORITY.index(v["role"])
+                    if v.get("role") in ROLE_PRIORITY else 99
+                )
+            )
         
             # -------------------------------------------------
             # PUBLISH (MAX 6)
