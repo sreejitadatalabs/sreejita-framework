@@ -105,6 +105,15 @@ def derive_risk_level(score: int) -> Dict[str, Any]:
 
     return {"label": "CRITICAL", "score": score}
 
+def infer_domain_from_kpis(kpis: Dict[str, Any]) -> str:
+    """
+    Backward-compatible domain inference.
+    """
+    return (
+        kpis.get("domain")
+        or kpis.get("domain_name")
+        or "retail"   # safe default for v3.5.x
+    )
 
 # =====================================================
 # EXECUTIVE KPI SELECTION (CAPABILITY-AWARE, MAX 9)
@@ -369,11 +378,14 @@ def normalize_recommendations(
 # =====================================================
 
 def build_executive_payload(
-    domain: str,
     kpis: Dict[str, Any],
     insights: List[Dict[str, Any]],
     recommendations: List[Dict[str, Any]],
+    domain: str = None,
 ) -> Dict[str, Any]:
+
+    if not domain:
+        domain = infer_domain_from_kpis(kpis)
 
     primary_sub = kpis.get("primary_sub_domain", "unknown")
 
@@ -395,8 +407,8 @@ def build_executive_payload(
         "recommendations": normalize_recommendations(recommendations),
         "board_readiness": board,
         "sub_domain": primary_sub,
+        "domain": domain,
     }
-
 
 # =====================================================
 # PER-SUB-DOMAIN EXECUTIVE COGNITION
@@ -440,10 +452,10 @@ def build_subdomain_executive_payloads(
         sub_kpis["primary_sub_domain"] = sub
 
         results[sub] = build_executive_payload(
+            sub_kpis,
+            sub_insights,
+            sub_recs,
             domain=domain,
-            kpis=sub_kpis,
-            insights=sub_insights,
-            recommendations=sub_recs,
         )
 
     return results
