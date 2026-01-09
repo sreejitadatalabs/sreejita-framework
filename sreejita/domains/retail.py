@@ -670,17 +670,15 @@ class RetailDomain(BaseDomain):
         # =================================================
         if RetailSubDomain.SALES.value in active_subs:
             sub = RetailSubDomain.SALES.value
-            if sub not in kpis.get("_domain_kpi_map", {}):
-                continue
-    
-            if self.time_col and c.get("sales"):
+        
+            if sub in kpis.get("_domain_kpi_map", {}):
                 # 1. Sales trend
-                fig, ax = plt.subplots()
-                df.set_index(self.time_col).resample("M")[c["sales"]].sum().plot(ax=ax)
-                ax.set_title("Monthly Sales Trend")
-                ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                save(fig, f"{sub}_sales_trend.png","Sales over time", 0.95, sub, "sales", "time")
-    
+                if self.time_col and c.get("sales"):
+                    fig, ax = plt.subplots()
+                    df.set_index(self.time_col).resample("M")[c["sales"]].sum().plot(ax=ax)
+                    ax.set_title("Monthly Sales Trend")
+                    save(fig, f"{sub}_sales_trend.png", "Sales over time", 0.95, sub, "sales", "time")
+
                 # 2. Sales distribution
                 fig, ax = plt.subplots()
                 df[c["sales"]].dropna().plot(kind="hist", bins=20, ax=ax)
@@ -739,15 +737,15 @@ class RetailDomain(BaseDomain):
         # =================================================
         if RetailSubDomain.INVENTORY.value in active_subs:
             sub = RetailSubDomain.INVENTORY.value
+            
             if sub not in kpis.get("_domain_kpi_map", {}):
-                continue
-    
-            if c.get("inventory"):
-                # 1. Inventory level distribution
-                fig, ax = plt.subplots()
-                df[c["inventory"]].plot(kind="hist", bins=20, ax=ax)
-                ax.set_title("Inventory Level Distribution")
-                save(fig, f"{sub}_inv_dist.png", "Stock level spread", 0.9, sub, "inventory", "distribution")
+                
+                if c.get("inventory"):
+                    # 1. Inventory level distribution
+                    fig, ax = plt.subplots()
+                    df[c["inventory"]].plot(kind="hist", bins=20, ax=ax)
+                    ax.set_title("Inventory Level Distribution")
+                    save(fig, f"{sub}_inv_dist.png", "Stock level spread", 0.9, sub, "inventory", "distribution")
     
                 # 2. Stockout ratio pie
                 rate = (df[c["inventory"]] <= 0).mean()
