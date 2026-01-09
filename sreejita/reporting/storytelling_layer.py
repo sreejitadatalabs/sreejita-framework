@@ -1,9 +1,13 @@
 # =====================================================
 # CLIENT STORYTELLING LAYER
 # Non-Analytical | Non-Invasive | Executive-Safe
+# Phase 1: Narrative Framing
+# Phase 2: Comparative / Delta Insights
 # =====================================================
 
 from typing import List, Dict, Any
+import pandas as pd
+
 
 # -----------------------------------------------------
 # RULES: INFO → OPPORTUNITY (SAFE PROMOTION)
@@ -36,7 +40,7 @@ OPPORTUNITY_PATTERNS = {
 
 
 # -----------------------------------------------------
-# STRATEGIC NARRATIVE TEMPLATES (1–2 MAX)
+# STRATEGIC NARRATIVE TEMPLATES (MAX 2)
 # -----------------------------------------------------
 
 def generate_strategic_narratives(
@@ -46,8 +50,8 @@ def generate_strategic_narratives(
 
     narratives: List[Dict[str, Any]] = []
 
-    total_sales = kpis.get("sales_total_sales") or kpis.get("total_sales")
-    aov = kpis.get("sales_aov") or kpis.get("aov")
+    total_sales = kpis.get("total_sales") or kpis.get("sales_total_sales")
+    aov = kpis.get("aov") or kpis.get("sales_aov")
 
     if total_sales and aov:
         narratives.append({
@@ -58,7 +62,7 @@ def generate_strategic_narratives(
                 "creates an opportunity to scale growth through targeted "
                 "commercial initiatives."
             ),
-            "confidence": 0.8,
+            "confidence": 0.80,
         })
 
     if kpis.get("primary_sub_domain") == "sales":
@@ -74,34 +78,31 @@ def generate_strategic_narratives(
 
     return narratives[:2]
 
+
 # =====================================================
-# PHASE 2 — COMPARATIVE / DELTA INSIGHTS
+# PHASE 2 — COMPARATIVE / DELTA INSIGHTS (MAX 3)
 # =====================================================
 
 def generate_comparative_insights(
-    df,
+    df: pd.DataFrame,
     kpis: Dict[str, Any],
-    domain: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Generates contrast-based insights using existing data only.
-    No new KPIs. No recomputation.
-    """
 
     insights: List[Dict[str, Any]] = []
+
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return insights
+
+    resolved = kpis.get("_resolved_columns", {}) or {}
+    sales_col = resolved.get("sales")
+    product_col = resolved.get("product")
+    category_col = resolved.get("category")
 
     # -------------------------------
     # 1. Top vs Long-Tail Products
     # -------------------------------
-    sales_col = kpis.get("_resolved_columns", {}).get("sales")
-    product_col = kpis.get("_resolved_columns", {}).get("product")
-
-    if sales_col and product_col and sales_col in df.columns:
-        prod_sales = (
-            df.groupby(product_col)[sales_col]
-            .sum()
-            .sort_values(ascending=False)
-        )
+    if sales_col in df.columns and product_col in df.columns:
+        prod_sales = df.groupby(product_col)[sales_col].sum().sort_values(ascending=False)
 
         if len(prod_sales) >= 10:
             top_n = max(1, int(len(prod_sales) * 0.2))
@@ -114,18 +115,16 @@ def generate_comparative_insights(
                     f"The top {top_n} products contribute approximately "
                     f"{top_share:.0%} of total revenue, indicating a "
                     "power-law dynamic that can be strategically leveraged "
-                    "or actively diversified."
+                    "or diversified."
                 ),
-                "confidence": 0.8,
+                "confidence": 0.80,
                 "sub_domain": "sales",
             })
 
     # -------------------------------
     # 2. Dominant Category vs Rest
     # -------------------------------
-    category_col = kpis.get("_resolved_columns", {}).get("category")
-
-    if sales_col and category_col and category_col in df.columns:
+    if sales_col in df.columns and category_col in df.columns:
         cat_sales = df.groupby(category_col)[sales_col].sum().sort_values(ascending=False)
 
         if len(cat_sales) >= 3:
@@ -150,51 +149,49 @@ def generate_comparative_insights(
     # -------------------------------
     # 3. Sales Variability Signal
     # -------------------------------
-    if sales_col and sales_col in df.columns:
+    if sales_col in df.columns:
         mean_sales = df[sales_col].mean()
         std_sales = df[sales_col].std()
 
         if mean_sales > 0:
             cv = std_sales / mean_sales
 
-            if cv >= 0.5:
-                descriptor = "high"
-            elif cv >= 0.25:
-                descriptor = "moderate"
-            else:
-                descriptor = "low"
+            descriptor = (
+                "high" if cv >= 0.5 else
+                "moderate" if cv >= 0.25 else
+                "low"
+            )
 
             insights.append({
                 "level": "INFO",
                 "title": "Sales Variability Profile",
                 "so_what": (
                     f"Sales variability is {descriptor} relative to average volume, "
-                    "suggesting demand is influenced by commercial levers "
-                    "such as pricing, promotion, or assortment mix."
+                    "suggesting demand is influenced by commercial levers such as "
+                    "pricing, promotion, or assortment mix."
                 ),
-                "confidence": 0.7,
+                "confidence": 0.70,
                 "sub_domain": "sales",
             })
 
-    return insights
+    return insights[:3]
+
 
 # -----------------------------------------------------
-# MAIN ENTRY: ENHANCE INSIGHTS
+# MAIN ENTRY: APPLY STORYTELLING (PHASE 1 + 2)
 # -----------------------------------------------------
 
 def apply_storytelling_layer(
     insights: List[Dict[str, Any]],
     kpis: Dict[str, Any],
+    df: pd.DataFrame,
     domain: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Enhances insights for client storytelling WITHOUT
-    changing analytical truth.
-    """
 
     enhanced: List[Dict[str, Any]] = []
     promoted = 0
 
+    # ---------- Phase 1: Narrative Promotion ----------
     for ins in insights:
         if not isinstance(ins, dict):
             continue
@@ -221,11 +218,10 @@ def apply_storytelling_layer(
         if not rewritten:
             enhanced.append(ins)
 
-    # Add strategic narratives (max 2)
+    # ---------- Strategic Narratives ----------
     enhanced.extend(generate_strategic_narratives(kpis, domain))
-    # After Phase 1 enhancements
-    enhanced.extend(
-        generate_comparative_insights(df, kpis, domain)
-    )
+
+    # ---------- Phase 2: Comparative Insights ----------
+    enhanced.extend(generate_comparative_insights(df, kpis))
 
     return enhanced
