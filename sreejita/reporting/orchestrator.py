@@ -14,7 +14,7 @@ from sreejita.domains.router_v2 import detect_domain
 from sreejita.domains.registry import registry
 
 from sreejita.reporting.storytelling_layer import apply_storytelling_layer
-from sreejita.reporting.executive_cognition import (
+from sreejita.narrative.executive_cognition import (
     build_executive_payload,
     build_subdomain_executive_payloads,
 )
