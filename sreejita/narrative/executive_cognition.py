@@ -153,17 +153,31 @@ def structure_insights(
     insights: List[Dict[str, Any]],
     domain: str,
 ) -> Dict[str, Any]:
+    """
+    Executive-governed insight structuring.
+
+    GUARANTEES:
+    - Exactly ONE comparative (Phase-2) insight is surfaced if present
+    - Phase-1 opportunities remain visible
+    - Risk / warning governance is preserved
+    - No insight flooding
+    """
 
     profile = get_domain_profile(domain)
     insights = insights or []
 
-    normalized = []
+    # -------------------------------------------------
+    # Normalize levels (domain-aware)
+    # -------------------------------------------------
+    normalized: List[Dict[str, Any]] = []
 
     for i in insights:
         if not isinstance(i, dict):
             continue
 
         lvl = i.get("level", "INFO")
+
+        # Optional escalation (healthcare, supply chain)
         if lvl == "INFO" and profile["escalate_info"]:
             lvl = "WARNING"
 
@@ -171,49 +185,100 @@ def structure_insights(
         item["level"] = lvl
         normalized.append(item)
 
-    # -------------------------------
-    # FORCE INCLUDE ONE COMPARATIVE INSIGHT
-    # -------------------------------
+    # -------------------------------------------------
+    # Detect Phase-2 (Comparative) Insights
+    # -------------------------------------------------
     comparative_keywords = (
         "top vs long-tail",
         "category dominance",
         "variability",
     )
 
-    comparative = [
+    comparative: List[Dict[str, Any]] = [
         i for i in normalized
         if any(k in i.get("title", "").lower() for k in comparative_keywords)
-    ][:1]
+    ][:1]   # 🔒 HARD CAP = 1
 
-    # -------------------------------
-    # STANDARD BUCKETING
-    # -------------------------------
-    strengths = comparative + [
-        i for i in normalized
-        if i["level"] in ("STRENGTH", "OPPORTUNITY")
-        and i not in comparative
+    # -------------------------------------------------
+    # Bucket remaining insights
+    # -------------------------------------------------
+    remaining = [i for i in normalized if i not in comparative]
+
+    strengths = (
+        comparative
+        + [
+            i for i in remaining
+            if i.get("level") in ("STRENGTH", "OPPORTUNITY")
+        ]
+    )[:3]   # 🔒 HARD CAP
+
+    warnings = [
+        i for i in remaining
+        if i.get("level") == "WARNING"
     ][:2]
 
-    warnings = [i for i in normalized if i["level"] == "WARNING"][:2]
-    risks = [i for i in normalized if i["level"] == "RISK"][:1]
+    risks = [
+        i for i in remaining
+        if i.get("level") == "RISK"
+    ][:1]
 
-    avg_conf = round(
+    # -------------------------------------------------
+    # Composite confidence
+    # -------------------------------------------------
+    avg_confidence = round(
         sum(float(i.get("confidence", 0.7)) for i in normalized)
         / max(len(normalized), 1),
         2,
     )
 
+    # -------------------------------------------------
+    # Domain-tone executive summary
+    # -------------------------------------------------
+    summary_by_tone = {
+        "clinical": (
+            "Operational signals indicate areas requiring close monitoring "
+            "and structured intervention."
+        ),
+        "commercial": (
+            "Performance demonstrates measurable strengths with "
+            "clear strategic leverage points."
+        ),
+        "financial": (
+            "Financial indicators show a stable position with "
+            "targeted optimization potential."
+        ),
+        "growth": (
+            "Growth momentum is visible with opportunities "
+            "to accelerate impact."
+        ),
+        "operational": (
+            "Operational performance is generally stable with "
+            "identifiable efficiency levers."
+        ),
+        "people": (
+            "People metrics suggest balanced workforce dynamics "
+            "with improvement opportunities."
+        ),
+        "experience": (
+            "Customer experience signals show engagement strength "
+            "with areas to enhance loyalty."
+        ),
+    }
+
+    # -------------------------------------------------
+    # FINAL STRUCTURED OUTPUT
+    # -------------------------------------------------
     return {
         "strengths": strengths,
         "warnings": warnings,
         "risks": risks,
         "composite": {
             "title": "Overall Executive Assessment",
-            "summary": (
-                "Performance shows measurable strengths with "
-                "clear strategic leverage points."
+            "summary": summary_by_tone.get(
+                profile["tone"],
+                summary_by_tone["commercial"],
             ),
-            "confidence": avg_conf,
+            "confidence": avg_confidence,
         },
     }
 
