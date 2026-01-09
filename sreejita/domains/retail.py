@@ -7,6 +7,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from matplotlib.ticker import FuncFormatter
+from enum import Enum
+
+from sreejita.core.column_resolver import resolve_column, resolve_semantics
+from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
+from .base import BaseDomain
 
 # =====================================================
 # HELPERS — RETAIL (DOMAIN-AGNOSTIC, SAFE)
@@ -177,6 +182,98 @@ def _market_basket_lift(
 
     except Exception:
         return []
+
+# =====================================================
+# RETAIL SUB-DOMAINS (AUTHORITATIVE)
+# =====================================================
+
+class RetailSubDomain(str, Enum):
+    SALES = "sales"
+    INVENTORY = "inventory"
+    CUSTOMER = "customer"
+    PRICING = "pricing"
+    STORE_OPERATIONS = "store_operations"
+    MERCHANDISING = "merchandising"
+    MIXED = "mixed"
+    UNKNOWN = "unknown"
+
+
+# =====================================================
+# RETAIL SUB-DOMAIN INFERENCE (CAPABILITY-BASED)
+# =====================================================
+
+def infer_retail_subdomains(
+    df: pd.DataFrame,
+    cols: Dict[str, str],
+) -> Dict[str, float]:
+
+    semantics = resolve_semantics(df)
+    scores: Dict[str, float] = {}
+
+    if semantics.get("has_order_id") and semantics.get("has_sales_amount"):
+        score = 0.55
+        if semantics.get("has_order_date"):
+            score += 0.15
+        if semantics.get("has_quantity"):
+            score += 0.10
+        scores[RetailSubDomain.SALES.value] = round(min(score, 0.9), 2)
+
+    if semantics.get("has_inventory_level"):
+        score = 0.55
+        if semantics.get("has_product_id"):
+            score += 0.15
+        if semantics.get("has_cost"):
+            score += 0.10
+        scores[RetailSubDomain.INVENTORY.value] = round(min(score, 0.9), 2)
+
+    if semantics.get("has_customer_id") and semantics.get("has_order_id"):
+        score = 0.55
+        if semantics.get("has_sales_amount"):
+            score += 0.10
+        scores[RetailSubDomain.CUSTOMER.value] = round(min(score, 0.9), 2)
+
+    if semantics.get("has_price") or semantics.get("has_discount"):
+        scores[RetailSubDomain.PRICING.value] = 0.65
+
+    if semantics.get("has_store_id"):
+        scores[RetailSubDomain.STORE_OPERATIONS.value] = 0.6
+
+    if semantics.get("has_product_id") and semantics.get("has_category"):
+        scores[RetailSubDomain.MERCHANDISING.value] = 0.7
+
+    return scores
+
+# =====================================================
+# RETAIL DOMAIN DETECTOR (v3.6 CANONICAL)
+# =====================================================
+
+class RetailDomainDetector(BaseDomainDetector):
+    domain_name = "retail"
+
+    def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
+        if df is None or df.empty:
+            return DomainDetectionResult(None, 0.0, {})
+
+        semantics = resolve_semantics(df)
+
+        anchors = [
+            semantics.get("has_order_id"),
+            semantics.get("has_sales_amount"),
+            semantics.get("has_product_id"),
+            semantics.get("has_order_date"),
+        ]
+
+        score = sum(int(x) for x in anchors)
+        if score == 0:
+            return DomainDetectionResult(None, 0.0, semantics)
+
+        confidence = min(0.30 + score * 0.15, 0.95)
+
+        return DomainDetectionResult(
+            domain="retail",
+            confidence=round(confidence, 2),
+            signals=semantics,
+        )
 
 # =====================================================
 # RETAIL DOMAIN (UNIVERSAL v3.6)
@@ -580,7 +677,7 @@ class RetailDomain(BaseDomain):
                 df.set_index(self.time_col).resample("M")[c["sales"]].sum().plot(ax=ax)
                 ax.set_title("Monthly Sales Trend")
                 ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
-                save(fig, "sales_trend.png", "Sales over time", 0.95, sub, "sales", "time")
+                save(fig, f"{sub}_sales_trend.png","Sales over time", 0.95, sub, "sales", "time")
     
                 # 2. Sales distribution
                 fig, ax = plt.subplots()
@@ -1107,162 +1204,6 @@ class RetailDomain(BaseDomain):
             })
     
         return recommendations
-
-from enum import Enum
-from typing import Dict
-import pandas as pd
-
-from sreejita.core.column_resolver import resolve_semantics
-from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
-
-
-# =====================================================
-# RETAIL SUB-DOMAINS (AUTHORITATIVE)
-# =====================================================
-
-class RetailSubDomain(str, Enum):
-    SALES = "sales"
-    INVENTORY = "inventory"
-    CUSTOMER = "customer"
-    PRICING = "pricing"
-    STORE_OPERATIONS = "store_operations"
-    MERCHANDISING = "merchandising"
-    MIXED = "mixed"
-    UNKNOWN = "unknown"
-
-
-# =====================================================
-# RETAIL SUB-DOMAIN INFERENCE (CAPABILITY-BASED)
-# =====================================================
-
-def infer_retail_subdomains(
-    df: pd.DataFrame,
-    cols: Dict[str, str],
-) -> Dict[str, float]:
-    """
-    Infer retail sub-domains using capability signals only.
-    Mirrors Healthcare inference philosophy.
-
-    Returns:
-        {sub_domain: confidence}
-    """
-
-    semantics = resolve_semantics(df)
-    scores: Dict[str, float] = {}
-
-    # ---------------- SALES ----------------
-    if (
-        semantics.get("has_order_id")
-        and semantics.get("has_sales_amount")
-    ):
-        score = 0.55
-        if semantics.get("has_order_date"):
-            score += 0.15
-        if semantics.get("has_quantity"):
-            score += 0.10
-        scores[RetailSubDomain.SALES.value] = round(min(score, 0.9), 2)
-
-    # ---------------- INVENTORY ----------------
-    if semantics.get("has_inventory_level"):
-        score = 0.55
-        if semantics.get("has_product_id"):
-            score += 0.15
-        if semantics.get("has_cost"):
-            score += 0.10
-        scores[RetailSubDomain.INVENTORY.value] = round(min(score, 0.9), 2)
-
-    # ---------------- CUSTOMER ----------------
-    if (
-        semantics.get("has_customer_id")
-        and semantics.get("has_order_id")
-    ):
-        score = 0.55
-        if semantics.get("has_order_date"):
-            score += 0.10
-        if semantics.get("has_sales_amount"):
-            score += 0.10
-        scores[RetailSubDomain.CUSTOMER.value] = round(min(score, 0.9), 2)
-
-    # ---------------- PRICING ----------------
-    if (
-        semantics.get("has_price")
-        or semantics.get("has_discount")
-    ):
-        score = 0.50
-        if semantics.get("has_sales_amount"):
-            score += 0.15
-        scores[RetailSubDomain.PRICING.value] = round(min(score, 0.85), 2)
-
-    # ---------------- STORE OPERATIONS ----------------
-    if semantics.get("has_store_id"):
-        score = 0.50
-        if semantics.get("has_order_date"):
-            score += 0.10
-        scores[RetailSubDomain.STORE_OPERATIONS.value] = round(min(score, 0.8), 2)
-
-    # ---------------- MERCHANDISING ----------------
-    if (
-        semantics.get("has_product_id")
-        and semantics.get("has_category")
-    ):
-        score = 0.55
-        if semantics.get("has_sales_amount"):
-            score += 0.15
-        scores[RetailSubDomain.MERCHANDISING.value] = round(min(score, 0.85), 2)
-
-    return scores
-
-
-# =====================================================
-# RETAIL DOMAIN DETECTOR (v3.6 CANONICAL)
-# =====================================================
-
-class RetailDomainDetector(BaseDomainDetector):
-    """
-    Capability-based Retail domain detector.
-
-    Rules:
-    - Never guesses
-    - Never uses column names
-    - Confidence-scaled
-    - Stateless
-    """
-
-    domain_name = "retail"
-
-    def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
-        try:
-            if df is None or df.empty:
-                return DomainDetectionResult(None, 0.0, {})
-
-            semantics = resolve_semantics(df)
-
-            # Anchor signals (minimum 2 required)
-            anchors = [
-                semantics.get("has_order_id"),
-                semantics.get("has_sales_amount"),
-                semantics.get("has_product_id"),
-                semantics.get("has_order_date"),
-            ]
-
-            score = sum(int(x) for x in anchors)
-
-            if score == 0:
-                return DomainDetectionResult(None, 0.0, semantics)
-
-            # Confidence scaling (Healthcare-style)
-            confidence = min(0.30 + score * 0.15, 0.95)
-
-            return DomainDetectionResult(
-                domain="retail",
-                confidence=round(confidence, 2),
-                signals=semantics,
-            )
-
-        except Exception:
-            # Absolute safety: detectors must never raise
-            return DomainDetectionResult(None, 0.0, {})
-
 
 # =====================================================
 # REGISTRATION
