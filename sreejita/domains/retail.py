@@ -738,7 +738,7 @@ class RetailDomain(BaseDomain):
         if RetailSubDomain.INVENTORY.value in active_subs:
             sub = RetailSubDomain.INVENTORY.value
             
-            if sub not in kpis.get("_domain_kpi_map", {}):
+            if sub in kpis.get("_domain_kpi_map", {}):
                 
                 if c.get("inventory"):
                     # 1. Inventory level distribution
@@ -780,15 +780,7 @@ class RetailDomain(BaseDomain):
                     fig, ax = plt.subplots()
                     ax.bar(["Inventory"], [df[c["inventory"]].mean()])
                     ax.set_title(f"Inventory Indicator {i+1}")
-                    save(
-                        fig,
-                        f"inv_indicator_{i}.png",
-                        "Inventory signal",
-                        0.4,
-                        sub,
-                        "inventory",
-                        "distribution",
-                    )
+                    save(fig, f"{sub}_inv_indicator_{i}.png", "Inventory signal", 0.4, sub, "inventory", "distribution",)
     
         # -------------------------------------------------
         # FINAL SELECTION — MAX 6
