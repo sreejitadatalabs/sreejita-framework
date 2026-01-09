@@ -169,11 +169,7 @@ def generate_report_payload(
         insights = engine.generate_insights(df, kpis) or []
 
         # 🔵 STORYTELLING LAYER (NEW)
-        insights = apply_storytelling_layer(
-            insights=insights,
-            kpis=kpis,
-            domain=domain,
-        )
+        insights = apply_storytelling_layer(insights, kpis, df, domain)
 
         # RECOMMENDATIONS
         raw_recs = engine.generate_recommendations(df, kpis, insights)
