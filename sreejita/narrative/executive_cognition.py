@@ -415,14 +415,32 @@ def build_executive_payload(
 # =====================================================
 
 def build_subdomain_executive_payloads(
-    kpis: Dict[str, Any],
-    insights: List[Dict[str, Any]],
-    recommendations: List[Dict[str, Any]],
-    domain: str = None,
+    *args,
+    **kwargs,
 ) -> Dict[str, Dict[str, Any]]:
+    """
+    Backward-compatible wrapper.
+    Supports BOTH:
+      - build_subdomain_executive_payloads(kpis, insights, recs)
+      - build_subdomain_executive_payloads(domain, kpis, insights, recs)
+    """
 
+    domain = None
+
+    # ---- positional unpacking (old + new contracts) ----
+    if len(args) == 3:
+        kpis, insights, recommendations = args
+    elif len(args) == 4:
+        domain, kpis, insights, recommendations = args
+    else:
+        raise TypeError(
+            "build_subdomain_executive_payloads expects "
+            "(kpis, insights, recs) or (domain, kpis, insights, recs)"
+        )
+
+    # ---- keyword override ----
     if not domain:
-        domain = infer_domain_from_kpis(kpis)
+        domain = kwargs.get("domain") or infer_domain_from_kpis(kpis)
 
     sub_domains = kpis.get("sub_domains", {}) or {}
     results: Dict[str, Dict[str, Any]] = {}
