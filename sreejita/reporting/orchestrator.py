@@ -13,6 +13,12 @@ import pandas as pd
 from sreejita.domains.router_v2 import detect_domain
 from sreejita.domains.registry import registry
 
+from sreejita.reporting.storytelling_layer import apply_storytelling_layer
+from sreejita.reporting.executive_cognition import (
+    build_executive_payload,
+    build_subdomain_executive_payloads,
+)
+
 from sreejita.reporting.recommendation_enricher import enrich_recommendations
 from sreejita.core.dataset_shape import detect_dataset_shape
 from sreejita.core.fingerprint import dataframe_fingerprint
@@ -27,7 +33,7 @@ MIN_DOMAIN_CONFIDENCE = 0.40
 MAX_EXECUTIVE_VISUALS = 6
 
 # =====================================================
-# SAFE FILE LOADER (NEVER CRASH)
+# SAFE FILE LOADER
 # =====================================================
 
 def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
@@ -48,7 +54,7 @@ def _read_tabular_file_safe(path: Path) -> pd.DataFrame:
     raise RuntimeError(f"Unsupported file type: {path.suffix}")
 
 # =====================================================
-# BOARD READINESS HISTORY (SAFE, NON-BLOCKING)
+# BOARD READINESS HISTORY (NON-BLOCKING)
 # =====================================================
 
 def _history_path(run_dir: Path) -> Path:
@@ -81,22 +87,13 @@ def _trend(prev: Optional[int], curr: Optional[int]) -> str:
     return "→"
 
 # =====================================================
-# CANONICAL ENTRY POINT (ONLY ENTRY)
+# CANONICAL ENTRY POINT
 # =====================================================
 
 def generate_report_payload(
     input_path: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Universal report payload generator.
-
-    GUARANTEES:
-    - Auto-detect never references undefined variables
-    - No 'generic' domain assumption
-    - Highest-confidence domain always wins
-    - Domain execution is isolated and safe
-    """
 
     # -------------------------------------------------
     # 0. INPUT VALIDATION
@@ -124,44 +121,31 @@ def generate_report_payload(
     shape_info = detect_dataset_shape(df)
 
     # -------------------------------------------------
-    # 3. DOMAIN DETECTION (OPTION B — CONFIDENCE WINNER)
+    # 3. DOMAIN DETECTION
     # -------------------------------------------------
-    domain_hint = config.get("domain_hint")
-
     detection_result = detect_domain(
         df,
-        domain_hint=domain_hint,
+        domain_hint=config.get("domain_hint"),
         strict=False,
     )
 
     if not detection_result or not detection_result.domain:
-        raise RuntimeError(
-            "No domain detected. Please select a domain manually."
-        )
-
-    if detection_result.confidence < MIN_DOMAIN_CONFIDENCE:
-        log.warning(
-            f"Low domain confidence detected "
-            f"(domain={detection_result.domain}, "
-            f"confidence={detection_result.confidence}). "
-            "Proceeding with detected domain."
-        )
+        raise RuntimeError("No domain detected. Please select a domain manually.")
 
     domain = detection_result.domain
 
-    engine = registry.get_domain(domain)
-    if engine is None:
-        raise RuntimeError(
-            f"Detected domain '{domain}' is not registered. "
-            "This is a framework configuration error."
+    if detection_result.confidence < MIN_DOMAIN_CONFIDENCE:
+        log.warning(
+            f"Low domain confidence "
+            f"(domain={domain}, confidence={detection_result.confidence})"
         )
 
-    # 🔒 RESET ENGINE STATE
-    if hasattr(engine, "_last_kpis"):
-        engine._last_kpis = None
+    engine = registry.get_domain(domain)
+    if engine is None:
+        raise RuntimeError(f"Domain '{domain}' is not registered")
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION (STRICT ORDER)
+    # 4. DOMAIN EXECUTION
     # -------------------------------------------------
     try:
         # PREPROCESS
@@ -170,9 +154,7 @@ def generate_report_payload(
         # KPIs
         kpis = engine.calculate_kpis(df)
         if not isinstance(kpis, dict):
-            raise TypeError("calculate_kpis must return a dict")
-
-        engine._last_kpis = kpis
+            raise TypeError("calculate_kpis must return dict")
 
         # VISUALS
         try:
@@ -184,23 +166,21 @@ def generate_report_payload(
             visuals = []
 
         # INSIGHTS
-        insights = engine.generate_insights(df, kpis)
+        insights = engine.generate_insights(df, kpis) or []
+
+        # 🔵 STORYTELLING LAYER (NEW)
+        insights = apply_storytelling_layer(
+            insights=insights,
+            kpis=kpis,
+            domain=domain,
+        )
 
         # RECOMMENDATIONS
         raw_recs = engine.generate_recommendations(df, kpis, insights)
         recommendations = enrich_recommendations(raw_recs)
 
-        # EXECUTIVE
-        executive = engine.build_executive(
-            kpis=kpis,
-            insights=insights,
-            recommendations=recommendations,
-        )
-
     except Exception as e:
-        log.exception(
-            f"Domain execution failed | domain={domain} | fingerprint={dataset_key}"
-        )
+        log.exception(f"Domain execution failed | domain={domain}")
         raise RuntimeError(f"{domain} execution failed: {e}")
 
     # -------------------------------------------------
@@ -218,7 +198,7 @@ def generate_report_payload(
             continue
 
     # -------------------------------------------------
-    # 6. UNIVERSAL VISUAL SAFETY NET
+    # 6. VISUAL SAFETY NET
     # -------------------------------------------------
     valid_visuals = engine.ensure_minimum_visuals(
         valid_visuals,
@@ -237,11 +217,30 @@ def generate_report_payload(
     )[:MAX_EXECUTIVE_VISUALS]
 
     # -------------------------------------------------
-    # 8. BOARD READINESS TREND
+    # 8. EXECUTIVE COGNITION (GLOBAL, UNIVERSAL)
+    # -------------------------------------------------
+    executive = build_executive_payload(
+        kpis=kpis,
+        insights=insights,
+        recommendations=recommendations,
+        domain=domain,
+    )
+
+    subdomain_executive = build_subdomain_executive_payloads(
+        kpis,
+        insights,
+        recommendations,
+        domain=domain,
+    )
+
+    executive["sub_domains"] = subdomain_executive
+
+    # -------------------------------------------------
+    # 9. BOARD READINESS TREND
     # -------------------------------------------------
     history = _load_history(run_dir)
 
-    board = executive.get("board_readiness", {}) if isinstance(executive, dict) else {}
+    board = executive.get("board_readiness", {})
     current_score = board.get("score")
     previous_score = history.get(dataset_key)
 
@@ -256,7 +255,7 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 9. FINAL PAYLOAD
+    # 10. FINAL PAYLOAD
     # -------------------------------------------------
     return {
         domain: {
