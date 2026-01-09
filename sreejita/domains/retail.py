@@ -649,6 +649,17 @@ class RetailDomain(BaseDomain):
             fig.savefig(path, dpi=120, bbox_inches="tight")
             plt.close(fig)
     
+            # ---------------- VISUAL CONFIDENCE (CLIENT-SAFE) ----------------
+            time_days = kpis.get("time_coverage_days") or 0
+            records = kpis.get("record_count") or 0
+            
+            if time_days >= 180 and records >= 5000:
+                visual_conf = 0.85
+            elif records >= 1000:
+                visual_conf = 0.7
+            else:
+                visual_conf = 0.55
+            
             visuals.append({
                 "path": str(path),
                 "caption": caption,
@@ -656,10 +667,9 @@ class RetailDomain(BaseDomain):
                 "sub_domain": sub,
                 "role": role,
                 "axis": axis,
-                "confidence": kpis.get("_confidence", {}).get(
-                    f"{sub}_total_sales", 0.7
-                ),
+                "confidence": visual_conf,
             })
+
     
         def human_fmt(x, _):
             if x >= 1e6:
