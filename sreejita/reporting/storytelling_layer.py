@@ -224,4 +224,9 @@ def apply_storytelling_layer(
     # ---------- Phase 2: Comparative Insights ----------
     enhanced.extend(generate_comparative_insights(df, kpis))
 
-    return enhanced
+    # Re-order: OPPORTUNITY (Phase 2) → OPPORTUNITY (Phase 1) → INFO
+    opps = [i for i in enhanced if i.get("level") == "OPPORTUNITY"]
+    infos = [i for i in enhanced if i.get("level") != "OPPORTUNITY"]
+    
+    return opps + infos
+
