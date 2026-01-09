@@ -656,6 +656,9 @@ class RetailDomain(BaseDomain):
                 "sub_domain": sub,
                 "role": role,
                 "axis": axis,
+                "confidence": kpis.get("_confidence", {}).get(
+                    f"{sub}_total_sales", 0.7
+                ),
             })
     
         def human_fmt(x, _):
