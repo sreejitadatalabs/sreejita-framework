@@ -8,7 +8,6 @@
 from typing import List, Dict, Any
 import pandas as pd
 
-
 # -----------------------------------------------------
 # RULES: INFO → OPPORTUNITY (SAFE PROMOTION)
 # -----------------------------------------------------
@@ -191,7 +190,9 @@ def apply_storytelling_layer(
     enhanced: List[Dict[str, Any]] = []
     promoted = 0
 
-    # ---------- Phase 1: Narrative Promotion ----------
+    # =================================================
+    # Phase 1 — Narrative Promotion (INFO → OPPORTUNITY)
+    # =================================================
     for ins in insights:
         if not isinstance(ins, dict):
             continue
@@ -218,15 +219,60 @@ def apply_storytelling_layer(
         if not rewritten:
             enhanced.append(ins)
 
-    # ---------- Strategic Narratives ----------
+    # ================================================
+    # Strategic Narratives (Max 2)
+    # ================================================
     enhanced.extend(generate_strategic_narratives(kpis, domain))
 
-    # ---------- Phase 2: Comparative Insights ----------
+    # ================================================
+    # Phase 2 — Comparative / Delta Insights
+    # ================================================
     enhanced.extend(generate_comparative_insights(df, kpis))
 
-    # Re-order: OPPORTUNITY (Phase 2) → OPPORTUNITY (Phase 1) → INFO
-    opps = [i for i in enhanced if i.get("level") == "OPPORTUNITY"]
-    infos = [i for i in enhanced if i.get("level") != "OPPORTUNITY"]
-    
-    return opps + infos
+    # =================================================
+    # OPTION A — FORCE-SURFACE ONE PHASE-2 INSIGHT
+    # =================================================
+
+    phase2_keywords = (
+        "top vs long-tail",
+        "category dominance",
+        "variability",
+    )
+
+    phase2_insights = [
+        i for i in enhanced
+        if isinstance(i, dict)
+        and any(k in i.get("title", "").lower() for k in phase2_keywords)
+    ]
+
+    forced_phase2 = phase2_insights[:1]  # max ONE
+
+    # Remove forced insight from rest to avoid duplication
+    remaining = [
+        i for i in enhanced
+        if i not in forced_phase2
+    ]
+
+    # =================================================
+    # FINAL ORDERING (EXECUTIVE SAFE)
+    # 1. Forced Phase-2 (if any)
+    # 2. Other OPPORTUNITIES
+    # 3. INFO insights
+    # =================================================
+
+    final_insights: List[Dict[str, Any]] = []
+
+    final_insights.extend(forced_phase2)
+
+    final_insights.extend(
+        i for i in remaining
+        if i.get("level") == "OPPORTUNITY"
+    )
+
+    final_insights.extend(
+        i for i in remaining
+        if i.get("level") != "OPPORTUNITY"
+    )
+
+    return final_insights
 
