@@ -415,11 +415,14 @@ def build_executive_payload(
 # =====================================================
 
 def build_subdomain_executive_payloads(
-    domain: str,
     kpis: Dict[str, Any],
     insights: List[Dict[str, Any]],
     recommendations: List[Dict[str, Any]],
+    domain: str = None,
 ) -> Dict[str, Dict[str, Any]]:
+
+    if not domain:
+        domain = infer_domain_from_kpis(kpis)
 
     sub_domains = kpis.get("sub_domains", {}) or {}
     results: Dict[str, Dict[str, Any]] = {}
