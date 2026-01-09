@@ -419,29 +419,50 @@ def build_subdomain_executive_payloads(
     **kwargs,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Backward-compatible wrapper.
-    Supports BOTH:
-      - build_subdomain_executive_payloads(kpis, insights, recs)
-      - build_subdomain_executive_payloads(domain, kpis, insights, recs)
+    Ultra backward-compatible executive payload builder.
+
+    Accepts legacy and new call patterns, including:
+      - (kpis, insights, recs)
+      - (domain, kpis, insights, recs)
+      - (kpis, insights, recs, config)
+      - (domain, kpis, insights, recs, config)
     """
 
     domain = None
+    kpis = None
+    insights = []
+    recommendations = []
 
-    # ---- positional unpacking (old + new contracts) ----
-    if len(args) == 3:
-        kpis, insights, recommendations = args
-    elif len(args) == 4:
-        domain, kpis, insights, recommendations = args
-    else:
-        raise TypeError(
-            "build_subdomain_executive_payloads expects "
-            "(kpis, insights, recs) or (domain, kpis, insights, recs)"
+    # ---- 1. Extract from positional args (best effort) ----
+    for obj in args:
+        if isinstance(obj, dict) and "sub_domains" in obj:
+            kpis = obj
+        elif isinstance(obj, list) and obj and isinstance(obj[0], dict):
+            # Could be insights or recommendations
+            if "level" in obj[0]:
+                insights = obj
+            elif "action" in obj[0]:
+                recommendations = obj
+        elif isinstance(obj, str):
+            domain = obj
+
+    # ---- 2. Keyword overrides ----
+    domain = kwargs.get("domain") or domain
+    kpis = kwargs.get("kpis") or kpis
+    insights = kwargs.get("insights") or insights
+    recommendations = kwargs.get("recommendations") or recommendations
+
+    # ---- 3. Hard validation ----
+    if not isinstance(kpis, dict):
+        raise RuntimeError(
+            "Executive cognition failed: unable to infer KPI payload "
+            "from orchestrator call."
         )
 
-    # ---- keyword override ----
     if not domain:
-        domain = kwargs.get("domain") or infer_domain_from_kpis(kpis)
+        domain = infer_domain_from_kpis(kpis)
 
+    # ---- 4. Normal processing (unchanged logic) ----
     sub_domains = kpis.get("sub_domains", {}) or {}
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -480,3 +501,4 @@ def build_subdomain_executive_payloads(
         )
 
     return results
+
