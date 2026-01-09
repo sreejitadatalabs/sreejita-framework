@@ -670,6 +670,8 @@ class RetailDomain(BaseDomain):
         # =================================================
         if RetailSubDomain.SALES.value in active_subs:
             sub = RetailSubDomain.SALES.value
+            if sub not in kpis.get("_domain_kpi_map", {}):
+                continue
     
             if self.time_col and c.get("sales"):
                 # 1. Sales trend
@@ -683,95 +685,97 @@ class RetailDomain(BaseDomain):
                 fig, ax = plt.subplots()
                 df[c["sales"]].dropna().plot(kind="hist", bins=20, ax=ax)
                 ax.set_title("Sales Distribution")
-                save(fig, "sales_dist.png", "Sales value spread", 0.8, sub, "sales", "distribution")
+                save(fig, f"{sub}_sales_dist.png", "Sales value spread", 0.8, sub, "sales", "distribution")
     
                 # 3. AOV distribution
                 if c.get("order_id"):
                     fig, ax = plt.subplots()
                     df.groupby(c["order_id"])[c["sales"]].sum().plot(kind="hist", bins=20, ax=ax)
                     ax.set_title("Order Value Distribution")
-                    save(fig, "aov_dist.png", "Order value spread", 0.85, sub, "sales", "distribution")
+                    save(fig, f"{sub}_aov_dist.png", "Order value spread", 0.85, sub, "sales", "distribution")
     
                 # 4. Units sold trend
                 if c.get("quantity"):
                     fig, ax = plt.subplots()
                     df.set_index(self.time_col).resample("M")[c["quantity"]].sum().plot(ax=ax)
                     ax.set_title("Units Sold Trend")
-                    save(fig, "units_trend.png", "Units sold over time", 0.75, sub, "sales", "time")
+                    save(fig, f"{sub}_units_trend.png", "Units sold over time", 0.75, sub, "sales", "time")
     
                 # 5. Top products by sales
                 if c.get("product"):
                     fig, ax = plt.subplots()
                     df.groupby(c["product"])[c["sales"]].sum().nlargest(10).plot.barh(ax=ax)
                     ax.set_title("Top Products by Sales")
-                    save(fig, "top_products.png", "Best-selling products", 0.9, sub, "sales", "entity")
+                    save(fig, f"{sub}_top_products.png", "Best-selling products", 0.9, sub, "sales", "entity")
     
                 # 6. Sales by category
                 if c.get("category"):
                     fig, ax = plt.subplots()
                     df.groupby(c["category"])[c["sales"]].sum().nlargest(8).plot.bar(ax=ax)
                     ax.set_title("Sales by Category")
-                    save(fig, "sales_category.png", "Category contribution", 0.8, sub, "sales", "composition")
+                    save(fig, f"{sub}_sales_category.png", "Category contribution", 0.8, sub, "sales", "composition")
     
                 # 7. Cumulative sales
                 fig, ax = plt.subplots()
                 df_sorted = df.sort_values(self.time_col)
                 df_sorted[c["sales"]].cumsum().plot(ax=ax)
                 ax.set_title("Cumulative Sales")
-                save(fig, "sales_cumulative.png", "Revenue accumulation", 0.7, sub, "sales", "time")
+                save(fig, f"{sub}_sales_cumulative.png", "Revenue accumulation", 0.7, sub, "sales", "time")
     
                 # 8. Daily sales volatility
                 fig, ax = plt.subplots()
                 df.set_index(self.time_col)[c["sales"]].resample("D").sum().plot(ax=ax)
                 ax.set_title("Daily Sales Volatility")
-                save(fig, "sales_daily.png", "Short-term sales variation", 0.6, sub, "sales", "time")
+                save(fig, f"{sub}_sales_daily.png", "Short-term sales variation", 0.6, sub, "sales", "time")
     
                 # 9. Sales percentile bands
                 fig, ax = plt.subplots()
                 df[c["sales"]].quantile([0.25, 0.5, 0.75]).plot(kind="bar", ax=ax)
                 ax.set_title("Sales Percentiles")
-                save(fig, "sales_percentiles.png", "Sales dispersion bands", 0.65, sub, "sales", "distribution")
+                save(fig, f"{sub}_sales_percentiles.png", "Sales dispersion bands", 0.65, sub, "sales", "distribution")
     
         # =================================================
         # INVENTORY SUB-DOMAIN (≥9 visuals)
         # =================================================
         if RetailSubDomain.INVENTORY.value in active_subs:
             sub = RetailSubDomain.INVENTORY.value
+            if sub not in kpis.get("_domain_kpi_map", {}):
+                continue
     
             if c.get("inventory"):
                 # 1. Inventory level distribution
                 fig, ax = plt.subplots()
                 df[c["inventory"]].plot(kind="hist", bins=20, ax=ax)
                 ax.set_title("Inventory Level Distribution")
-                save(fig, "inv_dist.png", "Stock level spread", 0.9, sub, "inventory", "distribution")
+                save(fig, f"{sub}_inv_dist.png", "Stock level spread", 0.9, sub, "inventory", "distribution")
     
                 # 2. Stockout ratio pie
                 rate = (df[c["inventory"]] <= 0).mean()
                 fig, ax = plt.subplots()
                 ax.pie([1 - rate, rate], labels=["In Stock", "Out"], autopct="%1.1f%%")
                 ax.set_title("Stock Availability")
-                save(fig, "stockout.png", "Stockout exposure", 0.95, sub, "inventory", "composition")
+                save(fig, f"{sub}_stockout.png", "Stockout exposure", 0.95, sub, "inventory", "composition")
     
                 # 3. Inventory trend
                 if self.time_col:
                     fig, ax = plt.subplots()
                     df.set_index(self.time_col)[c["inventory"]].resample("M").mean().plot(ax=ax)
                     ax.set_title("Average Inventory Trend")
-                    save(fig, "inv_trend.png", "Inventory trend", 0.85, sub, "inventory", "time")
+                    save(fig, f"{sub}_inv_trend.png", "Inventory trend", 0.85, sub, "inventory", "time")
     
                 # 4. Inventory by product
                 if c.get("product"):
                     fig, ax = plt.subplots()
                     df.groupby(c["product"])[c["inventory"]].mean().nlargest(10).plot.barh(ax=ax)
                     ax.set_title("Avg Inventory by Product")
-                    save(fig, "inv_product.png", "Inventory concentration", 0.8, sub, "inventory", "entity")
+                    save(fig, f"{sub}_inv_product.png", "Inventory concentration", 0.8, sub, "inventory", "entity")
     
                 # 5. Inventory by category
                 if c.get("category"):
                     fig, ax = plt.subplots()
                     df.groupby(c["category"])[c["inventory"]].mean().plot.bar(ax=ax)
                     ax.set_title("Inventory by Category")
-                    save(fig, "inv_category.png", "Category stock mix", 0.75, sub, "inventory", "composition")
+                    save(fig, f"{sub}_inv_category.png", "Category stock mix", 0.75, sub, "inventory", "composition")
     
                 # 6–9. Supporting views (safe fillers)
                 for i in range(4):
@@ -879,7 +883,7 @@ class RetailDomain(BaseDomain):
                 "level": "INFO",
                 "sub_domain": sub,
                 "title": "Sales Operations Stable",
-                "so_what": "No critical salesISK-level anomalies detected in sales KPIs.",
+                "so_what": "No critical sales-level anomalies detected in sales KPIs.",
             })
     
         # -------------------------------------------------
