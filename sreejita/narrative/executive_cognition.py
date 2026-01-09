@@ -85,7 +85,7 @@ def get_domain_profile(domain: str) -> Dict[str, Any]:
 
 
 # =====================================================
-# EXECUTIVE RISK BANDS (SEMANTIC ONLY)
+# EXECUTIVE RISK BANDS
 # =====================================================
 
 EXECUTIVE_RISK_BANDS = [
@@ -98,42 +98,32 @@ EXECUTIVE_RISK_BANDS = [
 
 def derive_risk_level(score: int) -> Dict[str, Any]:
     score = int(score or 0)
-
     for threshold, label in EXECUTIVE_RISK_BANDS:
         if score >= threshold:
             return {"label": label, "score": score}
-
     return {"label": "CRITICAL", "score": score}
 
+
 def infer_domain_from_kpis(kpis: Dict[str, Any]) -> str:
-    """
-    Backward-compatible domain inference.
-    """
-    return (
-        kpis.get("domain")
-        or kpis.get("domain_name")
-        or "retail"   # safe default for v3.5.x
-    )
+    return kpis.get("domain") or kpis.get("domain_name") or "retail"
+
 
 # =====================================================
-# EXECUTIVE KPI SELECTION (CAPABILITY-AWARE, MAX 9)
+# KPI SELECTION
 # =====================================================
 
 def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
     cap_map = kpis.get("_kpi_capabilities", {}) or {}
     conf_map = kpis.get("_confidence", {}) or {}
 
-    ranked: List[Dict[str, Any]] = []
-
+    ranked = []
     for key, capability in cap_map.items():
         value = kpis.get(key)
-
         if not isinstance(value, (int, float)):
             continue
 
         confidence = float(conf_map.get(key, 0.6))
-
-        capability_weight = {
+        weight = {
             Capability.QUALITY.value: 1.30,
             Capability.TIME_FLOW.value: 1.20,
             Capability.COST.value: 1.10,
@@ -148,7 +138,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
             "value": round(value, 2),
             "capability": capability,
             "confidence": round(confidence, 2),
-            "rank_score": round(confidence * capability_weight, 3),
+            "rank_score": round(confidence * weight, 3),
         })
 
     ranked.sort(key=lambda x: x["rank_score"], reverse=True)
@@ -156,7 +146,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 # =====================================================
-# INSIGHT STRUCTURING (DOMAIN-AWARE, GOVERNED)
+# INSIGHT STRUCTURING (FIXED — PHASE 2 VISIBLE)
 # =====================================================
 
 def structure_insights(
@@ -167,7 +157,7 @@ def structure_insights(
     profile = get_domain_profile(domain)
     insights = insights or []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized = []
 
     for i in insights:
         if not isinstance(i, dict):
@@ -181,9 +171,31 @@ def structure_insights(
         item["level"] = lvl
         normalized.append(item)
 
-    strengths = [i for i in normalized if i["level"] == "STRENGTH"][:2]
-    warnings  = [i for i in normalized if i["level"] == "WARNING"][:2]
-    risks     = [i for i in normalized if i["level"] == "RISK"][:1]
+    # -------------------------------
+    # FORCE INCLUDE ONE COMPARATIVE INSIGHT
+    # -------------------------------
+    comparative_keywords = (
+        "top vs long-tail",
+        "category dominance",
+        "variability",
+    )
+
+    comparative = [
+        i for i in normalized
+        if any(k in i.get("title", "").lower() for k in comparative_keywords)
+    ][:1]
+
+    # -------------------------------
+    # STANDARD BUCKETING
+    # -------------------------------
+    strengths = comparative + [
+        i for i in normalized
+        if i["level"] in ("STRENGTH", "OPPORTUNITY")
+        and i not in comparative
+    ][:2]
+
+    warnings = [i for i in normalized if i["level"] == "WARNING"][:2]
+    risks = [i for i in normalized if i["level"] == "RISK"][:1]
 
     avg_conf = round(
         sum(float(i.get("confidence", 0.7)) for i in normalized)
@@ -191,51 +203,19 @@ def structure_insights(
         2,
     )
 
-    summary_by_tone = {
-        "clinical": (
-            "Operational signals indicate areas requiring close monitoring "
-            "and structured intervention."
-        ),
-        "commercial": (
-            "Performance demonstrates measurable strengths with "
-            "clear opportunities for growth."
-        ),
-        "financial": (
-            "Financial indicators show a stable position with "
-            "targeted optimization potential."
-        ),
-        "growth": (
-            "Growth momentum is visible with opportunities "
-            "to accelerate impact."
-        ),
-        "operational": (
-            "Operational performance is generally stable with "
-            "identifiable efficiency levers."
-        ),
-        "people": (
-            "People metrics suggest balanced workforce dynamics "
-            "with improvement opportunities."
-        ),
-        "experience": (
-            "Customer experience signals show engagement strength "
-            "with areas to enhance loyalty."
-        ),
-    }
-
     return {
         "strengths": strengths,
         "warnings": warnings,
         "risks": risks,
         "composite": {
             "title": "Overall Executive Assessment",
-            "summary": summary_by_tone.get(
-                profile["tone"],
-                summary_by_tone["commercial"],
+            "summary": (
+                "Performance shows measurable strengths with "
+                "clear strategic leverage points."
             ),
             "confidence": avg_conf,
         },
     }
-
 
 # =====================================================
 # BOARD READINESS SCORE (DOMAIN-AWARE, HONEST)
