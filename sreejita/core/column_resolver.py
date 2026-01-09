@@ -185,6 +185,125 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "dtype": "numeric",
         "priority": 0.9,
     },
+    # ---------------- RETAIL / COMMERCE PRIMITIVES ----------------
+
+    "order_id": {
+        "aliases": [
+            "order_id", "orderid",
+            "invoice_id", "invoice",
+            "bill_id", "receipt_id",
+            "transaction_id", "txn_id"
+        ],
+        "dtype": "object",
+        "priority": 1.0,
+    },
+    
+    "order_date": {
+        "aliases": [
+            "order_date", "transaction_date",
+            "invoice_date", "purchase_date",
+            "order_datetime", "txn_date"
+        ],
+        "dtype": "datetime",
+        "priority": 1.0,
+    },
+    
+    "sales_amount": {
+        "aliases": [
+            "sales", "revenue", "amount",
+            "net_sales", "total_sales",
+            "order_value", "gross_sales"
+        ],
+        "dtype": "numeric",
+        "priority": 1.0,
+    },
+    
+    "quantity": {
+        "aliases": [
+            "quantity", "qty",
+            "units", "units_sold",
+            "item_qty"
+        ],
+        "dtype": "numeric",
+        "priority": 0.9,
+    },
+    
+    "product_id": {
+        "aliases": [
+            "product_id", "product",
+            "sku", "item_id",
+            "item_code"
+        ],
+        "dtype": "object",
+        "priority": 1.0,
+    },
+    
+    "category": {
+        "aliases": [
+            "category", "product_category",
+            "department", "dept",
+            "merch_category"
+        ],
+        "dtype": "object",
+        "priority": 0.85,
+    },
+    
+    "customer_id": {
+        "aliases": [
+            "customer_id", "customerid",
+            "client_id", "buyer_id",
+            "user_id"
+        ],
+        "dtype": "object",
+        "priority": 1.0,
+    },
+    
+    "store_id": {
+        "aliases": [
+            "store_id", "store",
+            "branch", "outlet",
+            "location_id"
+        ],
+        "dtype": "object",
+        "priority": 0.85,
+    },
+    
+    "price": {
+        "aliases": [
+            "price", "unit_price",
+            "selling_price", "mrp"
+        ],
+        "dtype": "numeric",
+        "priority": 0.9,
+    },
+    
+    "discount": {
+        "aliases": [
+            "discount", "discount_amount",
+            "markdown", "promo_discount"
+        ],
+        "dtype": "numeric",
+        "priority": 0.85,
+    },
+    
+    "profit": {
+        "aliases": [
+            "profit", "margin",
+            "gross_profit", "net_profit"
+        ],
+        "dtype": "numeric",
+        "priority": 0.9,
+    },
+    
+    "inventory_level": {
+        "aliases": [
+            "inventory", "stock_level",
+            "qty_on_hand", "on_hand_qty",
+            "stock_on_hand"
+        ],
+        "dtype": "numeric",
+        "priority": 0.9,
+    },
 }
 
 # =====================================================
@@ -311,6 +430,7 @@ def resolve_semantics(df: pd.DataFrame) -> Dict[str, bool]:
     Never infer domain or sub-domain here.
     """
     return {
+        # -------- Healthcare (existing) --------
         "has_patient_id": bool(resolve_column(df, "patient_id")),
         "has_admission_date": bool(resolve_column(df, "admission_date")),
         "has_discharge_date": bool(resolve_column(df, "discharge_date")),
@@ -319,4 +439,18 @@ def resolve_semantics(df: pd.DataFrame) -> Dict[str, bool]:
         "has_cost": bool(resolve_column(df, "cost")),
         "has_supply": bool(resolve_column(df, "supply")),
         "has_population": bool(resolve_column(df, "population")),
+
+        # -------- Commerce / Retail primitives --------
+        "has_order_id": bool(resolve_column(df, "order_id")),
+        "has_order_date": bool(resolve_column(df, "order_date")),
+        "has_sales_amount": bool(resolve_column(df, "sales_amount")),
+        "has_quantity": bool(resolve_column(df, "quantity")),
+        "has_product_id": bool(resolve_column(df, "product_id")),
+        "has_category": bool(resolve_column(df, "category")),
+        "has_customer_id": bool(resolve_column(df, "customer_id")),
+        "has_store_id": bool(resolve_column(df, "store_id")),
+        "has_price": bool(resolve_column(df, "price")),
+        "has_discount": bool(resolve_column(df, "discount")),
+        "has_profit": bool(resolve_column(df, "profit")),
+        "has_inventory_level": bool(resolve_column(df, "inventory_level")),
     }
