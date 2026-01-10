@@ -500,6 +500,15 @@ def resolve_semantics(df: pd.DataFrame) -> Dict[str, bool]:
         "has_supply": bool(resolve_column(df, "supply")),
         "has_population": bool(resolve_column(df, "population")),
 
+        # -------- Marketing primitives --------
+        "has_campaign": bool(resolve_column(df, "campaign")),
+        "has_channel": bool(resolve_column(df, "channel")),
+        "has_impressions": bool(resolve_column(df, "impressions")),
+        "has_clicks": bool(resolve_column(df, "clicks")),
+        "has_conversions": bool(resolve_column(df, "conversions")),
+        "has_spend": bool(resolve_column(df, "spend")),
+        "has_marketing_revenue": bool(resolve_column(df, "revenue")),
+
         # -------- Commerce / Retail primitives --------
         "has_order_id": bool(resolve_column(df, "order_id")),
         "has_order_date": bool(resolve_column(df, "order_date")),
