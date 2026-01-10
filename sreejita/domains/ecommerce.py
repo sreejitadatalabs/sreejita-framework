@@ -239,6 +239,26 @@ class EcommerceDomain(BaseDomain):
         # -------------------------------------------------
         present = sum(1 for v in self.cols.values() if v)
         self.data_completeness = round(present / max(len(self.cols), 1), 2)
+
+        # -------------------------------------------------
+        # 7. Dataset-shape-aware sub-domain suppression
+        # -------------------------------------------------
+        missing_funnel_signals = not any([
+            self.cols.get("sessions"),
+            self.cols.get("add_to_cart"),
+            self.cols.get("checkout"),
+        ])
+        
+        if missing_funnel_signals:
+            # Suppress funnel-heavy sub-domains
+            self.sub_domains.pop("traffic", None)
+            self.sub_domains.pop("conversion", None)
+        
+            # Narrow KPI map accordingly
+            self._domain_kpi_map = {
+                k: v for k, v in self._domain_kpi_map.items()
+                if k in ("revenue", "customer", "operations")
+            }
     
         return df
 
