@@ -758,13 +758,10 @@ class EcommerceDomain(BaseDomain):
         self,
         df: pd.DataFrame,
         kpis: Dict[str, Any],
-        insights: Optional[List[Dict[str, Any]]] = None,
+        insights: List[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        
+    
         recs: List[Dict[str, Any]] = []
-
-        insights = insights or []
-        insight_titles = {i.get("title") for i in insights if isinstance(i, dict)}
     
         cr = kpis.get("conversion_rate")
         abandonment = kpis.get("cart_abandonment_rate")
@@ -775,9 +772,9 @@ class EcommerceDomain(BaseDomain):
         return_rate = kpis.get("return_rate")
     
         # =================================================
-        # SUB-DOMAIN: TRAFFIC & ACQUISITION
+        # TRAFFIC & ACQUISITION
         # =================================================
-        if bounce and bounce > 0.65:
+        if bounce is not None and bounce > 0.65:
             recs.append({
                 "action": "Refine landing page relevance and align ad messaging to reduce bounce.",
                 "priority": "HIGH",
@@ -797,23 +794,23 @@ class EcommerceDomain(BaseDomain):
         })
     
         # =================================================
-        # SUB-DOMAIN: CONVERSION & FUNNEL
+        # CONVERSION & FUNNEL
         # =================================================
-        if cr and cr < 0.02:
+        if cr is not None and cr < 0.02:
             recs.append({
                 "action": "Simplify product pages and strengthen calls-to-action to improve conversion.",
                 "priority": "HIGH",
                 "sub_domain": "conversion",
             })
     
-        if abandonment and abandonment > 0.65:
+        if abandonment is not None and abandonment > 0.65:
             recs.append({
                 "action": "Enable abandoned cart reminders and reduce checkout friction.",
                 "priority": "HIGH",
                 "sub_domain": "conversion",
             })
     
-        if checkout_drop and checkout_drop > 0.70:
+        if checkout_drop is not None and checkout_drop > 0.70:
             recs.append({
                 "action": "Audit checkout flow for payment, trust, or UX barriers.",
                 "priority": "HIGH",
@@ -827,9 +824,9 @@ class EcommerceDomain(BaseDomain):
         })
     
         # =================================================
-        # SUB-DOMAIN: REVENUE & ECONOMICS
+        # REVENUE & ECONOMICS
         # =================================================
-        if aov and aov < 50:
+        if aov is not None and aov < 50:
             recs.append({
                 "action": "Implement bundles and cross-sell recommendations to increase order value.",
                 "priority": "MEDIUM",
@@ -842,16 +839,10 @@ class EcommerceDomain(BaseDomain):
             "sub_domain": "revenue",
         })
     
-        recs.append({
-            "action": "Review pricing consistency across channels to avoid customer confusion.",
-            "priority": "LOW",
-            "sub_domain": "revenue",
-        })
-    
         # =================================================
-        # SUB-DOMAIN: CUSTOMER & RETENTION
+        # CUSTOMER & RETENTION
         # =================================================
-        if repeat_rate and repeat_rate < 0.20:
+        if repeat_rate is not None and repeat_rate < 0.20:
             recs.append({
                 "action": "Launch post-purchase engagement campaigns to increase repeat buying.",
                 "priority": "MEDIUM",
@@ -862,35 +853,17 @@ class EcommerceDomain(BaseDomain):
             "action": "Introduce loyalty incentives for returning customers.",
             "priority": "LOW",
             "sub_domain": "customer",
-        })
-    
-        recs.append({
-            "action": "Use email or push notifications to re-engage inactive users.",
-            "priority": "LOW",
-            "sub_domain": "customer",
-        })
+            })
     
         # =================================================
-        # SUB-DOMAIN: OPERATIONAL FRICTION
+        # OPERATIONAL FRICTION
         # =================================================
-        if return_rate and return_rate > 0.15:
+        if return_rate is not None and return_rate > 0.15:
             recs.append({
                 "action": "Analyze return reasons to improve product descriptions and quality control.",
                 "priority": "HIGH",
                 "sub_domain": "operations",
             })
-    
-        recs.append({
-            "action": "Improve order tracking and communication to reduce post-purchase friction.",
-            "priority": "LOW",
-            "sub_domain": "operations",
-        })
-    
-        recs.append({
-            "action": "Review return policies to balance customer trust with operational cost.",
-            "priority": "LOW",
-            "sub_domain": "operations",
-        })
     
         return recs
 
