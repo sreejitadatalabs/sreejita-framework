@@ -1422,3 +1422,6 @@ class SupplyChainDomainDetector(BaseDomainDetector):
                 ],
             },
         )
+
+def register(registry):
+    registry.register("supply_chain", SupplyChainDomain, SupplyChainDomainDetector)
