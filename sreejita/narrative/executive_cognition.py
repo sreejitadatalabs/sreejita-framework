@@ -157,7 +157,7 @@ def structure_insights(
     Executive-governed insight structuring.
 
     GUARANTEES:
-    - Exactly ONE comparative (Phase-2) insight is surfaced if present
+    - Exactly ONE comparative (Phase-2) insight is surfaced FIRST if present
     - Phase-1 opportunities remain visible
     - Risk / warning governance is preserved
     - No insight flooding
@@ -176,8 +176,6 @@ def structure_insights(
             continue
 
         lvl = i.get("level", "INFO")
-
-        # Optional escalation (healthcare, supply chain)
         if lvl == "INFO" and profile["escalate_info"]:
             lvl = "WARNING"
 
@@ -186,41 +184,34 @@ def structure_insights(
         normalized.append(item)
 
     # -------------------------------------------------
-    # Detect Phase-2 (Comparative) Insights
+    # Phase-2 Comparative Detection (STRICT)
     # -------------------------------------------------
     comparative_keywords = (
-        "top vs long-tail",
-        "category dominance",
-        "variability",
+        "top vs",
+        "long-tail",
+        "dominant",
+        "concentration",
+        "variance",
+        "distribution",
     )
 
-    comparative: List[Dict[str, Any]] = [
+    comparative = [
         i for i in normalized
         if any(k in i.get("title", "").lower() for k in comparative_keywords)
-    ][:1]   # 🔒 HARD CAP = 1
+    ][:1]  # 🔒 HARD CAP = 1
 
-    # -------------------------------------------------
-    # Bucket remaining insights
-    # -------------------------------------------------
     remaining = [i for i in normalized if i not in comparative]
 
+    # -------------------------------------------------
+    # Structured Buckets (Consulting Order)
+    # -------------------------------------------------
     strengths = (
         comparative
-        + [
-            i for i in remaining
-            if i.get("level") in ("STRENGTH", "OPPORTUNITY")
-        ]
-    )[:3]   # 🔒 HARD CAP
+        + [i for i in remaining if i.get("level") in ("STRENGTH", "OPPORTUNITY")]
+    )[:3]
 
-    warnings = [
-        i for i in remaining
-        if i.get("level") == "WARNING"
-    ][:2]
-
-    risks = [
-        i for i in remaining
-        if i.get("level") == "RISK"
-    ][:1]
+    warnings = [i for i in remaining if i.get("level") == "WARNING"][:2]
+    risks = [i for i in remaining if i.get("level") == "RISK"][:1]
 
     # -------------------------------------------------
     # Composite confidence
@@ -235,49 +226,22 @@ def structure_insights(
     # Domain-tone executive summary
     # -------------------------------------------------
     summary_by_tone = {
-        "clinical": (
-            "Operational signals indicate areas requiring close monitoring "
-            "and structured intervention."
-        ),
-        "commercial": (
-            "Performance demonstrates measurable strengths with "
-            "clear strategic leverage points."
-        ),
-        "financial": (
-            "Financial indicators show a stable position with "
-            "targeted optimization potential."
-        ),
-        "growth": (
-            "Growth momentum is visible with opportunities "
-            "to accelerate impact."
-        ),
-        "operational": (
-            "Operational performance is generally stable with "
-            "identifiable efficiency levers."
-        ),
-        "people": (
-            "People metrics suggest balanced workforce dynamics "
-            "with improvement opportunities."
-        ),
-        "experience": (
-            "Customer experience signals show engagement strength "
-            "with areas to enhance loyalty."
-        ),
+        "clinical": "Operational signals indicate areas requiring close monitoring and structured intervention.",
+        "commercial": "Performance demonstrates measurable strengths with clear strategic leverage points.",
+        "financial": "Financial indicators show a stable position with targeted optimization potential.",
+        "growth": "Growth momentum is visible with opportunities to accelerate impact.",
+        "operational": "Operational performance is generally stable with identifiable efficiency levers.",
+        "people": "People metrics suggest balanced workforce dynamics with improvement opportunities.",
+        "experience": "Customer experience signals show engagement strength with areas to enhance loyalty.",
     }
 
-    # -------------------------------------------------
-    # FINAL STRUCTURED OUTPUT
-    # -------------------------------------------------
     return {
         "strengths": strengths,
         "warnings": warnings,
         "risks": risks,
         "composite": {
             "title": "Overall Executive Assessment",
-            "summary": summary_by_tone.get(
-                profile["tone"],
-                summary_by_tone["commercial"],
-            ),
+            "summary": summary_by_tone.get(profile["tone"], summary_by_tone["commercial"]),
             "confidence": avg_confidence,
         },
     }
