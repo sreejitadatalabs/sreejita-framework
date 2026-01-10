@@ -6,7 +6,6 @@
 from typing import Dict, Any, List
 from sreejita.core.capabilities import Capability
 
-
 # =====================================================
 # DOMAIN EXECUTIVE PROFILES (POLICY, NOT LOGIC)
 # =====================================================
@@ -89,12 +88,11 @@ def get_domain_profile(domain: str) -> Dict[str, Any]:
 # =====================================================
 
 EXECUTIVE_RISK_BANDS = [
-    (85, "LOW"),
-    (70, "MEDIUM"),
-    (50, "HIGH"),
-    (0,  "CRITICAL"),
+    (85, "VERY HIGH"),
+    (70, "HIGH"),
+    (50, "MODERATE"),
+    (0,  "LOW"),
 ]
-
 
 def derive_risk_level(score: int) -> Dict[str, Any]:
     score = int(score or 0)
@@ -106,7 +104,6 @@ def derive_risk_level(score: int) -> Dict[str, Any]:
 
 def infer_domain_from_kpis(kpis: Dict[str, Any]) -> str:
     return kpis.get("domain") or kpis.get("domain_name") or "retail"
-
 
 # =====================================================
 # KPI SELECTION
@@ -134,7 +131,7 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         ranked.append({
             "key": key,
-            "name": key.replace("_", " ").title(),
+            "name": format_kpi_name(key),
             "value": round(value, 2),
             "capability": capability,
             "confidence": round(confidence, 2),
@@ -304,6 +301,11 @@ def compute_board_readiness_score(
         "band": risk["label"],
     }
 
+def format_kpi_name(key: str) -> str:
+    name = key.replace("_", " ").title()
+    for abbr in ["Ctr", "Cpc", "Cpm", "Cpa", "Roas"]:
+        name = name.replace(abbr, abbr.upper())
+    return name
 
 # =====================================================
 # EXECUTIVE BRIEF (CEO-LEGIBLE, DOMAIN-SAFE)
