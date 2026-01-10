@@ -908,18 +908,17 @@ class MarketingDomain(BaseDomain):
         self,
         df: pd.DataFrame,
         kpis: Dict[str, Any],
+        insights: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Marketing Recommendation Engine (v1.1)
-    
-        GUARANTEES:
-        - ≥7 recommendations per sub-domain (when data allows)
-        - KPI-backed (not insight-title-backed)
-        - Executive-safe, non-judgemental
-        - Actionable but optional
+        Executive-safe, sub-domain aware recommendations.
+        Compatible with orchestrator calling conventions.
         """
     
         recs: List[Dict[str, Any]] = []
+    
+        insights = insights or []
+        insight_titles = {i.get("title") for i in insights if isinstance(i, dict)}
     
         if not isinstance(kpis, dict):
             return recs
