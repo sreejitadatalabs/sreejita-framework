@@ -304,6 +304,66 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "dtype": "numeric",
         "priority": 0.9,
     },
+
+    # ---------------- MARKETING PRIMITIVES (RAW ONLY) ----------------
+
+    "campaign": {
+        "aliases": [
+            "campaign", "campaign_name", "campaign name",
+            "campaignid", "campaign_id"
+        ],
+        "dtype": "object",
+        "priority": 1.0,
+    },
+
+    "channel": {
+        "aliases": [
+            "channel", "source", "platform", "medium"
+        ],
+        "dtype": "object",
+        "priority": 0.95,
+    },
+
+    "impressions": {
+        "aliases": [
+            "impressions", "imps", "views", "ad_impressions"
+        ],
+        "dtype": "numeric",
+        "priority": 1.0,
+    },
+
+    "clicks": {
+        "aliases": [
+            "clicks", "ad_clicks", "link_clicks"
+        ],
+        "dtype": "numeric",
+        "priority": 1.0,
+    },
+
+    "conversions": {
+        "aliases": [
+            "conversions", "results", "purchases", "leads"
+        ],
+        "dtype": "numeric",
+        "priority": 1.0,
+    },
+
+    "spend": {
+        "aliases": [
+            "spend", "cost", "amount_spent", "ad_spend"
+        ],
+        "dtype": "numeric",
+        "priority": 1.0,
+    },
+
+    "revenue": {
+        "aliases": [
+            "revenue", "conversion_value", "return"
+        ],
+        "dtype": "numeric",
+        "priority": 0.9,  # slightly lower to avoid ecommerce dominance
+    },
+
 }
 
 # =====================================================
