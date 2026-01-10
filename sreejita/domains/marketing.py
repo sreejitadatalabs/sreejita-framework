@@ -191,9 +191,21 @@ class MarketingDomain(BaseDomain):
         # -------------------------------------------------
         # DATA COMPLETENESS (CONFIDENCE SIGNAL)
         # -------------------------------------------------
-        present = sum(1 for v in self.cols.values() if v)
+        raw_metric_keys = {
+            "spend",
+            "impressions",
+            "clicks",
+            "conversions",
+            "revenue",
+        }
+        
+        present = sum(
+            1 for k, v in self.cols.items()
+            if k in raw_metric_keys and v
+        )
+        
         self.data_completeness = round(
-            present / max(len(self.cols), 1),
+            present / max(len(raw_metric_keys), 1),
             2,
         )
 
