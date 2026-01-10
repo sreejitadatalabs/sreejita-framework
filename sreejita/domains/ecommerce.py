@@ -108,133 +108,139 @@ def _compute_return_rate_proxy(
 
     return _safe_div(returned, orders)
 
-def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-    self.time_col = _detect_time_column(df)
 
-    # -------------------------------------------------
-    # 1. Resolve columns ONCE (Ecommerce-specific)
-    # -------------------------------------------------
-    self.cols = {
-        # Traffic
-        "sessions": resolve_column(df, "sessions") or resolve_column(df, "visits"),
-        "users": resolve_column(df, "users") or resolve_column(df, "visitors"),
-        "pageviews": resolve_column(df, "pageviews") or resolve_column(df, "screen_views"),
-        "bounce": resolve_column(df, "bounce_rate"),
+class EcommerceDomain(BaseDomain):
+    name = "ecommerce"
+    description = "Universal E-Commerce Analytics (Traffic, Conversion, Funnel, Retention)"
 
-        # Funnel
-        "add_to_cart": resolve_column(df, "add_to_cart") or resolve_column(df, "atc"),
-        "checkout": resolve_column(df, "checkout") or resolve_column(df, "begin_checkout"),
-        "orders": resolve_column(df, "orders") or resolve_column(df, "transactions"),
-        "revenue": (
-            resolve_column(df, "revenue")
-            or resolve_column(df, "total_revenue")
-            or resolve_column(df, "sales")
-        ),
-        "returns": resolve_column(df, "returns") or resolve_column(df, "refunds"),
-
-        # Retention / identity (light touch)
-        "customer": resolve_column(df, "customer_id") or resolve_column(df, "user_id"),
-
-        # Dimensions
-        "source": resolve_column(df, "source") or resolve_column(df, "channel"),
-        "device": resolve_column(df, "device") or resolve_column(df, "platform"),
-        "product": resolve_column(df, "product_name") or resolve_column(df, "sku"),
-        "category": resolve_column(df, "category"),
-    }
-
-    # -------------------------------------------------
-    # 2. Store detected funnel & session columns (NEW)
-    # -------------------------------------------------
-    self.session_cols = _detect_session_columns(df)
-    self.funnel_cols = _detect_funnel_columns(df)
-
-    # -------------------------------------------------
-    # 3. Define Ecommerce sub-domains (NEW)
-    # -------------------------------------------------
-    self.sub_domains = {
-        "traffic": "Traffic & Acquisition",
-        "conversion": "Conversion & Funnel",
-        "revenue": "Revenue & Economics",
-        "customer": "Customer & Retention Signals",
-        "operations": "Operational Friction",
-    }
-
-    # KPI → sub-domain mapping (used later)
-    self._domain_kpi_map = {
-        "traffic": [
-            "total_sessions",
-            "total_users",
-            "avg_bounce_rate",
-        ],
-        "conversion": [
-            "conversion_rate",
-            "conversion_rate_proxy",
-            "cart_abandonment_rate",
-            "checkout_dropoff_rate",
-        ],
-        "revenue": [
-            "aov",
-            "revenue_per_session",
-            "revenue_per_user",
-        ],
-        "customer": [
-            "repeat_user_rate",
-            "orders_per_customer",
-        ],
-        "operations": [
-            "return_rate",
-        ],
-    }
-
-    # -------------------------------------------------
-    # 4. Numeric safety & normalization
-    # -------------------------------------------------
-    numeric_cols = [
-        "sessions",
-        "users",
-        "pageviews",
-        "add_to_cart",
-        "checkout",
-        "orders",
-        "revenue",
-        "returns",
-    ]
-
-    for k in numeric_cols:
-        col = self.cols.get(k)
-        if col and col in df.columns:
-            if df[col].dtype == object:
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .str.replace(r"[,$]", "", regex=True)
-                )
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-    # Bounce rate normalization
-    if self.cols.get("bounce") and self.cols["bounce"] in df.columns:
-        b = self.cols["bounce"]
-        if df[b].dtype == object:
-            df[b] = df[b].astype(str).str.replace("%", "", regex=False)
-        df[b] = pd.to_numeric(df[b], errors="coerce")
-        if df[b].dropna().median() > 1:
-            df[b] = df[b] / 100.0
-        df[b] = df[b].clip(0, 1)
-
-    # -------------------------------------------------
-    # 5. Date cleaning
-    # -------------------------------------------------
-    if self.time_col and self.time_col in df.columns:
-        df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
-        df = df.sort_values(self.time_col)
-
-    # -------------------------------------------------
-    # 6. Data completeness (optional but useful)
-    # -------------------------------------------------
-    present = sum(1 for v in self.cols.values() if v)
-    self.data_completeness = round(present / max(len(self.cols), 1), 2)
-
-    return df
+    # ---------------- PREPROCESS (CENTRALIZED STATE) ----------------
+    def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        self.time_col = _detect_time_column(df)
+    
+        # -------------------------------------------------
+        # 1. Resolve columns ONCE (Ecommerce-specific)
+        # -------------------------------------------------
+        self.cols = {
+            # Traffic
+            "sessions": resolve_column(df, "sessions") or resolve_column(df, "visits"),
+            "users": resolve_column(df, "users") or resolve_column(df, "visitors"),
+            "pageviews": resolve_column(df, "pageviews") or resolve_column(df, "screen_views"),
+            "bounce": resolve_column(df, "bounce_rate"),
+    
+            # Funnel
+            "add_to_cart": resolve_column(df, "add_to_cart") or resolve_column(df, "atc"),
+            "checkout": resolve_column(df, "checkout") or resolve_column(df, "begin_checkout"),
+            "orders": resolve_column(df, "orders") or resolve_column(df, "transactions"),
+            "revenue": (
+                resolve_column(df, "revenue")
+                or resolve_column(df, "total_revenue")
+                or resolve_column(df, "sales")
+            ),
+            "returns": resolve_column(df, "returns") or resolve_column(df, "refunds"),
+    
+            # Retention / identity (light touch)
+            "customer": resolve_column(df, "customer_id") or resolve_column(df, "user_id"),
+    
+            # Dimensions
+            "source": resolve_column(df, "source") or resolve_column(df, "channel"),
+            "device": resolve_column(df, "device") or resolve_column(df, "platform"),
+            "product": resolve_column(df, "product_name") or resolve_column(df, "sku"),
+            "category": resolve_column(df, "category"),
+        }
+    
+        # -------------------------------------------------
+        # 2. Store detected funnel & session columns (NEW)
+        # -------------------------------------------------
+        self.session_cols = _detect_session_columns(df)
+        self.funnel_cols = _detect_funnel_columns(df)
+    
+        # -------------------------------------------------
+        # 3. Define Ecommerce sub-domains (NEW)
+        # -------------------------------------------------
+        self.sub_domains = {
+            "traffic": "Traffic & Acquisition",
+            "conversion": "Conversion & Funnel",
+            "revenue": "Revenue & Economics",
+            "customer": "Customer & Retention Signals",
+            "operations": "Operational Friction",
+        }
+    
+        # KPI → sub-domain mapping (used later)
+        self._domain_kpi_map = {
+            "traffic": [
+                "total_sessions",
+                "total_users",
+                "avg_bounce_rate",
+            ],
+            "conversion": [
+                "conversion_rate",
+                "conversion_rate_proxy",
+                "cart_abandonment_rate",
+                "checkout_dropoff_rate",
+            ],
+            "revenue": [
+                "aov",
+                "revenue_per_session",
+                "revenue_per_user",
+            ],
+            "customer": [
+                "repeat_user_rate",
+                "orders_per_customer",
+            ],
+            "operations": [
+                "return_rate",
+            ],
+        }
+    
+        # -------------------------------------------------
+        # 4. Numeric safety & normalization
+        # -------------------------------------------------
+        numeric_cols = [
+            "sessions",
+            "users",
+            "pageviews",
+            "add_to_cart",
+            "checkout",
+            "orders",
+            "revenue",
+            "returns",
+        ]
+    
+        for k in numeric_cols:
+            col = self.cols.get(k)
+            if col and col in df.columns:
+                if df[col].dtype == object:
+                    df[col] = (
+                        df[col]
+                        .astype(str)
+                        .str.replace(r"[,$]", "", regex=True)
+                    )
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    
+        # Bounce rate normalization
+        if self.cols.get("bounce") and self.cols["bounce"] in df.columns:
+            b = self.cols["bounce"]
+            if df[b].dtype == object:
+                df[b] = df[b].astype(str).str.replace("%", "", regex=False)
+            df[b] = pd.to_numeric(df[b], errors="coerce")
+            if df[b].dropna().median() > 1:
+                df[b] = df[b] / 100.0
+            df[b] = df[b].clip(0, 1)
+    
+        # -------------------------------------------------
+        # 5. Date cleaning
+        # -------------------------------------------------
+        if self.time_col and self.time_col in df.columns:
+            df[self.time_col] = pd.to_datetime(df[self.time_col], errors="coerce")
+            df = df.sort_values(self.time_col)
+    
+        # -------------------------------------------------
+        # 6. Data completeness (optional but useful)
+        # -------------------------------------------------
+        present = sum(1 for v in self.cols.values() if v)
+        self.data_completeness = round(present / max(len(self.cols), 1), 2)
+    
+        return df
 
     # ---------------- KPIs ----------------
 
