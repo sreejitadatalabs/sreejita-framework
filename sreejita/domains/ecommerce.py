@@ -734,8 +734,17 @@ class EcommerceDomain(BaseDomain):
 
     # ---------------- RECOMMENDATIONS ----------------
 
-    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_recommendations(
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+        insights: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        
         recs: List[Dict[str, Any]] = []
+
+        insights = insights or []
+        insight_titles = {i.get("title") for i in insights if isinstance(i, dict)}
     
         cr = kpis.get("conversion_rate")
         abandonment = kpis.get("cart_abandonment_rate")
