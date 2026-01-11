@@ -941,7 +941,8 @@ class FinanceDomainDetector(BaseDomainDetector):
 
 def register(registry):
     registry.register(
-        domain_name="finance",
-        domain_class=FinanceDomain,
-        detector_class=FinanceDomainDetector
+        name="finance",
+        domain_cls=FinanceDomain,
+        detector_cls=FinanceDomainDetector,
     )
+
