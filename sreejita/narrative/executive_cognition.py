@@ -122,10 +122,10 @@ def select_executive_kpis(kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
         confidence = float(conf_map.get(key, 0.6))
         weight = {
             Capability.QUALITY.value: 1.30,
-            Capability.TIME_FLOW.value: 1.20,
+            Capability.TIME_FLOW.value: 1.25,
             Capability.COST.value: 1.10,
             Capability.VOLUME.value: 1.00,
-            Capability.VARIANCE.value: 1.00,
+            Capability.VARIANCE.value: 1.15,
             Capability.ACCESS.value: 1.00,
         }.get(capability, 1.0)
 
