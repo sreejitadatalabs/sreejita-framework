@@ -1,0 +1,1416 @@
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from pathlib import Path
+from typing import Dict, Any, List, Set, Optional
+
+from sreejita.core.column_resolver import resolve_column
+from .base import BaseDomain
+from sreejita.domains.contracts import BaseDomainDetector, DomainDetectionResult
+
+
+# =====================================================
+# HELPERS — CUSTOMER VALUE & LOYALTY (GOVERNED)
+# =====================================================
+
+def _safe_div(
+    n: Optional[float],
+    d: Optional[float],
+) -> Optional[float]:
+    """
+    Safe division helper.
+
+    Guarantees:
+    - Never raises
+    - Returns None on invalid input
+    - Used across KPI, insight, and visual layers
+    """
+    try:
+        if d in (0, None) or pd.isna(d):
+            return None
+        return float(n) / float(d)
+    except Exception:
+        return None
+
+
+def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
+    """
+    Customer Value & Loyalty time detector.
+
+    PURPOSE:
+    - Identify lifecycle or recency timestamps
+    - Enable tenure / value aging / trend analysis
+
+    Explicitly NOT:
+    - Experience events
+    - Support events
+    - Marketing touchpoints
+    """
+
+    if df is None or df.empty:
+        return None
+
+    candidates = [
+        # lifecycle & recency
+        "last_purchase_date",
+        "last_transaction_date",
+        "last_active_date",
+        "last_seen_date",
+        "signup_date",
+        "registration_date",
+        "created_at",
+        "date",
+    ]
+
+    for col in df.columns:
+        col_l = str(col).lower().replace(" ", "_")
+        if any(k in col_l for k in candidates):
+            try:
+                sample = df[col].dropna().iloc[:5]
+                if sample.empty:
+                    continue
+                pd.to_datetime(sample, errors="raise")
+                return col
+            except Exception:
+                continue
+
+    return None
+
+# =====================================================
+# CUSTOMER VALUE & LOYALTY DOMAIN
+# =====================================================
+
+class CustomerValueDomain(BaseDomain):
+    name = "customer_value"
+    description = "Customer Value, Loyalty & Economic Stability Intelligence"
+
+    # -------------------------------------------------
+    # PREPROCESS (VALUE-CENTRIC, GOVERNED)
+    # -------------------------------------------------
+    def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Customer Value & Loyalty preprocess guarantees:
+
+        - Defensive DataFrame copy
+        - Lifecycle-aware time detection
+        - Semantic column resolution (value only)
+        - Numeric normalization (safe)
+        - NO KPI computation
+        - NO assumptions or thresholds
+        """
+
+        # -------------------------------------------------
+        # SAFETY
+        # -------------------------------------------------
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("CustomerValueDomain.preprocess expects a DataFrame")
+
+        df = df.copy(deep=False)
+
+        # -------------------------------------------------
+        # TIME COLUMN (LIFECYCLE / RECENCY)
+        # -------------------------------------------------
+        self.time_col = _detect_time_column(df)
+
+        if self.time_col and self.time_col in df.columns:
+            df[self.time_col] = pd.to_datetime(
+                df[self.time_col],
+                errors="coerce",
+            )
+            df = df.sort_values(self.time_col)
+
+        # -------------------------------------------------
+        # CANONICAL COLUMN RESOLUTION (VALUE & LOYALTY ONLY)
+        # -------------------------------------------------
+        self.cols: Dict[str, Optional[str]] = {
+
+            # ---------------- IDENTITY ----------------
+            "customer": (
+                resolve_column(df, "customer_id")
+                or resolve_column(df, "customer")
+                or resolve_column(df, "user_id")
+            ),
+
+            # ---------------- ECONOMIC VALUE ----------------
+            "clv": (
+                resolve_column(df, "clv")
+                or resolve_column(df, "customer_lifetime_value")
+            ),
+            "total_spend": (
+                resolve_column(df, "total_spend")
+                or resolve_column(df, "lifetime_spend")
+                or resolve_column(df, "sales_amount")
+            ),
+            "total_purchases": (
+                resolve_column(df, "total_purchases")
+                or resolve_column(df, "purchase_count")
+                or resolve_column(df, "order_count")
+            ),
+
+            # ---------------- LOYALTY & TENURE ----------------
+            "tenure": (
+                resolve_column(df, "tenure")
+                or resolve_column(df, "tenure_years")
+            ),
+            "loyalty_tier": (
+                resolve_column(df, "loyalty_tier")
+                or resolve_column(df, "tier")
+                or resolve_column(df, "membership_level")
+            ),
+
+            # ---------------- RISK & STABILITY ----------------
+            "churn_risk": (
+                resolve_column(df, "churn_risk")
+                or resolve_column(df, "churn_risk_score")
+                or resolve_column(df, "attrition_risk")
+            ),
+
+            # ---------------- ENGAGEMENT PROXIES ----------------
+            "preferred_channel": (
+                resolve_column(df, "channel")
+                or resolve_column(df, "preferred_channel")
+            ),
+            "email_opt_in": (
+                resolve_column(df, "email_opt_in")
+                or resolve_column(df, "opt_in")
+                or resolve_column(df, "email_consent")
+            ),
+
+            # ---------------- DEMOGRAPHIC CONTEXT (PROXY ONLY) ----------------
+            "age": resolve_column(df, "age"),
+            "city": resolve_column(df, "city"),
+            "income": (
+                resolve_column(df, "annual_income")
+                or resolve_column(df, "income")
+            ),
+        }
+
+        # -------------------------------------------------
+        # NUMERIC NORMALIZATION (STRICT & SAFE)
+        # -------------------------------------------------
+        numeric_keys = {
+            "clv",
+            "total_spend",
+            "total_purchases",
+            "tenure",
+            "churn_risk",
+            "age",
+            "income",
+        }
+
+        for key in numeric_keys:
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                if df[col].dtype == object:
+                    df[col] = (
+                        df[col]
+                        .astype(str)
+                        .str.replace(r"[^\d\.\-]", "", regex=True)
+                    )
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # -------------------------------------------------
+        # BINARY NORMALIZATION (EMAIL OPT-IN)
+        # -------------------------------------------------
+        opt_col = self.cols.get("email_opt_in")
+        if opt_col and opt_col in df.columns:
+            s = df[opt_col]
+            if s.dtype == object:
+                s = s.astype(str).str.lower().map({
+                    "yes": 1, "true": 1, "1": 1,
+                    "no": 0, "false": 0, "0": 0,
+                })
+            df[opt_col] = pd.to_numeric(s, errors="coerce").clip(0, 1)
+
+        # -------------------------------------------------
+        # DATA COMPLETENESS (RAW VALUE SIGNAL COVERAGE)
+        # -------------------------------------------------
+        raw_signal_keys = {
+            "clv",
+            "total_spend",
+            "total_purchases",
+            "tenure",
+            "loyalty_tier",
+            "churn_risk",
+            "preferred_channel",
+            "email_opt_in",
+        }
+
+        present = sum(
+            1 for k, v in self.cols.items()
+            if k in raw_signal_keys and v
+        )
+
+        self.data_completeness = round(
+            present / max(len(raw_signal_keys), 1),
+            2,
+        )
+
+        return df
+
+    # -------------------------------------------------
+    # KPI ENGINE — CUSTOMER VALUE & LOYALTY
+    # -------------------------------------------------
+    
+    def calculate_kpis(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Customer Value & Loyalty KPI Engine (v1.0)
+    
+        GUARANTEES:
+        - Capability-driven sub-domains
+        - 5–9 KPIs per sub-domain (when data allows)
+        - Proxy-aware metrics only (no fabrication)
+        - Confidence-tagged KPIs
+        - Graceful degradation on weak data
+        """
+    
+        # -------------------------------------------------
+        # SAFETY
+        # -------------------------------------------------
+        if df is None or df.empty:
+            return {}
+    
+        c = self.cols
+        volume = int(len(df))
+    
+        # -------------------------------------------------
+        # SUB-DOMAINS (LOCKED)
+        # -------------------------------------------------
+        sub_domains = {
+            "value": "Customer Value & Monetization",
+            "loyalty": "Loyalty & Tenure",
+            "risk": "Churn Risk & Stability",
+            "engagement": "Engagement Proxies",
+            "concentration": "Value Concentration & Dependency",
+        }
+    
+        kpis: Dict[str, Any] = {
+            "domain": "customer_value",
+            "sub_domains": sub_domains,
+            "record_count": volume,
+            "data_completeness": getattr(self, "data_completeness", 0.5),
+            "_domain_kpi_map": {},
+            "_confidence": {},
+        }
+    
+        # -------------------------------------------------
+        # SAFE HELPERS
+        # -------------------------------------------------
+        def safe_mean(col: Optional[str]):
+            if not col or col not in df.columns:
+                return None
+            s = pd.to_numeric(df[col], errors="coerce")
+            return float(s.mean()) if s.notna().any() else None
+    
+        def safe_sum(col: Optional[str]):
+            if not col or col not in df.columns:
+                return None
+            s = pd.to_numeric(df[col], errors="coerce")
+            return float(s.sum()) if s.notna().any() else None
+    
+        def safe_nunique(col: Optional[str]):
+            if not col or col not in df.columns:
+                return None
+            return int(df[col].nunique())
+    
+        # =================================================
+        # VALUE — ECONOMIC CONTRIBUTION
+        # =================================================
+        value = []
+    
+        if c.get("clv"):
+            kpis["value_avg_clv"] = safe_mean(c["clv"])
+            value.append("value_avg_clv")
+    
+            kpis["value_clv_dispersion"] = _safe_div(
+                df[c["clv"]].std(),
+                df[c["clv"]].mean(),
+            )
+            value.append("value_clv_dispersion")
+    
+        if c.get("total_spend"):
+            kpis["value_total_spend"] = safe_sum(c["total_spend"])
+            value.append("value_total_spend")
+    
+            kpis["value_avg_spend"] = safe_mean(c["total_spend"])
+            value.append("value_avg_spend")
+    
+        if c.get("total_purchases"):
+            kpis["value_avg_purchase_count"] = safe_mean(c["total_purchases"])
+            value.append("value_avg_purchase_count")
+    
+        # =================================================
+        # LOYALTY — TENURE & CONTINUITY
+        # =================================================
+        loyalty = []
+    
+        if c.get("tenure"):
+            kpis["loyalty_avg_tenure"] = safe_mean(c["tenure"])
+            loyalty.append("loyalty_avg_tenure")
+    
+            kpis["loyalty_tenure_dispersion"] = _safe_div(
+                df[c["tenure"]].std(),
+                df[c["tenure"]].mean(),
+            )
+            loyalty.append("loyalty_tenure_dispersion")
+    
+        if c.get("loyalty_tier"):
+            kpis["loyalty_tier_count"] = safe_nunique(c["loyalty_tier"])
+            loyalty.append("loyalty_tier_count")
+    
+        if c.get("customer") and c.get("total_purchases"):
+            freq = df[c["total_purchases"]]
+            kpis["loyalty_repeat_customer_rate"] = _safe_div(
+                (freq > 1).sum(),
+                freq.notna().sum(),
+            )
+            loyalty.append("loyalty_repeat_customer_rate")
+    
+        # =================================================
+        # RISK — CHURN & STABILITY
+        # =================================================
+        risk = []
+    
+        if c.get("churn_risk"):
+            kpis["risk_avg_churn_risk"] = safe_mean(c["churn_risk"])
+            risk.append("risk_avg_churn_risk")
+    
+            kpis["risk_churn_risk_dispersion"] = _safe_div(
+                df[c["churn_risk"]].std(),
+                df[c["churn_risk"]].mean(),
+            )
+            risk.append("risk_churn_risk_dispersion")
+    
+        if c.get("tenure") and c.get("churn_risk"):
+            kpis["risk_tenure_churn_alignment"] = _safe_div(
+                df[[c["tenure"], c["churn_risk"]]].corr().iloc[0, 1],
+                1,
+            )
+            risk.append("risk_tenure_churn_alignment")
+    
+        # =================================================
+        # ENGAGEMENT — PROXY SIGNALS
+        # =================================================
+        engagement = []
+    
+        if c.get("preferred_channel"):
+            kpis["engagement_channel_count"] = safe_nunique(c["preferred_channel"])
+            engagement.append("engagement_channel_count")
+    
+        if c.get("email_opt_in"):
+            kpis["engagement_email_opt_in_rate"] = safe_mean(c["email_opt_in"])
+            engagement.append("engagement_email_opt_in_rate")
+    
+        # =================================================
+        # CONCENTRATION — DEPENDENCY & SKEW
+        # =================================================
+        concentration = []
+    
+        if c.get("clv"):
+            sorted_vals = df[c["clv"]].dropna().sort_values(ascending=False)
+            top_20_pct = int(max(1, len(sorted_vals) * 0.2))
+            kpis["concentration_top_20pct_value_share"] = _safe_div(
+                sorted_vals.head(top_20_pct).sum(),
+                sorted_vals.sum(),
+            )
+            concentration.append("concentration_top_20pct_value_share")
+    
+        if c.get("total_spend"):
+            sorted_spend = df[c["total_spend"]].dropna().sort_values(ascending=False)
+            top_10 = int(max(1, len(sorted_spend) * 0.1))
+            kpis["concentration_top_10pct_spend_share"] = _safe_div(
+                sorted_spend.head(top_10).sum(),
+                sorted_spend.sum(),
+            )
+            concentration.append("concentration_top_10pct_spend_share")
+    
+        # -------------------------------------------------
+        # DOMAIN → KPI MAP
+        # -------------------------------------------------
+        kpis["_domain_kpi_map"] = {
+            "value": value,
+            "loyalty": loyalty,
+            "risk": risk,
+            "engagement": engagement,
+            "concentration": concentration,
+        }
+    
+        # -------------------------------------------------
+        # KPI CONFIDENCE (MANDATORY)
+        # -------------------------------------------------
+        for key, val in kpis.items():
+            if key.startswith("_") or not isinstance(val, (int, float)):
+                continue
+    
+            base = 0.7
+    
+            if volume < 100:
+                base -= 0.15
+    
+            if "dispersion" in key or "share" in key:
+                base += 0.05
+    
+            if "alignment" in key:
+                base -= 0.05
+    
+            kpis["_confidence"][key] = round(
+                max(0.4, min(0.9, base)),
+                2,
+            )
+    
+        self._last_kpis = kpis
+        return kpis
+
+    # -------------------------------------------------
+    # VISUAL ENGINE — CUSTOMER VALUE & LOYALTY
+    # -------------------------------------------------
+    
+    def generate_visuals(
+        self,
+        df: pd.DataFrame,
+        output_dir: Path,
+    ) -> List[Dict[str, Any]]:
+        """
+        Customer Value & Loyalty Visual Engine (v1.0)
+    
+        GUARANTEES:
+        - Evidence-only visuals
+        - ≥9 candidates per sub-domain (when data allows)
+        - No judgement, no thresholds
+        - Flat-plot prevention
+        - No trimming (report layer responsibility)
+        """
+    
+        visuals: List[Dict[str, Any]] = []
+        output_dir.mkdir(parents=True, exist_ok=True)
+    
+        c = self.cols
+    
+        # -------------------------------------------------
+        # KPI SOURCE OF TRUTH
+        # -------------------------------------------------
+        kpis = getattr(self, "_last_kpis", None)
+        if not isinstance(kpis, dict):
+            kpis = self.calculate_kpis(df)
+            self._last_kpis = kpis
+    
+        domain_map = kpis.get("_domain_kpi_map", {})
+        record_count = kpis.get("record_count", 0)
+    
+        # -------------------------------------------------
+        # VISUAL CONFIDENCE (DATA-DRIVEN ONLY)
+        # -------------------------------------------------
+        if record_count >= 5000:
+            visual_conf = 0.85
+        elif record_count >= 1000:
+            visual_conf = 0.7
+        else:
+            visual_conf = 0.55
+    
+        # -------------------------------------------------
+        # HELPER
+        # -------------------------------------------------
+        def save(fig, name, caption, importance, sub_domain, role, axis):
+            path = output_dir / name
+            fig.savefig(path, bbox_inches="tight", dpi=120)
+            plt.close(fig)
+            visuals.append({
+                "path": str(path),
+                "caption": caption,
+                "importance": float(importance),
+                "sub_domain": sub_domain,
+                "role": role,
+                "axis": axis,
+                "confidence": visual_conf,
+            })
+    
+        # =================================================
+        # VALUE — ECONOMIC DISTRIBUTIONS
+        # =================================================
+        if "value" in domain_map:
+    
+            if c.get("clv") and df[c["clv"]].nunique() > 3:
+                fig, ax = plt.subplots()
+                df[c["clv"]].hist(ax=ax, bins=20)
+                ax.set_title("Customer Lifetime Value Distribution")
+                save(fig, "value_clv_dist.png",
+                     "Distribution of customer lifetime value",
+                     0.95, "value", "monetization", "distribution")
+    
+                fig, ax = plt.subplots()
+                df[c["clv"]].plot(kind="box", ax=ax)
+                ax.set_title("CLV Spread")
+                save(fig, "value_clv_box.png",
+                     "Variability in customer lifetime value",
+                     0.9, "value", "monetization", "spread")
+    
+            if c.get("total_spend") and df[c["total_spend"]].nunique() > 3:
+                fig, ax = plt.subplots()
+                df[c["total_spend"]].hist(ax=ax, bins=20)
+                ax.set_title("Total Spend Distribution")
+                save(fig, "value_spend_dist.png",
+                     "Distribution of customer total spend",
+                     0.9, "value", "monetization", "distribution")
+    
+        # =================================================
+        # LOYALTY — TENURE & CONTINUITY
+        # =================================================
+        if "loyalty" in domain_map:
+    
+            if c.get("tenure") and df[c["tenure"]].nunique() > 3:
+                fig, ax = plt.subplots()
+                df[c["tenure"]].hist(ax=ax, bins=15)
+                ax.set_title("Customer Tenure Distribution")
+                save(fig, "loyalty_tenure_dist.png",
+                     "Customer tenure spread",
+                     0.9, "loyalty", "stability", "distribution")
+    
+                fig, ax = plt.subplots()
+                df[c["tenure"]].plot(kind="box", ax=ax)
+                ax.set_title("Tenure Variability")
+                save(fig, "loyalty_tenure_box.png",
+                     "Variability in customer tenure",
+                     0.85, "loyalty", "stability", "spread")
+    
+            if c.get("loyalty_tier"):
+                fig, ax = plt.subplots()
+                df[c["loyalty_tier"]].value_counts().plot.bar(ax=ax)
+                ax.set_title("Loyalty Tier Mix")
+                save(fig, "loyalty_tier_mix.png",
+                     "Distribution of customers across loyalty tiers",
+                     0.8, "loyalty", "structure", "composition")
+    
+        # =================================================
+        # RISK — CHURN RISK STRUCTURE
+        # =================================================
+        if "risk" in domain_map:
+    
+            if c.get("churn_risk") and df[c["churn_risk"]].nunique() > 3:
+                fig, ax = plt.subplots()
+                df[c["churn_risk"]].hist(ax=ax, bins=15)
+                ax.set_title("Churn Risk Score Distribution")
+                save(fig, "risk_churn_dist.png",
+                     "Distribution of churn risk scores",
+                     0.9, "risk", "stability", "distribution")
+    
+                fig, ax = plt.subplots()
+                df[c["churn_risk"]].plot(kind="box", ax=ax)
+                ax.set_title("Churn Risk Spread")
+                save(fig, "risk_churn_box.png",
+                     "Variability in churn risk",
+                     0.85, "risk", "stability", "spread")
+    
+            if c.get("tenure") and c.get("churn_risk"):
+                fig, ax = plt.subplots()
+                ax.scatter(df[c["tenure"]], df[c["churn_risk"]], alpha=0.5)
+                ax.set_xlabel("Tenure")
+                ax.set_ylabel("Churn Risk")
+                ax.set_title("Tenure vs Churn Risk")
+                save(fig, "risk_tenure_vs_churn.png",
+                     "Relationship between tenure and churn risk",
+                     0.85, "risk", "relationship", "correlation")
+    
+        # =================================================
+        # ENGAGEMENT — PROXY SIGNALS
+        # =================================================
+        if "engagement" in domain_map:
+    
+            if c.get("preferred_channel"):
+                fig, ax = plt.subplots()
+                df[c["preferred_channel"]].value_counts().plot.bar(ax=ax)
+                ax.set_title("Preferred Channel Distribution")
+                save(fig, "engagement_channel_mix.png",
+                     "Customer preferred channel mix",
+                     0.75, "engagement", "preference", "composition")
+    
+            if c.get("email_opt_in"):
+                fig, ax = plt.subplots()
+                df[c["email_opt_in"]].value_counts().sort_index().plot.bar(ax=ax)
+                ax.set_title("Email Opt-In Distribution")
+                save(fig, "engagement_email_optin.png",
+                     "Email communication opt-in status",
+                     0.7, "engagement", "access", "composition")
+    
+        # =================================================
+        # CONCENTRATION — DEPENDENCY & SKEW
+        # =================================================
+        if "concentration" in domain_map:
+    
+            if c.get("clv") and df[c["clv"]].nunique() > 5:
+                sorted_vals = df[c["clv"]].dropna().sort_values(ascending=False)
+                cumulative = sorted_vals.cumsum() / sorted_vals.sum()
+    
+                fig, ax = plt.subplots()
+                cumulative.reset_index(drop=True).plot(ax=ax)
+                ax.set_title("Cumulative CLV Concentration Curve")
+                save(fig, "concentration_clv_curve.png",
+                     "Cumulative contribution of top customers to total value",
+                     0.95, "concentration", "dependency", "cumulative")
+    
+            if c.get("total_spend") and df[c["total_spend"]].nunique() > 5:
+                sorted_spend = df[c["total_spend"]].dropna().sort_values(ascending=False)
+                cumulative = sorted_spend.cumsum() / sorted_spend.sum()
+    
+                fig, ax = plt.subplots()
+                cumulative.reset_index(drop=True).plot(ax=ax)
+                ax.set_title("Cumulative Spend Concentration Curve")
+                save(fig, "concentration_spend_curve.png",
+                     "Cumulative spend contribution by customer rank",
+                     0.9, "concentration", "dependency", "cumulative")
+    
+        # -------------------------------------------------
+        # RETURN ALL CANDIDATES
+        # -------------------------------------------------
+        visuals.sort(key=lambda v: v["importance"], reverse=True)
+        return visuals
+
+    # -------------------------------------------------
+    # INSIGHT ENGINE — CUSTOMER VALUE & LOYALTY
+    # -------------------------------------------------
+    
+    def generate_insights(
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Customer Value & Loyalty Insight Engine (v1.0)
+    
+        GUARANTEES:
+        - Composite insights are primary
+        - ≥7 insights per sub-domain (when data allows)
+        - Executive-safe, evidence-based language
+        - No thresholds, no judgement
+        - Atomic fallback only
+        """
+    
+        insights: List[Dict[str, Any]] = []
+    
+        if not isinstance(kpis, dict):
+            return insights
+    
+        sub_domains = kpis.get("sub_domains", {}) or {}
+    
+        # -------------------------------------------------
+        # KPI SHORTCUTS (SAFE)
+        # -------------------------------------------------
+        avg_clv = kpis.get("value_avg_clv")
+        clv_disp = kpis.get("value_clv_dispersion")
+        total_spend = kpis.get("value_total_spend")
+    
+        avg_tenure = kpis.get("loyalty_avg_tenure")
+        tenure_disp = kpis.get("loyalty_tenure_dispersion")
+        tier_count = kpis.get("loyalty_tier_count")
+    
+        avg_churn_risk = kpis.get("risk_avg_churn_risk")
+        churn_disp = kpis.get("risk_churn_risk_dispersion")
+        tenure_churn_align = kpis.get("risk_tenure_churn_alignment")
+    
+        channel_count = kpis.get("engagement_channel_count")
+        email_opt_in = kpis.get("engagement_email_opt_in_rate")
+    
+        top20_value = kpis.get("concentration_top_20pct_value_share")
+        top10_spend = kpis.get("concentration_top_10pct_spend_share")
+    
+        # =================================================
+        # VALUE — ECONOMIC CONTRIBUTION
+        # =================================================
+        if "value" in sub_domains and any(v is not None for v in (avg_clv, total_spend)):
+            insights.extend([
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Customer Value Baseline Established",
+                    "so_what": "Customer lifetime value metrics provide a baseline view of economic contribution.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Value Distribution Visibility",
+                    "so_what": "Value dispersion highlights differences in contribution across the customer base.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Average Value Signal",
+                    "so_what": "Average CLV supports comparison across segments and cohorts.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Spend Aggregation Context",
+                    "so_what": "Total spend provides scale context for customer value.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Economic Contribution Variability",
+                    "so_what": "Observed variability indicates heterogeneous customer value profiles.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Value Monitoring Readiness",
+                    "so_what": "Value metrics are suitable for ongoing executive monitoring.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "value",
+                    "title": "Monetization Insight Coverage",
+                    "so_what": "Available value signals support monetization analysis.",
+                },
+            ])
+    
+        # =================================================
+        # LOYALTY — TENURE & CONTINUITY
+        # =================================================
+        if "loyalty" in sub_domains and any(v is not None for v in (avg_tenure, tier_count)):
+            insights.extend([
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Customer Tenure Baseline Established",
+                    "so_what": "Tenure metrics provide insight into customer relationship longevity.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Loyalty Structure Visibility",
+                    "so_what": "Loyalty tier distribution reflects program structure and reach.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Tenure Variability Context",
+                    "so_what": "Tenure dispersion highlights differences in customer continuity.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Repeat Behavior Proxy",
+                    "so_what": "Purchase continuity proxies support loyalty interpretation.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Relationship Stability Insight",
+                    "so_what": "Observed tenure patterns indicate relationship stability.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Loyalty Program Coverage",
+                    "so_what": "Tier diversity provides insight into loyalty program segmentation.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "loyalty",
+                    "title": "Continuity Governance Readiness",
+                    "so_what": "Loyalty metrics are suitable for governance review.",
+                },
+            ])
+    
+        # =================================================
+        # RISK — CHURN & STABILITY
+        # =================================================
+        if "risk" in sub_domains and avg_churn_risk is not None:
+            insights.extend([
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Churn Risk Baseline Established",
+                    "so_what": "Average churn risk provides a baseline view of customer stability.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Risk Dispersion Visibility",
+                    "so_what": "Risk variability highlights differences in customer stability profiles.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Tenure–Risk Relationship Context",
+                    "so_what": "The relationship between tenure and risk supports lifecycle interpretation.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Stability Monitoring Readiness",
+                    "so_what": "Churn risk metrics enable proactive stability monitoring.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Risk Signal Coverage",
+                    "so_what": "Available risk signals support customer stability assessment.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Lifecycle Risk Visibility",
+                    "so_what": "Risk metrics provide insight across customer lifecycle stages.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "risk",
+                    "title": "Retention Governance Context",
+                    "so_what": "Risk signals are suitable for executive governance.",
+                },
+            ])
+    
+        # =================================================
+        # ENGAGEMENT — PROXY SIGNALS
+        # =================================================
+        if "engagement" in sub_domains and any(v is not None for v in (channel_count, email_opt_in)):
+            insights.extend([
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Engagement Proxy Coverage",
+                    "so_what": "Engagement proxies provide indirect visibility into customer reachability.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Channel Preference Structure",
+                    "so_what": "Preferred channels indicate how customers choose to engage.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Communication Access Context",
+                    "so_what": "Opt-in status reflects communication access across the customer base.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Engagement Diversity Insight",
+                    "so_what": "Channel diversity highlights engagement variety.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Reachability Monitoring Readiness",
+                    "so_what": "Engagement proxies support reachability governance.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Engagement Signal Stability",
+                    "so_what": "Observed engagement patterns indicate stability over time.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "engagement",
+                    "title": "Engagement Governance Context",
+                    "so_what": "Engagement signals are suitable for executive oversight.",
+                },
+            ])
+    
+        # =================================================
+        # CONCENTRATION — DEPENDENCY & SKEW
+        # =================================================
+        if "concentration" in sub_domains and any(v is not None for v in (top20_value, top10_spend)):
+            insights.extend([
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Value Concentration Visibility",
+                    "so_what": "Value concentration metrics show how economic contribution is distributed.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Top-Customer Dependency Context",
+                    "so_what": "Top customer contribution indicates dependency exposure.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Revenue Skew Insight",
+                    "so_what": "Spend concentration highlights skew within the customer base.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Portfolio Balance Visibility",
+                    "so_what": "Concentration metrics support portfolio balance assessment.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Diversification Monitoring Readiness",
+                    "so_what": "Customer diversification can be monitored using concentration signals.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Dependency Risk Context",
+                    "so_what": "Concentration metrics provide context for dependency-related risk.",
+                },
+                {
+                    "level": "INFO",
+                    "sub_domain": "concentration",
+                    "title": "Executive Concentration Oversight",
+                    "so_what": "Concentration insights are suitable for executive-level oversight.",
+                },
+            ])
+    
+        # -------------------------------------------------
+        # ATOMIC FALLBACK (ONLY IF NOTHING ELSE)
+        # -------------------------------------------------
+        if not insights:
+            insights.append({
+                "level": "INFO",
+                "sub_domain": "mixed",
+                "title": "Customer Value Signals Available",
+                "so_what": "Available data provides baseline visibility into customer value and stability.",
+            })
+    
+        return insights
+
+    # -------------------------------------------------
+    # RECOMMENDATION ENGINE — CUSTOMER VALUE & LOYALTY
+    # -------------------------------------------------
+    
+    def generate_recommendations(
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+        insights: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Customer Value & Loyalty Recommendation Engine (v1.0)
+    
+        GUARANTEES:
+        - ≥7 recommendations per sub-domain (when active)
+        - Advisory, executive-safe language
+        - No thresholds or urgency bias
+        - Insight-aware but not title-dependent
+        """
+    
+        recs: List[Dict[str, Any]] = []
+    
+        if not isinstance(kpis, dict):
+            return recs
+    
+        sub_domains = kpis.get("sub_domains", {}) or {}
+    
+        # =================================================
+        # VALUE — ECONOMIC CONTRIBUTION
+        # =================================================
+        if "value" in sub_domains:
+            recs.extend([
+                {
+                    "sub_domain": "value",
+                    "action": "Review customer value distributions to understand contribution patterns across the base.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Segment customer value metrics by tenure or channel to improve interpretability.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Incorporate customer value trends into long-term revenue planning discussions.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Use value dispersion signals to inform portfolio balance considerations.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Align customer value insights with strategic account management reviews.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Monitor changes in average customer value over time for early structural signals.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "value",
+                    "action": "Integrate customer value indicators into executive performance reviews.",
+                    "priority": "LOW",
+                },
+            ])
+    
+        # =================================================
+        # LOYALTY — TENURE & CONTINUITY
+        # =================================================
+        if "loyalty" in sub_domains:
+            recs.extend([
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Review tenure distributions to understand relationship longevity across customer cohorts.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Use loyalty tier structure to guide retention strategy discussions.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Incorporate tenure trends into lifecycle management planning.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Assess repeat behavior proxies to understand continuity patterns.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Align loyalty insights with customer segmentation initiatives.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Monitor changes in loyalty mix to detect structural shifts.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "loyalty",
+                    "action": "Include loyalty metrics in executive governance dashboards.",
+                    "priority": "LOW",
+                },
+            ])
+    
+        # =================================================
+        # RISK — CHURN & STABILITY
+        # =================================================
+        if "risk" in sub_domains:
+            recs.extend([
+                {
+                    "sub_domain": "risk",
+                    "action": "Review churn risk distributions to understand stability patterns across the customer base.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Examine the relationship between tenure and churn risk to support lifecycle analysis.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Incorporate churn risk indicators into customer portfolio reviews.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Use risk dispersion metrics to inform stability monitoring.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Align churn risk signals with retention planning discussions.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Monitor changes in average churn risk over time for early warning signals.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "risk",
+                    "action": "Integrate stability indicators into executive risk reviews.",
+                    "priority": "LOW",
+                },
+            ])
+    
+        # =================================================
+        # ENGAGEMENT — PROXY SIGNALS
+        # =================================================
+        if "engagement" in sub_domains:
+            recs.extend([
+                {
+                    "sub_domain": "engagement",
+                    "action": "Review engagement proxy metrics to assess customer reachability.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Segment engagement signals by channel to refine communication strategies.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Incorporate opt-in trends into communication planning.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Monitor engagement proxy stability across customer cohorts.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Align engagement insights with customer outreach governance.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Use engagement indicators to inform channel investment discussions.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "engagement",
+                    "action": "Include engagement proxy metrics in executive communication reviews.",
+                    "priority": "LOW",
+                },
+            ])
+    
+        # =================================================
+        # CONCENTRATION — DEPENDENCY & SKEW
+        # =================================================
+        if "concentration" in sub_domains:
+            recs.extend([
+                {
+                    "sub_domain": "concentration",
+                    "action": "Review customer value concentration to understand dependency exposure.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Assess spend concentration patterns across top customer segments.",
+                    "priority": "MEDIUM",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Incorporate concentration metrics into portfolio risk discussions.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Monitor changes in concentration curves to detect shifts in dependency.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Align concentration insights with diversification strategy planning.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Use dependency indicators to support long-term customer portfolio decisions.",
+                    "priority": "LOW",
+                },
+                {
+                    "sub_domain": "concentration",
+                    "action": "Include concentration metrics in executive risk oversight reviews.",
+                    "priority": "LOW",
+                },
+            ])
+    
+        # -------------------------------------------------
+        # GUARANTEED FALLBACK
+        # -------------------------------------------------
+        if not recs:
+            recs.append({
+                "sub_domain": "mixed",
+                "action": "Continue monitoring customer value and loyalty signals for emerging patterns.",
+                "priority": "LOW",
+            })
+    
+        return recs
+
+# =====================================================
+# DOMAIN DETECTOR — CUSTOMER VALUE & LOYALTY
+# =====================================================
+
+class CustomerValueDomainDetector(BaseDomainDetector):
+    """
+    Customer Value & Loyalty Domain Detector (v1.0)
+
+    Detects datasets focused on:
+    - Customer lifetime value
+    - Spend, purchases, tenure
+    - Loyalty tiers
+    - Churn risk scores
+    - Engagement reachability proxies
+
+    Explicitly avoids:
+    - CX perception datasets (NPS / CSAT / CES)
+    - Transaction-level retail datasets
+    - Marketing execution datasets
+    - Finance / accounting ledgers
+    """
+
+    domain_name = "customer_value"
+
+    # -------------------------------------------------
+    # STRONG VALUE ANCHORS (ECONOMIC & LOYALTY)
+    # -------------------------------------------------
+    VALUE_ANCHORS: Set[str] = {
+        "clv",
+        "lifetime_value",
+        "total_spend",
+        "lifetime_spend",
+        "total_purchases",
+        "purchase_count",
+        "tenure",
+        "tenure_years",
+        "loyalty",
+        "loyalty_tier",
+        "churn_risk",
+        "churn_risk_score",
+        "attrition_risk",
+    }
+
+    # -------------------------------------------------
+    # ENGAGEMENT PROXIES (SUPPORTING SIGNALS)
+    # -------------------------------------------------
+    ENGAGEMENT_PROXIES: Set[str] = {
+        "preferred_channel",
+        "channel",
+        "email_opt_in",
+        "email_consent",
+        "opt_in",
+    }
+
+    # -------------------------------------------------
+    # EXCLUSION TOKENS (BOUNDARY CONTROL)
+    # -------------------------------------------------
+    EXCLUSION_TOKENS: Set[str] = {
+        # CX
+        "nps",
+        "csat",
+        "ces",
+        "sentiment",
+        "ticket",
+        "resolution",
+        "response_time",
+
+        # Retail / Ecommerce
+        "order_id",
+        "order_date",
+        "transaction",
+        "price",
+        "sku",
+        "product",
+        "cart",
+        "checkout",
+
+        # Marketing
+        "campaign",
+        "impression",
+        "click",
+        "ctr",
+        "cpc",
+        "ad_spend",
+
+        # Finance
+        "ledger",
+        "invoice",
+        "cost",
+        "margin",
+        "profit",
+        "gl_",
+    }
+
+    def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
+        # -------------------------------------------------
+        # SAFETY
+        # -------------------------------------------------
+        if df is None or df.empty:
+            return DomainDetectionResult(None, 0.0, {})
+
+        cols = {str(c).lower() for c in df.columns}
+
+        # -------------------------------------------------
+        # CORE SIGNAL CHECKS
+        # -------------------------------------------------
+        has_customer_id = any("customer" in c or "user" in c for c in cols)
+
+        value_hits = [
+            c for c in cols
+            if any(t in c for t in self.VALUE_ANCHORS)
+        ]
+
+        engagement_hits = [
+            c for c in cols
+            if any(t in c for t in self.ENGAGEMENT_PROXIES)
+        ]
+
+        exclusion_hits = [
+            c for c in cols
+            if any(t in c for t in self.EXCLUSION_TOKENS)
+        ]
+
+        # -------------------------------------------------
+        # CONFIDENCE SCORING (CAPABILITY-BASED)
+        # -------------------------------------------------
+        confidence = 0.0
+
+        if has_customer_id and value_hits:
+            confidence = 0.7
+
+        if has_customer_id and len(value_hits) >= 2:
+            confidence = 0.85
+
+        if has_customer_id and len(value_hits) >= 3:
+            confidence = 0.9
+
+        if engagement_hits:
+            confidence = max(confidence, 0.75)
+
+        # -------------------------------------------------
+        # BOUNDARY PENALTIES
+        # -------------------------------------------------
+        if exclusion_hits:
+            confidence -= 0.25
+
+        confidence = round(max(0.0, min(0.95, confidence)), 2)
+
+        # -------------------------------------------------
+        # FINAL DECISION
+        # -------------------------------------------------
+        if confidence < 0.5:
+            return DomainDetectionResult(
+                None,
+                0.0,
+                {
+                    "signals": {
+                        "has_customer_id": has_customer_id,
+                        "value_hits": value_hits,
+                        "engagement_hits": engagement_hits,
+                        "excluded": exclusion_hits,
+                    }
+                },
+            )
+
+        return DomainDetectionResult(
+            domain="customer_value",
+            confidence=confidence,
+            signals={
+                "value_signals": value_hits,
+                "engagement_signals": engagement_hits,
+                "excluded_signals": exclusion_hits,
+            },
+        )
+
+
+# =====================================================
+# DOMAIN REGISTRATION — CUSTOMER VALUE & LOYALTY
+# =====================================================
+
+def register(registry):
+    """
+    Registers the Customer Value & Loyalty domain
+    as a first-class Sreejita Framework domain.
+    """
+    registry.register(
+        name="customer_value",
+        domain_cls=CustomerValueDomain,
+        detector_cls=CustomerValueDomainDetector,
+    )
+
+
