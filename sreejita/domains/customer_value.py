@@ -324,8 +324,6 @@ class CustomerValueDomain(BaseDomain):
         c = self.cols
         volume = int(len(df))
 
-        kpis["_proxy_metrics"] = []
-
         # -------------------------------------------------
         # SUB-DOMAINS (LOCKED)
         # -------------------------------------------------
@@ -344,6 +342,7 @@ class CustomerValueDomain(BaseDomain):
             "data_completeness": getattr(self, "data_completeness", 0.5),
             "_domain_kpi_map": {},
             "_confidence": {},
+            "_proxy_metrics": [],   # ✅ FIX: initialize here
         }
     
         # -------------------------------------------------
@@ -528,7 +527,7 @@ class CustomerValueDomain(BaseDomain):
             if "dispersion" in key or "share" in key:
                 base += 0.05
 
-            if key in kpis.get("_proxy_metrics", []):
+            if "_proxy_metrics" in kpis and key in kpis["_proxy_metrics"]:
                 base -= 0.15
 
             if "alignment" in key:
