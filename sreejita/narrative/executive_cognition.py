@@ -91,6 +91,7 @@ DEFAULT_PROFILE = EXECUTIVE_DOMAIN_PROFILES["retail"]
 def get_domain_profile(domain: str) -> Dict[str, Any]:
     return EXECUTIVE_DOMAIN_PROFILES.get(domain, DEFAULT_PROFILE)
 
+print(">>> EXECUTIVE COGNITION LOADED FROM sreejita/narrative/executive_cognition.py")
 
 # =====================================================
 # EXECUTIVE RISK BANDS
@@ -261,6 +262,11 @@ def compute_board_readiness_score(
     insights: List[Dict[str, Any]],
     domain: str,
 ) -> Dict[str, Any]:
+
+    print(">>> compute_board_readiness_score CALLED")
+    print(">>> domain:", kpis.get("domain"))
+    print(">>> data_completeness:", kpis.get("data_completeness"))
+    print(">>> domain_has_strong_data:", kpis.get("_domain_has_strong_data"))
 
     profile = get_domain_profile(domain)
     conf_map = kpis.get("_confidence", {}) or {}
