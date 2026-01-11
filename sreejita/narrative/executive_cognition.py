@@ -299,9 +299,14 @@ def compute_board_readiness_score(
     if kpis.get("primary_sub_domain") == "mixed":
         score = round(score - (10 * profile["mixed_domain_penalty"]))
 
+    # -------------------------------------------------
+    # GLOBAL COMPLETENESS CAP (DOMAIN-AWARE OVERRIDE)
+    # -------------------------------------------------
     if isinstance(kpis.get("data_completeness"), (int, float)):
         if kpis["data_completeness"] < 0.6:
-            score = min(score, 65)
+            # Allow domain-level override when strong signals exist
+            if not kpis.get("_domain_has_strong_data", False):
+                score = min(score, 65)
 
     risk = derive_risk_level(score)
 
