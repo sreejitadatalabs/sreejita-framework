@@ -323,7 +323,9 @@ class CustomerValueDomain(BaseDomain):
     
         c = self.cols
         volume = int(len(df))
-    
+
+        kpis["_proxy_metrics"] = []
+
         # -------------------------------------------------
         # SUB-DOMAINS (LOCKED)
         # -------------------------------------------------
@@ -363,7 +365,13 @@ class CustomerValueDomain(BaseDomain):
             if not col or col not in df.columns:
                 return None
             return int(df[col].nunique())
-    
+
+        def can_derive_total_purchases():
+            if not c.get("customer"):
+                return False
+            # multiple rows per customer implies history
+            return df[c["customer"]].duplicated().any()
+
         # =================================================
         # VALUE — ECONOMIC CONTRIBUTION
         # =================================================
@@ -416,6 +424,25 @@ class CustomerValueDomain(BaseDomain):
                 freq.notna().sum(),
             )
             loyalty.append("loyalty_repeat_customer_rate")
+
+        # ---------------- PROXY: TOTAL PURCHASES ----------------
+        if (
+            not c.get("total_purchases")
+            and can_derive_total_purchases()
+        ):
+            purchase_counts = (
+                df.groupby(c["customer"])
+                .size()
+                .rename("proxy_total_purchases")
+            )
+        
+            avg_purchases = purchase_counts.mean()
+        
+            kpis["loyalty_avg_purchase_count"] = float(avg_purchases)
+            loyalty.append("loyalty_avg_purchase_count")
+        
+            # mark as proxy
+            kpis["_proxy_metrics"].append("loyalty_avg_purchase_count")
     
         # =================================================
         # RISK — CHURN & STABILITY
@@ -500,7 +527,10 @@ class CustomerValueDomain(BaseDomain):
     
             if "dispersion" in key or "share" in key:
                 base += 0.05
-    
+
+            if key in kpis.get("_proxy_metrics", []):
+                base -= 0.15
+
             if "alignment" in key:
                 base -= 0.05
     
