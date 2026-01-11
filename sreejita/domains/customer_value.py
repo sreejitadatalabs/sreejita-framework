@@ -297,10 +297,12 @@ class CustomerValueDomain(BaseDomain):
             "email_opt_in",
         }
 
-        present = sum(
-            1 for k, v in self.cols.items()
-            if k in raw_signal_keys and v
-        )
+        present = 0
+        for k in raw_signal_keys:
+            col = self.cols.get(k)
+            if col and col in df.columns:
+                if df[col].notna().any():
+                    present += 1
 
         self.data_completeness = round(
             present / max(len(raw_signal_keys), 1),
