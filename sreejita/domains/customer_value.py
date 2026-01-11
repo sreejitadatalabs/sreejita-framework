@@ -184,7 +184,10 @@ class CustomerValueDomain(BaseDomain):
                 resolve_column(df, "total_purchases")
                 or resolve_column(df, "purchase_count")
                 or resolve_column(df, "order_count")
+                or resolve_column(df, "annual_frequency")   # ✅ ADD
+                or _resolve_any(df, ["frequency", "orders_per_year"])
             ),
+
 
             # ---------------- LOYALTY & TENURE ----------------
             "tenure": (
@@ -234,6 +237,11 @@ class CustomerValueDomain(BaseDomain):
                 resolve_column(df, "annual_income")
                 or resolve_column(df, "income")
             ),
+
+            "recency_days": (
+                resolve_column(df, "days_since_last_purchase")
+                or resolve_column(df, "recency_days")
+            ),
         }
 
         # -------------------------------------------------
@@ -244,6 +252,7 @@ class CustomerValueDomain(BaseDomain):
             "total_spend",
             "total_purchases",
             "tenure",
+            "recency_days",
             "churn_risk",
             "age",
             "income",
@@ -282,6 +291,7 @@ class CustomerValueDomain(BaseDomain):
             "total_purchases",
             "tenure",
             "loyalty_tier",
+            "recency_days",
             "churn_risk",
             "preferred_channel",
             "email_opt_in",
