@@ -14,6 +14,7 @@ import pandas as pd
 
 from sreejita.domains.retail import RetailDomain, RetailDomainDetector
 from sreejita.domains.customer import CustomerDomain, CustomerDomainDetector
+from sreejita.domains.customer_value import CustomerValueDomain, CustomerValueDomainDetector
 from sreejita.domains.finance import FinanceDomain, FinanceDomainDetector
 from sreejita.domains.ecommerce import EcommerceDomain, EcommerceDomainDetector
 from sreejita.domains.healthcare import HealthcareDomain, HealthcareDomainDetector
@@ -47,6 +48,7 @@ MIN_DOMAIN_CONFIDENCE = 0.45  # 🚨 hard guardrail
 DOMAIN_DETECTORS = [
     RetailDomainDetector(),
     CustomerDomainDetector(),
+    CustomerValueDomainDetector(),  # 🆕 ADD HERE
     FinanceDomainDetector(),
     EcommerceDomainDetector(),
     HealthcareDomainDetector(),
@@ -64,6 +66,7 @@ GENERIC_DETECTOR = GenericDomainDetector()
 _DOMAIN_FACTORY = {
     "retail": RetailDomain,
     "customer": CustomerDomain,
+    "customer_value": CustomerValueDomain,  # 🆕 ADD
     "finance": FinanceDomain,
     "ecommerce": EcommerceDomain,
     "healthcare": HealthcareDomain,
