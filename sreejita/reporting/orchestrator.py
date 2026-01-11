@@ -192,7 +192,7 @@ def generate_report_payload(
     for v in visuals:
         try:
             path = Path(v.get("path", ""))
-            conf = float(v.get("confidence", 1.0))  # DEFAULT TO SAFE CONFIDENCE
+            conf = float(v.get("confidence", v.get("importance", 1.0)))
             if path.exists() and conf >= 0.30:
                 valid_visuals.append(v)
 
