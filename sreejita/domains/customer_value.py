@@ -335,7 +335,7 @@ class CustomerValueDomain(BaseDomain):
     
         c = self.cols
         volume = int(len(df))
-
+    
         # -------------------------------------------------
         # SUB-DOMAINS (LOCKED)
         # -------------------------------------------------
@@ -347,15 +347,30 @@ class CustomerValueDomain(BaseDomain):
             "concentration": "Value Concentration & Dependency",
         }
     
+        # -------------------------------------------------
+        # KPI CONTAINER
+        # -------------------------------------------------
         kpis: Dict[str, Any] = {
             "domain": "customer_value",
             "sub_domains": sub_domains,
             "record_count": volume,
-            "data_completeness": getattr(self, "data_completeness", 0.5),
+            "data_completeness": getattr(self, "data_completeness", 0.0),
             "_domain_kpi_map": {},
             "_confidence": {},
-            "_proxy_metrics": [],   # ✅ FIX: initialize here
+            "_proxy_metrics": [],
         }
+    
+        # -------------------------------------------------
+        # PROMOTE DATA COMPLETENESS AS FIRST-CLASS KPI SIGNAL
+        # -------------------------------------------------
+        completeness = kpis["data_completeness"]
+    
+        if completeness >= 0.4:
+            kpis["_confidence"]["data_completeness"] = 0.85
+        elif completeness >= 0.25:
+            kpis["_confidence"]["data_completeness"] = 0.70
+        else:
+            kpis["_confidence"]["data_completeness"] = 0.50
     
         # -------------------------------------------------
         # SAFE HELPERS
@@ -376,13 +391,12 @@ class CustomerValueDomain(BaseDomain):
             if not col or col not in df.columns:
                 return None
             return int(df[col].nunique())
-
+    
         def can_derive_total_purchases():
             if not c.get("customer"):
                 return False
-            # multiple rows per customer implies history
             return df[c["customer"]].duplicated().any()
-
+    
         # =================================================
         # VALUE — ECONOMIC CONTRIBUTION
         # =================================================
@@ -435,24 +449,19 @@ class CustomerValueDomain(BaseDomain):
                 freq.notna().sum(),
             )
             loyalty.append("loyalty_repeat_customer_rate")
-
+    
         # ---------------- PROXY: TOTAL PURCHASES ----------------
-        if (
-            not c.get("total_purchases")
-            and can_derive_total_purchases()
-        ):
+        if not c.get("total_purchases") and can_derive_total_purchases():
             purchase_counts = (
                 df.groupby(c["customer"])
                 .size()
                 .rename("proxy_total_purchases")
             )
-        
+    
             avg_purchases = purchase_counts.mean()
-        
+    
             kpis["loyalty_avg_purchase_count"] = float(avg_purchases)
             loyalty.append("loyalty_avg_purchase_count")
-        
-            # mark as proxy
             kpis["_proxy_metrics"].append("loyalty_avg_purchase_count")
     
         # =================================================
@@ -471,10 +480,8 @@ class CustomerValueDomain(BaseDomain):
             risk.append("risk_churn_risk_dispersion")
     
         if c.get("tenure") and c.get("churn_risk"):
-            kpis["risk_tenure_churn_alignment"] = _safe_div(
-                df[[c["tenure"], c["churn_risk"]]].corr().iloc[0, 1],
-                1,
-            )
+            corr = df[[c["tenure"], c["churn_risk"]]].corr().iloc[0, 1]
+            kpis["risk_tenure_churn_alignment"] = _safe_div(corr, 1)
             risk.append("risk_tenure_churn_alignment")
     
         # =================================================
@@ -497,9 +504,9 @@ class CustomerValueDomain(BaseDomain):
     
         if c.get("clv"):
             sorted_vals = df[c["clv"]].dropna().sort_values(ascending=False)
-            top_20_pct = int(max(1, len(sorted_vals) * 0.2))
+            top_20 = int(max(1, len(sorted_vals) * 0.2))
             kpis["concentration_top_20pct_value_share"] = _safe_div(
-                sorted_vals.head(top_20_pct).sum(),
+                sorted_vals.head(top_20).sum(),
                 sorted_vals.sum(),
             )
             concentration.append("concentration_top_20pct_value_share")
@@ -525,6 +532,11 @@ class CustomerValueDomain(BaseDomain):
         }
     
         # -------------------------------------------------
+        # DOMAIN DATA STRENGTH FLAG (VISUAL & READINESS GATE)
+        # -------------------------------------------------
+        kpis["_domain_has_strong_data"] = completeness >= 0.4
+    
+        # -------------------------------------------------
         # KPI CONFIDENCE (MANDATORY)
         # -------------------------------------------------
         for key, val in kpis.items():
@@ -538,10 +550,10 @@ class CustomerValueDomain(BaseDomain):
     
             if "dispersion" in key or "share" in key:
                 base += 0.05
-
-            if "_proxy_metrics" in kpis and key in kpis["_proxy_metrics"]:
+    
+            if key in kpis.get("_proxy_metrics", []):
                 base -= 0.15
-
+    
             if "alignment" in key:
                 base -= 0.05
     
