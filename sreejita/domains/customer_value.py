@@ -79,6 +79,28 @@ def _detect_time_column(df: pd.DataFrame) -> Optional[str]:
 
     return None
 
+def _resolve_any(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """
+    Domain-scoped resolver for customer value signals.
+
+    Matches on:
+    - snake_case
+    - camelCase
+    - partial semantic tokens
+
+    Does NOT fabricate meaning.
+    """
+    cols = {c.lower().replace(" ", "_"): c for c in df.columns}
+
+    for key in candidates:
+        key_l = key.lower()
+        for norm, original in cols.items():
+            if key_l == norm:
+                return original
+            if key_l in norm:
+                return original
+    return None
+
 # =====================================================
 # CUSTOMER VALUE & LOYALTY DOMAIN
 # =====================================================
@@ -138,12 +160,26 @@ class CustomerValueDomain(BaseDomain):
             "clv": (
                 resolve_column(df, "clv")
                 or resolve_column(df, "customer_lifetime_value")
+                or _resolve_any(df, [
+                    "clv_value",
+                    "lifetime_value",
+                    "lifetime_revenue",
+                    "customer_value",
+                ])
             ),
+            
             "total_spend": (
                 resolve_column(df, "total_spend")
                 or resolve_column(df, "lifetime_spend")
                 or resolve_column(df, "sales_amount")
+                or _resolve_any(df, [
+                    "total_revenue",
+                    "lifetime_revenue",
+                    "customer_revenue",
+                    "revenue_total",
+                ])
             ),
+
             "total_purchases": (
                 resolve_column(df, "total_purchases")
                 or resolve_column(df, "purchase_count")
@@ -154,7 +190,14 @@ class CustomerValueDomain(BaseDomain):
             "tenure": (
                 resolve_column(df, "tenure")
                 or resolve_column(df, "tenure_years")
+                or _resolve_any(df, [
+                    "customer_tenure",
+                    "years_active",
+                    "years_with_company",
+                    "relationship_years",
+                ])
             ),
+
             "loyalty_tier": (
                 resolve_column(df, "loyalty_tier")
                 or resolve_column(df, "tier")
@@ -166,6 +209,11 @@ class CustomerValueDomain(BaseDomain):
                 resolve_column(df, "churn_risk")
                 or resolve_column(df, "churn_risk_score")
                 or resolve_column(df, "attrition_risk")
+                or _resolve_any(df, [
+                    "churn_probability",
+                    "risk_score",
+                    "retention_risk",
+                ])
             ),
 
             # ---------------- ENGAGEMENT PROXIES ----------------
