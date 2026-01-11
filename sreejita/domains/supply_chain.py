@@ -1010,19 +1010,17 @@ class SupplyChainDomain(BaseDomain):
         self,
         df: pd.DataFrame,
         kpis: Dict[str, Any],
+        insights: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Supply Chain Recommendation Engine (v1.0)
-    
-        GUARANTEES:
-        - ≥7 recommendations per sub-domain
-        - Composite-first, capability-oriented
-        - No thresholds or hard targets
-        - Executive-safe, advisory tone
-        - Report layer trims output
+        Executive-safe, sub-domain aware recommendations.
+        Compatible with orchestrator calling conventions.
         """
     
         recs: List[Dict[str, Any]] = []
+    
+        insights = insights or []
+        insight_titles = {i.get("title") for i in insights if isinstance(i, dict)}
     
         if not isinstance(kpis, dict):
             return recs
