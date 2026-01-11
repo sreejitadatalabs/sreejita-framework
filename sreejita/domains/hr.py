@@ -556,7 +556,12 @@ class HRDomain(BaseDomain):
 
     # ---------------- RECOMMENDATIONS ----------------
 
-    def generate_recommendations(self, df: pd.DataFrame, kpis: Dict[str, Any]) -> List[Dict[str, Any]]:
+     def generate_recommendations(
+        self,
+        df: pd.DataFrame,
+        kpis: Dict[str, Any],
+        insights: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         HR / Workforce Advisory Recommendation Engine
     
