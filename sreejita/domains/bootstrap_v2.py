@@ -27,13 +27,13 @@ from sreejita.domains import (
     retail,
     ecommerce,
     customer,
+    customer_value,   # 🆕 ADD THIS
     finance,
     healthcare,
     hr,
     supply_chain,
     marketing,
 )
-
 
 # =====================================================
 # SAFE REGISTRATION HELPER
@@ -96,6 +96,7 @@ def bootstrap_domains():
         retail,
         ecommerce,
         customer,
+        customer_value,   # 🆕 ADD THIS
         finance,
         healthcare,
         hr,
