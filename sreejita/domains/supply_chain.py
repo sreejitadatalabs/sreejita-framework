@@ -126,6 +126,10 @@ class SupplyChainDomain(BaseDomain):
                 or resolve_column(df, "item_id")
             ),
 
+            # ---------------- OPERATIONAL TIME ----------------
+            "processing_time": resolve_column(df, "processing_time"),
+            "packing_time": resolve_column(df, "packing_time"),
+
             # ---------------- STRUCTURE ----------------
             "category": (
                 resolve_column(df, "category")
@@ -193,6 +197,11 @@ class SupplyChainDomain(BaseDomain):
             if col and col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
 
+        for key in ["processing_time", "packing_time"]:
+            col = self.cols.get(key)
+            if col and col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
         if self.time_col and self.time_col in df.columns:
             df = df.sort_values(self.time_col)
 
@@ -225,6 +234,9 @@ class SupplyChainDomain(BaseDomain):
             "inventory",
             "cost",
             "distance",
+            "processing_time",
+            "packing_time",
+            "status",
             "weight",
             "co2",
         }
@@ -309,12 +321,22 @@ class SupplyChainDomain(BaseDomain):
             kpis["planning_order_frequency"] = total_orders / max(df[c["order_date"]].nunique(), 1)
             planning.append("planning_order_frequency")
     
+        # --- Lead Time (Date-based OR Operational proxy) ---
+        lead_days = None
+        
         if c.get("order_date") and c.get("delivery_date"):
-            lead = (df[c["delivery_date"]] - df[c["order_date"]]).dt.days
-            lead = lead.dropna()
-            if not lead.empty:
-                kpis["planning_avg_lead_time"] = lead.mean()
-                kpis["planning_lead_time_variability"] = _safe_div(lead.std(), lead.mean())
+            lead_days = (df[c["delivery_date"]] - df[c["order_date"]]).dt.days
+        
+        elif c.get("processing_time") or c.get("packing_time"):
+            proc = pd.to_numeric(df.get(c.get("processing_time")), errors="coerce") if c.get("processing_time") else 0
+            pack = pd.to_numeric(df.get(c.get("packing_time")), errors="coerce") if c.get("packing_time") else 0
+            lead_days = (proc.fillna(0) + (pack.fillna(0) / 60)) / 24  # hours → days
+        
+        if lead_days is not None:
+            lead_days = lead_days.dropna()
+            if not lead_days.empty:
+                kpis["planning_avg_lead_time"] = lead_days.mean()
+                kpis["planning_lead_time_variability"] = _safe_div(lead_days.std(), lead_days.mean())
                 planning.extend([
                     "planning_avg_lead_time",
                     "planning_lead_time_variability",
@@ -352,6 +374,14 @@ class SupplyChainDomain(BaseDomain):
         if c.get("distance"):
             kpis["logistics_avg_distance"] = safe_mean(c["distance"])
             logistics.append("logistics_avg_distance")
+
+        elif c.get("status"):
+            status = df[c["status"]].astype(str).str.lower()
+            delivered = status.str.contains("deliver", na=False)
+            returned = status.str.contains("return|fail|cancel", na=False)
+            if (delivered | returned).any():
+                kpis["logistics_on_time_delivery_rate"] = delivered.mean()
+                logistics.append("logistics_on_time_delivery_rate")
     
         # =================================================
         # COST EFFICIENCY
@@ -395,7 +425,7 @@ class SupplyChainDomain(BaseDomain):
                 "resilience_carrier_count",
                 "resilience_top_carrier_share",
             ])
-    
+
         # =================================================
         # SUSTAINABILITY (PROXY-AWARE)
         # =================================================
@@ -405,14 +435,13 @@ class SupplyChainDomain(BaseDomain):
             kpis["sustainability_avg_co2"] = safe_mean(c["co2"])
             sustainability.append("sustainability_avg_co2")
     
-        elif c.get("distance") and c.get("weight"):
-            # Explicit proxy — no constants embedded
+        elif c.get("distance"):
             kpis["sustainability_emissions_proxy"] = _safe_div(
-                safe_sum(c["distance"]) * safe_sum(c["weight"]),
+                safe_sum(c["distance"]),
                 volume,
             )
             sustainability.append("sustainability_emissions_proxy")
-    
+
         # -------------------------------------------------
         # DOMAIN → KPI MAP
         # -------------------------------------------------
@@ -444,7 +473,6 @@ class SupplyChainDomain(BaseDomain):
     
         self._last_kpis = kpis
         return kpis
-
 
     # ---------------- VISUALS (SMART SELECTION) ----------------
 
@@ -538,12 +566,13 @@ class SupplyChainDomain(BaseDomain):
         # =================================================
         if "logistics" in domain_map and c.get("order_date") and c.get("delivery_date"):
             lead = (df[c["delivery_date"]] - df[c["order_date"]]).dt.days.dropna()
-    
-            # 3. Lead time distribution
-            fig, ax = plt.subplots()
-            lead.hist(ax=ax, bins=20)
-            ax.set_title("Lead Time Distribution")
-            save(fig, "logistics_lead_dist.png", "Fulfillment time dispersion", 0.95, "logistics", "velocity", "distribution")
+
+            if lead.nunique() > 3:
+                fig, ax = plt.subplots()
+                lead.hist(ax=ax, bins=20)
+                ax.set_title("Lead Time Distribution")
+                save(
+                    fig, "logistics_lead_dist.png", "Fulfillment time dispersion", 0.95, "logistics", "velocity", "distribution",)
     
             # 4. Lead time spread
             fig, ax = plt.subplots()
@@ -552,12 +581,15 @@ class SupplyChainDomain(BaseDomain):
             save(fig, "logistics_lead_box.png", "Delivery variability", 0.9, "logistics", "variability", "spread")
     
         if "logistics" in domain_map and c.get("delivery_date") and c.get("promised_date"):
+            
             # 5. On-time delivery trend (evidence only)
-            fig, ax = plt.subplots()
             on_time = df[c["delivery_date"]] <= df[c["promised_date"]]
-            on_time.groupby(df[self.time_col].dt.to_period("M")).mean().plot(ax=ax)
-            ax.set_title("On-Time Delivery Over Time")
-            save(fig, "logistics_otd_trend.png", "Delivery reliability trend", 0.9, "logistics", "reliability", "time")
+
+            if on_time.nunique() > 1:
+                fig, ax = plt.subplots()
+                on_time.groupby(df[self.time_col].dt.to_period("M")).mean().plot(ax=ax)
+                ax.set_title("On-Time Delivery Over Time")
+                save(fig, "logistics_otd_trend.png", "Delivery reliability trend", 0.9, "logistics", "reliability", "time",)
     
         # =================================================
         # INVENTORY — STOCK POSITION
