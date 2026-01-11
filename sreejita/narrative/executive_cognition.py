@@ -74,6 +74,15 @@ EXECUTIVE_DOMAIN_PROFILES = {
         "readiness_bias": +10,
         "tone": "experience",
     },
+        "customer_value": {
+        "escalate_info": False,
+        "warning_penalty": 3,
+        "risk_penalty": 6,
+        "confidence_floor": 0.65,
+        "mixed_domain_penalty": 0.4,
+        "readiness_bias": +8,
+        "tone": "commercial",
+    },
 }
 
 DEFAULT_PROFILE = EXECUTIVE_DOMAIN_PROFILES["retail"]
