@@ -304,6 +304,83 @@ SEMANTIC_COLUMN_MAP: Dict[str, Dict[str, Any]] = {
         "dtype": "numeric",
         "priority": 0.9,
     },
+    
+    # ---------------- SUPPLY CHAIN PRIMITIVES ----------------
+
+    "delivery_date": {
+        "aliases": [
+            "delivery_date", "delivered_date",
+            "actual_delivery", "deliverydate",
+            "delivery date"
+        ],
+        "dtype": "datetime",
+        "priority": 1.0,
+    },
+
+    "ship_date": {
+        "aliases": [
+            "ship_date", "shipping_date",
+            "dispatch_date", "shipped_date",
+            "ship date"
+        ],
+        "dtype": "datetime",
+        "priority": 0.95,
+    },
+
+    "promised_date": {
+        "aliases": [
+            "promised_date", "expected_delivery",
+            "estimated_delivery", "promise_date",
+            "promised delivery date"
+        ],
+        "dtype": "datetime",
+        "priority": 0.95,
+    },
+
+    "supplier": {
+        "aliases": [
+            "supplier", "vendor", "manufacturer",
+            "supplier_name", "vendor_name"
+        ],
+        "dtype": "object",
+        "priority": 0.9,
+    },
+
+    "carrier": {
+        "aliases": [
+            "carrier", "logistics_provider",
+            "freight_partner", "shipping_partner"
+        ],
+        "dtype": "object",
+        "priority": 0.9,
+    },
+
+    "distance": {
+        "aliases": [
+            "distance", "miles", "kilometers",
+            "km", "route_distance"
+        ],
+        "dtype": "numeric",
+        "priority": 0.85,
+    },
+
+    "weight": {
+        "aliases": [
+            "weight", "shipment_weight",
+            "tonnage", "load_weight"
+        ],
+        "dtype": "numeric",
+        "priority": 0.85,
+    },
+
+    "co2": {
+        "aliases": [
+            "co2", "emissions", "carbon_emissions",
+            "co2_emissions"
+        ],
+        "dtype": "numeric",
+        "priority": 0.85,
+    },
 
     # ---------------- MARKETING PRIMITIVES (RAW ONLY) ----------------
 
