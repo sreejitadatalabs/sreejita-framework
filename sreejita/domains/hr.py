@@ -556,7 +556,7 @@ class HRDomain(BaseDomain):
 
     # ---------------- RECOMMENDATIONS ----------------
 
-     def generate_recommendations(
+    def generate_recommendations(
         self,
         df: pd.DataFrame,
         kpis: Dict[str, Any],
