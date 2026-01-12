@@ -246,7 +246,7 @@ class CustomerValueDomain(BaseDomain):
                 or resolve_column(df, "income")
             ),
 
-            referrals": (
+            "referrals": (
                 resolve_column(df, "referrals")
                 or resolve_column(df, "referral_count")
             ),
