@@ -499,7 +499,21 @@ class CustomerValueDomain(BaseDomain):
             corr = df[[c["tenure"], c["churn_risk"]]].corr().iloc[0, 1]
             kpis["risk_tenure_churn_alignment"] = _safe_div(corr, 1)
             risk.append("risk_tenure_churn_alignment")
-    
+
+        # ---------------- RISK SHAPE ----------------
+        if c.get("churn_risk"):
+            s = df[c["churn_risk"]].dropna()
+        
+            # asymmetry of risk distribution (no threshold)
+            kpis["risk_churn_skew"] = float(s.skew()) if len(s) > 10 else None
+            risk.append("risk_churn_skew")
+        
+        # ---------------- RISK RECENCY ALIGNMENT ----------------
+        if c.get("churn_risk") and c.get("recency_days"):
+            corr = df[[c["churn_risk"], c["recency_days"]]].corr().iloc[0, 1]
+            kpis["risk_recency_alignment"] = corr
+            risk.append("risk_recency_alignment")
+
         # =================================================
         # ENGAGEMENT — PROXY SIGNALS
         # =================================================
@@ -728,7 +742,41 @@ class CustomerValueDomain(BaseDomain):
                 "Variability in churn risk",
                 0.85, "risk", "stability", "spread"
             )
-    
+
+        if c.get("churn_risk") and df[c["churn_risk"]].nunique() > 5:
+            fig, ax = plt.subplots()
+            df[c["churn_risk"]].dropna().plot(kind="density", ax=ax)
+            ax.set_title("Churn Risk Density")
+            save(
+                fig,
+                "risk_churn_density.png",
+                "Density profile of customer churn risk",
+                0.92,
+                "risk",
+                "stability",
+                "distribution",
+            )
+
+        if c.get("recency_days") and c.get("churn_risk"):
+            x = df[c["recency_days"]]
+            y = df[c["churn_risk"]]
+        
+            if x.notna().sum() > 20 and y.notna().sum() > 20:
+                fig, ax = plt.subplots()
+                ax.scatter(x, y, alpha=0.4)
+                ax.set_xlabel("Days Since Last Purchase")
+                ax.set_ylabel("Churn Risk")
+                ax.set_title("Recency vs Churn Risk")
+                save(
+                    fig,
+                    "risk_recency_vs_churn.png",
+                    "Relationship between inactivity and churn risk",
+                    0.90,
+                    "risk",
+                    "early_warning",
+                    "relationship",
+                )
+
         if c.get("tenure") and c.get("churn_risk"):
             x = df[c["tenure"]]
             y = df[c["churn_risk"]]
@@ -1000,7 +1048,20 @@ class CustomerValueDomain(BaseDomain):
                     "so_what": "Risk signals are suitable for executive governance.",
                 },
             ])
-    
+
+        if (
+            kpis.get("risk_recency_alignment") is not None
+            and abs(kpis["risk_recency_alignment"]) > 0.3
+        ):
+            insights.append({
+                "level": "STRATEGIC",
+                "title": "Inactivity-Driven Churn Risk",
+                "so_what": (
+                    "Customer churn risk shows a strong relationship with purchase inactivity, "
+                    "indicating emerging rather than residual risk."
+                ),
+            })
+
         # =================================================
         # ENGAGEMENT — PROXY SIGNALS
         # =================================================
