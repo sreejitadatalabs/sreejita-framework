@@ -579,10 +579,11 @@ class CustomerValueDomain(BaseDomain):
     
         GUARANTEES:
         - Evidence-only visuals
-        - ≥9 candidates per sub-domain (when data allows)
-        - No judgement, no thresholds
+        - Column-driven (no KPI bookkeeping gates)
         - Flat-plot prevention
+        - No judgement, no thresholds
         - No trimming (report layer responsibility)
+        - Deterministic file output
         """
     
         visuals: List[Dict[str, Any]] = []
@@ -591,15 +592,10 @@ class CustomerValueDomain(BaseDomain):
         c = self.cols
     
         # -------------------------------------------------
-        # KPI SOURCE OF TRUTH
+        # KPI SOURCE OF TRUTH (STATELESS)
         # -------------------------------------------------
-        kpis = getattr(self, "_last_kpis", None)
-        if not isinstance(kpis, dict):
-            kpis = self.calculate_kpis(df)
-            self._last_kpis = kpis
-    
-        domain_map = kpis.get("_domain_kpi_map", {})
-        record_count = kpis.get("record_count", 0)
+        kpis = self.calculate_kpis(df)
+        record_count = int(kpis.get("record_count", len(df)))
     
         # -------------------------------------------------
         # VISUAL CONFIDENCE (DATA-DRIVEN ONLY)
@@ -607,163 +603,189 @@ class CustomerValueDomain(BaseDomain):
         if record_count >= 5000:
             visual_conf = 0.85
         elif record_count >= 1000:
-            visual_conf = 0.7
+            visual_conf = 0.70
         else:
             visual_conf = 0.55
     
         # -------------------------------------------------
-        # HELPER
+        # SAFE SAVE HELPER
         # -------------------------------------------------
         def save(fig, name, caption, importance, sub_domain, role, axis):
             path = output_dir / name
             fig.savefig(path, bbox_inches="tight", dpi=120)
             plt.close(fig)
-            visuals.append({
-                "path": str(path),
-                "caption": caption,
-                "importance": float(importance),
-                "sub_domain": sub_domain,
-                "role": role,
-                "axis": axis,
-                "confidence": visual_conf,
-            })
+            if path.exists():
+                visuals.append({
+                    "path": str(path),
+                    "caption": caption,
+                    "importance": float(importance),
+                    "sub_domain": sub_domain,
+                    "role": role,
+                    "axis": axis,
+                    "confidence": visual_conf,
+                })
     
         # =================================================
         # VALUE — ECONOMIC DISTRIBUTIONS
         # =================================================
-        if "value" in domain_map:
+        if c.get("clv") and df[c["clv"]].nunique(dropna=True) > 3:
+            fig, ax = plt.subplots()
+            df[c["clv"]].dropna().hist(ax=ax, bins=20)
+            ax.set_title("Customer Lifetime Value Distribution")
+            save(
+                fig, "value_clv_dist.png",
+                "Distribution of customer lifetime value",
+                0.95, "value", "monetization", "distribution"
+            )
     
-            if c.get("clv") and df[c["clv"]].nunique() > 3:
-                fig, ax = plt.subplots()
-                df[c["clv"]].hist(ax=ax, bins=20)
-                ax.set_title("Customer Lifetime Value Distribution")
-                save(fig, "value_clv_dist.png",
-                     "Distribution of customer lifetime value",
-                     0.95, "value", "monetization", "distribution")
+            fig, ax = plt.subplots()
+            df[c["clv"]].dropna().plot(kind="box", ax=ax)
+            ax.set_title("CLV Spread")
+            save(
+                fig, "value_clv_box.png",
+                "Variability in customer lifetime value",
+                0.90, "value", "monetization", "spread"
+            )
     
-                fig, ax = plt.subplots()
-                df[c["clv"]].plot(kind="box", ax=ax)
-                ax.set_title("CLV Spread")
-                save(fig, "value_clv_box.png",
-                     "Variability in customer lifetime value",
-                     0.9, "value", "monetization", "spread")
-    
-            if c.get("total_spend") and df[c["total_spend"]].nunique() > 3:
-                fig, ax = plt.subplots()
-                df[c["total_spend"]].hist(ax=ax, bins=20)
-                ax.set_title("Total Spend Distribution")
-                save(fig, "value_spend_dist.png",
-                     "Distribution of customer total spend",
-                     0.9, "value", "monetization", "distribution")
+        if c.get("total_spend") and df[c["total_spend"]].nunique(dropna=True) > 3:
+            fig, ax = plt.subplots()
+            df[c["total_spend"]].dropna().hist(ax=ax, bins=20)
+            ax.set_title("Total Spend Distribution")
+            save(
+                fig, "value_spend_dist.png",
+                "Distribution of customer total spend",
+                0.90, "value", "monetization", "distribution"
+            )
     
         # =================================================
         # LOYALTY — TENURE & CONTINUITY
         # =================================================
-        if "loyalty" in domain_map:
+        if c.get("tenure") and df[c["tenure"]].nunique(dropna=True) > 3:
+            fig, ax = plt.subplots()
+            df[c["tenure"]].dropna().hist(ax=ax, bins=15)
+            ax.set_title("Customer Tenure Distribution")
+            save(
+                fig, "loyalty_tenure_dist.png",
+                "Customer tenure spread",
+                0.90, "loyalty", "stability", "distribution"
+            )
     
-            if c.get("tenure") and df[c["tenure"]].nunique() > 3:
-                fig, ax = plt.subplots()
-                df[c["tenure"]].hist(ax=ax, bins=15)
-                ax.set_title("Customer Tenure Distribution")
-                save(fig, "loyalty_tenure_dist.png",
-                     "Customer tenure spread",
-                     0.9, "loyalty", "stability", "distribution")
+            fig, ax = plt.subplots()
+            df[c["tenure"]].dropna().plot(kind="box", ax=ax)
+            ax.set_title("Tenure Variability")
+            save(
+                fig, "loyalty_tenure_box.png",
+                "Variability in customer tenure",
+                0.85, "loyalty", "stability", "spread"
+            )
     
+        if c.get("loyalty_tier"):
+            counts = df[c["loyalty_tier"]].value_counts()
+            if len(counts) > 1:
                 fig, ax = plt.subplots()
-                df[c["tenure"]].plot(kind="box", ax=ax)
-                ax.set_title("Tenure Variability")
-                save(fig, "loyalty_tenure_box.png",
-                     "Variability in customer tenure",
-                     0.85, "loyalty", "stability", "spread")
-    
-            if c.get("loyalty_tier"):
-                fig, ax = plt.subplots()
-                df[c["loyalty_tier"]].value_counts().plot.bar(ax=ax)
+                counts.plot.bar(ax=ax)
                 ax.set_title("Loyalty Tier Mix")
-                save(fig, "loyalty_tier_mix.png",
-                     "Distribution of customers across loyalty tiers",
-                     0.8, "loyalty", "structure", "composition")
+                save(
+                    fig, "loyalty_tier_mix.png",
+                    "Distribution of customers across loyalty tiers",
+                    0.80, "loyalty", "structure", "composition"
+                )
     
         # =================================================
         # RISK — CHURN RISK STRUCTURE
         # =================================================
-        if "risk" in domain_map:
+        if c.get("churn_risk") and df[c["churn_risk"]].nunique(dropna=True) > 3:
+            fig, ax = plt.subplots()
+            df[c["churn_risk"]].dropna().hist(ax=ax, bins=15)
+            ax.set_title("Churn Risk Score Distribution")
+            save(
+                fig, "risk_churn_dist.png",
+                "Distribution of churn risk scores",
+                0.90, "risk", "stability", "distribution"
+            )
     
-            if c.get("churn_risk") and df[c["churn_risk"]].nunique() > 3:
-                fig, ax = plt.subplots()
-                df[c["churn_risk"]].hist(ax=ax, bins=15)
-                ax.set_title("Churn Risk Score Distribution")
-                save(fig, "risk_churn_dist.png",
-                     "Distribution of churn risk scores",
-                     0.9, "risk", "stability", "distribution")
+            fig, ax = plt.subplots()
+            df[c["churn_risk"]].dropna().plot(kind="box", ax=ax)
+            ax.set_title("Churn Risk Spread")
+            save(
+                fig, "risk_churn_box.png",
+                "Variability in churn risk",
+                0.85, "risk", "stability", "spread"
+            )
     
+        if c.get("tenure") and c.get("churn_risk"):
+            x = df[c["tenure"]]
+            y = df[c["churn_risk"]]
+            if x.notna().sum() > 5 and y.notna().sum() > 5:
                 fig, ax = plt.subplots()
-                df[c["churn_risk"]].plot(kind="box", ax=ax)
-                ax.set_title("Churn Risk Spread")
-                save(fig, "risk_churn_box.png",
-                     "Variability in churn risk",
-                     0.85, "risk", "stability", "spread")
-    
-            if c.get("tenure") and c.get("churn_risk"):
-                fig, ax = plt.subplots()
-                ax.scatter(df[c["tenure"]], df[c["churn_risk"]], alpha=0.5)
+                ax.scatter(x, y, alpha=0.5)
                 ax.set_xlabel("Tenure")
                 ax.set_ylabel("Churn Risk")
                 ax.set_title("Tenure vs Churn Risk")
-                save(fig, "risk_tenure_vs_churn.png",
-                     "Relationship between tenure and churn risk",
-                     0.85, "risk", "relationship", "correlation")
+                save(
+                    fig, "risk_tenure_vs_churn.png",
+                    "Relationship between tenure and churn risk",
+                    0.85, "risk", "relationship", "correlation"
+                )
     
         # =================================================
         # ENGAGEMENT — PROXY SIGNALS
         # =================================================
-        if "engagement" in domain_map:
-    
-            if c.get("preferred_channel"):
+        if c.get("preferred_channel"):
+            counts = df[c["preferred_channel"]].value_counts()
+            if len(counts) > 1:
                 fig, ax = plt.subplots()
-                df[c["preferred_channel"]].value_counts().plot.bar(ax=ax)
+                counts.plot.bar(ax=ax)
                 ax.set_title("Preferred Channel Distribution")
-                save(fig, "engagement_channel_mix.png",
-                     "Customer preferred channel mix",
-                     0.75, "engagement", "preference", "composition")
+                save(
+                    fig, "engagement_channel_mix.png",
+                    "Customer preferred channel mix",
+                    0.75, "engagement", "preference", "composition"
+                )
     
-            if c.get("email_opt_in"):
+        if c.get("email_opt_in"):
+            counts = df[c["email_opt_in"]].value_counts().sort_index()
+            if len(counts) > 1:
                 fig, ax = plt.subplots()
-                df[c["email_opt_in"]].value_counts().sort_index().plot.bar(ax=ax)
+                counts.plot.bar(ax=ax)
                 ax.set_title("Email Opt-In Distribution")
-                save(fig, "engagement_email_optin.png",
-                     "Email communication opt-in status",
-                     0.7, "engagement", "access", "composition")
+                save(
+                    fig, "engagement_email_optin.png",
+                    "Email communication opt-in status",
+                    0.70, "engagement", "access", "composition"
+                )
     
         # =================================================
         # CONCENTRATION — DEPENDENCY & SKEW
         # =================================================
-        if "concentration" in domain_map:
-    
-            if c.get("clv") and df[c["clv"]].nunique() > 5:
-                sorted_vals = df[c["clv"]].dropna().sort_values(ascending=False)
-                cumulative = sorted_vals.cumsum() / sorted_vals.sum()
-    
+        if c.get("clv") and df[c["clv"]].nunique(dropna=True) > 5:
+            vals = df[c["clv"]].dropna().sort_values(ascending=False)
+            if vals.sum() > 0:
+                cumulative = vals.cumsum() / vals.sum()
                 fig, ax = plt.subplots()
                 cumulative.reset_index(drop=True).plot(ax=ax)
                 ax.set_title("Cumulative CLV Concentration Curve")
-                save(fig, "concentration_clv_curve.png",
-                     "Cumulative contribution of top customers to total value",
-                     0.95, "concentration", "dependency", "cumulative")
+                save(
+                    fig, "concentration_clv_curve.png",
+                    "Cumulative contribution of top customers to total value",
+                    0.95, "concentration", "dependency", "cumulative"
+                )
     
-            if c.get("total_spend") and df[c["total_spend"]].nunique() > 5:
-                sorted_spend = df[c["total_spend"]].dropna().sort_values(ascending=False)
-                cumulative = sorted_spend.cumsum() / sorted_spend.sum()
-    
+        if c.get("total_spend") and df[c["total_spend"]].nunique(dropna=True) > 5:
+            vals = df[c["total_spend"]].dropna().sort_values(ascending=False)
+            if vals.sum() > 0:
+                cumulative = vals.cumsum() / vals.sum()
                 fig, ax = plt.subplots()
                 cumulative.reset_index(drop=True).plot(ax=ax)
                 ax.set_title("Cumulative Spend Concentration Curve")
-                save(fig, "concentration_spend_curve.png",
-                     "Cumulative spend contribution by customer rank",
-                     0.9, "concentration", "dependency", "cumulative")
+                save(
+                    fig, "concentration_spend_curve.png",
+                    "Cumulative spend contribution by customer rank",
+                    0.90, "concentration", "dependency", "cumulative"
+                )
     
         # -------------------------------------------------
-        # RETURN ALL CANDIDATES
+        # RETURN ALL CANDIDATES (NO TRIMMING)
         # -------------------------------------------------
         visuals.sort(key=lambda v: v["importance"], reverse=True)
         return visuals
