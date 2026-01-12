@@ -145,30 +145,20 @@ def generate_report_payload(
         raise RuntimeError(f"Domain '{domain}' is not registered")
 
     # -------------------------------------------------
-    # 4. DOMAIN EXECUTION
+    # 4. DOMAIN EXECUTION (AUTHORITATIVE)
     # -------------------------------------------------
     try:
-        # PREPROCESS
-        df = engine.preprocess(df)
+        result = engine.run(
+            df,
+            visual_output_dir=run_dir / "visuals" / domain,
+        )
 
-        # KPIs
-        kpis = engine.calculate_kpis(df)
-        if not isinstance(kpis, dict):
-            raise TypeError("calculate_kpis must return dict")
+        kpis = result.get("kpis", {})
+        visuals = result.get("visuals", [])
+        insights = result.get("insights", [])
+        recommendations = result.get("recommendations", [])
 
-        # VISUALS
-        try:
-            visuals = engine.generate_visuals(
-                df=df,
-                output_dir=run_dir / "visuals" / domain,
-            ) or []
-        except Exception:
-            visuals = []
-
-        # INSIGHTS
-        insights = engine.generate_insights(df, kpis) or []
-
-        # 🔵 STORYTELLING LAYER (NEW)
+        # STORYTELLING LAYER
         insights = apply_storytelling_layer(
             insights=insights,
             kpis=kpis,
@@ -176,50 +166,24 @@ def generate_report_payload(
             domain=domain,
         )
 
-        # RECOMMENDATIONS
-        raw_recs = engine.generate_recommendations(df, kpis, insights)
-        recommendations = enrich_recommendations(raw_recs)
+        recommendations = enrich_recommendations(recommendations)
 
     except Exception as e:
         log.exception(f"Domain execution failed | domain={domain}")
         raise RuntimeError(f"{domain} execution failed: {e}")
 
     # -------------------------------------------------
-    # 5. VISUAL VALIDATION
+    # 5. EXECUTIVE VISUAL SELECTION
     # -------------------------------------------------
-    valid_visuals: List[Dict[str, Any]] = []
-
-    for v in visuals:
-        try:
-            path = Path(v.get("path", ""))
-            conf = float(v.get("confidence", v.get("importance", 1.0)))
-            if path.exists() and conf >= 0.30:
-                valid_visuals.append(v)
-
-        except Exception:
-            continue
-
-    # -------------------------------------------------
-    # 6. VISUAL SAFETY NET
-    # -------------------------------------------------
-    valid_visuals = engine.ensure_minimum_visuals(
-        valid_visuals,
-        df,
-        run_dir / "visuals" / domain,
-    )
-
-    # -------------------------------------------------
-    # 7. EXECUTIVE VISUAL SELECTION
-    # -------------------------------------------------
-    valid_visuals = sorted(
-        valid_visuals,
+    visuals = sorted(
+        visuals,
         key=lambda v: float(v.get("importance", 0.0))
         * float(v.get("confidence", 1.0)),
         reverse=True,
     )[:MAX_EXECUTIVE_VISUALS]
 
     # -------------------------------------------------
-    # 8. EXECUTIVE COGNITION (GLOBAL, UNIVERSAL)
+    # 6. EXECUTIVE COGNITION
     # -------------------------------------------------
     executive = build_executive_payload(
         kpis=kpis,
@@ -238,7 +202,7 @@ def generate_report_payload(
     executive["sub_domains"] = subdomain_executive
 
     # -------------------------------------------------
-    # 9. BOARD READINESS TREND
+    # 7. BOARD READINESS TREND
     # -------------------------------------------------
     history = _load_history(run_dir)
 
@@ -257,13 +221,13 @@ def generate_report_payload(
         _save_history(run_dir, history)
 
     # -------------------------------------------------
-    # 10. FINAL PAYLOAD
+    # 8. FINAL PAYLOAD
     # -------------------------------------------------
     return {
         domain: {
             "domain": domain,
             "kpis": kpis,
-            "visuals": valid_visuals,
+            "visuals": visuals,
             "insights": insights,
             "recommendations": recommendations,
             "executive": executive,
