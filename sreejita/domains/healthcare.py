@@ -2282,11 +2282,9 @@ class HealthcareDomainDetector(BaseDomainDetector):
         """
         Universal, capability-based healthcare domain detector.
 
-        Guarantees:
-        - Alias-aware (via resolve_semantics)
-        - Pharmacy / clinic / hospital / public-health safe
-        - Never drops domain once anchored
-        - Confidence reflects signal strength, not binary existence
+        Finance-safe guarantees:
+        - Will not anchor on GL / P&L ledgers
+        - Clinical signals must dominate
         """
 
         # -------------------------------------------------
@@ -2300,26 +2298,41 @@ class HealthcareDomainDetector(BaseDomainDetector):
             )
 
         # -------------------------------------------------
-        # SEMANTIC CAPABILITIES (AUTHORITATIVE)
+        # SEMANTIC CAPABILITIES
         # -------------------------------------------------
         semantics = resolve_semantics(df)
 
         # -------------------------------------------------
-        # HEALTHCARE ANCHOR (CAPABILITY-BASED, NON-BINARY)
+        # 🚫 FINANCE NEGATIVE GATE (CRITICAL FIX)
+        # -------------------------------------------------
+        has_revenue = semantics.get("has_revenue", False)
+        has_expense = semantics.get("has_expense", False)
+        has_profit = semantics.get("has_profit", False)
+        has_gl_account = semantics.get("has_gl_account", False)
+
+        # Full ledger signature → NOT healthcare
+        if has_revenue and has_expense and has_profit and has_gl_account:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=0.0,
+                signals=semantics,
+            )
+
+        # -------------------------------------------------
+        # HEALTHCARE ANCHOR (CAPABILITY-BASED)
         # -------------------------------------------------
         anchor_signals = [
             semantics.get("has_patient_id", False),
             semantics.get("has_admission_date", False),
             semantics.get("has_discharge_date", False),
-            semantics.get("has_duration", False),    # clinic / diagnostics
-            semantics.get("has_cost", False),        # billing / pharmacy
-            semantics.get("has_supply", False),      # pharmacy
-            semantics.get("has_population", False),  # public health
+            semantics.get("has_duration", False),
+            semantics.get("has_cost", False),
+            semantics.get("has_supply", False),
+            semantics.get("has_population", False),
         ]
 
         anchor_score = sum(int(x) for x in anchor_signals)
 
-        # ❌ No healthcare evidence at all
         if anchor_score == 0:
             return DomainDetectionResult(
                 domain=None,
@@ -2328,19 +2341,12 @@ class HealthcareDomainDetector(BaseDomainDetector):
             )
 
         # -------------------------------------------------
-        # CONFIDENCE SCORING (LINEAR, BOUNDED, HONEST)
+        # CONFIDENCE (UNCHANGED)
         # -------------------------------------------------
-        # Safety floor once healthcare is anchored
         confidence = 0.30
-
-        # Capability-driven reinforcement
         confidence += min(anchor_score * 0.10, 0.55)
-
         confidence = round(min(confidence, 0.95), 2)
 
-        # -------------------------------------------------
-        # RETURN — NEVER DROP AFTER ANCHOR
-        # -------------------------------------------------
         return DomainDetectionResult(
             domain=self.domain_name,
             confidence=confidence,
@@ -2348,13 +2354,11 @@ class HealthcareDomainDetector(BaseDomainDetector):
         )
 
 
-# -----------------------------------------------------
-# REGISTRY HOOK
-# -----------------------------------------------------
 def register(registry):
     registry.register(
         "healthcare",
         HealthcareDomain,
         HealthcareDomainDetector,
     )
+
 
