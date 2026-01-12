@@ -875,8 +875,7 @@ class EcommerceDomain(BaseDomain):
 class EcommerceDomainDetector(BaseDomainDetector):
     domain_name = "ecommerce"
 
-    # Strong ecommerce signals only (not marketing-only)
-    TOKENS: Set[str] = {
+    TOKENS = {
         "session",
         "sessions",
         "cart",
@@ -889,36 +888,46 @@ class EcommerceDomainDetector(BaseDomainDetector):
         "refund",
     }
 
-    def detect(self, df) -> DomainDetectionResult:
+    def detect(self, df: pd.DataFrame) -> DomainDetectionResult:
         cols = {c.lower() for c in df.columns}
 
-        # Token hits
+        # -------------------------------------------------
+        # 🚫 FINANCE LEDGER NEGATIVE GATE (CRITICAL FIX)
+        # -------------------------------------------------
+        has_gl_account = any("gl" in c and "account" in c for c in cols)
+        has_profit = any("profit" in c for c in cols)
+        has_expense = any("expense" in c or "cost" in c for c in cols)
+
+        # Ledger-style dataset → not ecommerce
+        if has_gl_account and has_profit and has_expense:
+            return DomainDetectionResult(
+                domain=None,
+                confidence=0.0,
+                signals={"reason": "ledger_dataset"},
+            )
+
+        # -------------------------------------------------
+        # TOKEN MATCHING (UNCHANGED)
+        # -------------------------------------------------
         hits = [
             c for c in cols
             if any(t in c for t in self.TOKENS)
         ]
 
-        # Base confidence (require more evidence than marketing)
         confidence = min(len(hits) / 4, 1.0)
 
-        # -------------------------------------------------
-        # Strong ecommerce signature boosts
-        # -------------------------------------------------
         has_sessions = any("session" in c for c in cols)
         has_cart = any("cart" in c for c in cols)
         has_checkout = any("checkout" in c for c in cols)
         has_orders = any("order" in c or "transaction" in c for c in cols)
         has_revenue = any("revenue" in c or "sales" in c for c in cols)
 
-        # Session + Cart/Funnel = classic ecommerce
         if has_sessions and (has_cart or has_checkout):
             confidence = max(confidence, 0.85)
 
-        # Orders + Revenue = very strong ecommerce
         if has_orders and has_revenue:
             confidence = max(confidence, 0.90)
 
-        # Session + Orders + Revenue = near-certain
         if has_sessions and has_orders and has_revenue:
             confidence = max(confidence, 0.95)
 
@@ -930,4 +939,9 @@ class EcommerceDomainDetector(BaseDomainDetector):
 
 
 def register(registry):
-    registry.register("ecommerce", EcommerceDomain, EcommerceDomainDetector)
+    registry.register(
+        "ecommerce",
+        EcommerceDomain,
+        EcommerceDomainDetector
+    )
+
