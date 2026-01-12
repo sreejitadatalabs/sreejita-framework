@@ -181,6 +181,20 @@ def benford_deviation(series: pd.Series) -> float:
         sum(abs(observed.get(str(d), 0) - expected[str(d)]) for d in range(1, 10))
     )
 
+def _has_numeric_column(df, names):
+    names = {n.lower() for n in names}
+    for col in df.columns:
+        lcol = str(col).lower()
+        if any(n in lcol for n in names) and pd.api.types.is_numeric_dtype(df[col]):
+            return True
+    return False
+
+def _has_gl_account(df):
+    for c in df.columns:
+        l = str(c).lower()
+        if ("gl" in l and ("account" in l or "code" in l)) or "ledger" in l:
+            return True
+    return False
 
 # =====================================================
 # VISUAL FORMATTERS (NO PLOTTING LOGIC)
@@ -540,7 +554,7 @@ class FinanceDomain(BaseDomain):
                 fig, ax = plt.subplots(figsize=(7, 4))
                 s.plot(ax=ax)
                 ax.set_title("Price Movement Over Time")
-                ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+                ax.yaxis.set_major_formatter(FuncFormatter(human_currency_formatter))
                 save(fig, "price_trend.png",
                      "Observed price movement over time", 0.92, "market")
     
@@ -585,7 +599,7 @@ class FinanceDomain(BaseDomain):
                 [df[c["revenue"]].sum(), df[c["expense"]].sum()]
             )
             ax.set_title("Revenue and Expense Magnitudes")
-            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            ax.yaxis.set_major_formatter(FuncFormatter(human_currency_formatter))
             save(fig, "revenue_expense.png",
                  "Relative magnitude of revenue and expenses", 0.9, "corporate")
     
@@ -610,7 +624,7 @@ class FinanceDomain(BaseDomain):
                 [df[c["debt"]].mean(), df[c["equity"]].mean()]
             )
             ax.set_title("Average Capital Components")
-            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            ax.yaxis.set_major_formatter(FuncFormatter(human_currency_formatter))
             save(fig, "capital_structure.png",
                  "Observed capital structure components", 0.83, "risk")
     
@@ -632,7 +646,7 @@ class FinanceDomain(BaseDomain):
                 [df[c["loans"]].mean(), df[c["npa"]].mean()]
             )
             ax.set_title("Loan and Non-Performing Asset Levels")
-            ax.yaxis.set_major_formatter(FuncFormatter(human_fmt))
+            ax.yaxis.set_major_formatter(FuncFormatter(human_currency_formatter))
             save(fig, "loan_npa_levels.png",
                  "Observed loan and non-performing asset levels", 0.79, "banking")
     
@@ -1598,6 +1612,12 @@ class FinanceDomainDetector(BaseDomainDetector):
         if signal_groups_present == 0:
             confidence = 0.0
 
+        has_gl = any("gl" in c and "account" in c for c in cols)
+        has_pnl = bool(pnl_hits)
+        
+        if has_gl and has_pnl:
+            confidence = max(confidence, 0.85)
+            
         return DomainDetectionResult(
             domain="finance",
             confidence=round(confidence, 2),
