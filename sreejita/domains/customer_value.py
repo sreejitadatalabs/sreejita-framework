@@ -307,11 +307,12 @@ class CustomerValueDomain(BaseDomain):
             "total_spend",
             "total_purchases",
         
-            # CORE LOYALTY
+            # CORE CONTINUITY (OPTION B)
             "tenure",
+            "total_purchases",
             "loyalty_tier",
         
-            # CORE RISK (OPTION A)
+            # CORE STABILITY
             "churn_risk",
             "recency_days",
         }
