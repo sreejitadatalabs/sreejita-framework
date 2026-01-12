@@ -301,31 +301,26 @@ class CustomerValueDomain(BaseDomain):
         # -------------------------------------------------
         # DATA COMPLETENESS (RAW VALUE SIGNAL COVERAGE)
         # -------------------------------------------------
-        raw_signal_keys = {
-            # CORE VALUE
+        # ---------------------------------------------
+        # DATA COMPLETENESS — ANALYTIC SIGNALS ONLY
+        # ---------------------------------------------
+        analytic_signal_keys = {
             "clv",
             "total_spend",
             "total_purchases",
-        
-            # CORE CONTINUITY (OPTION B)
             "tenure",
-            "total_purchases",
-            "loyalty_tier",
-        
-            # CORE STABILITY
             "churn_risk",
             "recency_days",
         }
-
+        
         present = 0
-        for k in raw_signal_keys:
+        for k in analytic_signal_keys:
             col = self.cols.get(k)
-            if col and col in df.columns:
-                if df[col].notna().any():
-                    present += 1
-
+            if col and col in df.columns and df[col].notna().any():
+                present += 1
+        
         self.data_completeness = round(
-            present / max(len(raw_signal_keys), 1),
+            present / max(len(analytic_signal_keys), 1),
             2,
         )
 
