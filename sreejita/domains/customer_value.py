@@ -456,7 +456,18 @@ class CustomerValueDomain(BaseDomain):
                 df[c["tenure"]].mean(),
             )
             loyalty.append("loyalty_tenure_dispersion")
-    
+
+        # ---------------- LOYALTY CONTINUITY ----------------
+        if c.get("tenure"):
+            s = df[c["tenure"]].dropna()
+            kpis["loyalty_tenure_skew"] = float(s.skew()) if len(s) > 10 else None
+            loyalty.append("loyalty_tenure_skew")
+        
+        if c.get("tenure") and c.get("total_purchases"):
+            corr = df[[c["tenure"], c["total_purchases"]]].corr().iloc[0, 1]
+            kpis["loyalty_tenure_purchase_alignment"] = corr
+            loyalty.append("loyalty_tenure_purchase_alignment")
+
         if c.get("loyalty_tier"):
             kpis["loyalty_tier_count"] = safe_nunique(c["loyalty_tier"])
             loyalty.append("loyalty_tier_count")
@@ -711,7 +722,41 @@ class CustomerValueDomain(BaseDomain):
                 "Variability in customer tenure",
                 0.85, "loyalty", "stability", "spread"
             )
-    
+
+        if c.get("tenure") and df[c["tenure"]].nunique() > 5:
+            fig, ax = plt.subplots()
+            df[c["tenure"]].dropna().plot(kind="density", ax=ax)
+            ax.set_title("Customer Tenure Density")
+            save(
+                fig,
+                "loyalty_tenure_density.png",
+                "Density profile of customer tenure",
+                0.93,
+                "loyalty",
+                "continuity",
+                "distribution",
+            )
+
+        if c.get("tenure") and c.get("total_purchases"):
+            x = df[c["tenure"]]
+            y = df[c["total_purchases"]]
+        
+            if x.notna().sum() > 20 and y.notna().sum() > 20:
+                fig, ax = plt.subplots()
+                ax.scatter(x, y, alpha=0.4)
+                ax.set_xlabel("Tenure (Years)")
+                ax.set_ylabel("Purchase Frequency")
+                ax.set_title("Tenure vs Purchase Frequency")
+                save(
+                    fig,
+                    "loyalty_tenure_vs_frequency.png",
+                    "Relationship between customer tenure and purchase activity",
+                    0.92,
+                    "loyalty",
+                    "continuity",
+                    "relationship",
+                )
+
         if c.get("loyalty_tier"):
             counts = df[c["loyalty_tier"]].value_counts()
             if len(counts) > 1:
@@ -1002,7 +1047,20 @@ class CustomerValueDomain(BaseDomain):
                     "so_what": "Loyalty metrics are suitable for governance review.",
                 },
             ])
-    
+
+        if (
+            kpis.get("loyalty_tenure_purchase_alignment") is not None
+            and abs(kpis["loyalty_tenure_purchase_alignment"]) > 0.3
+        ):
+            insights.append({
+                "level": "STRATEGIC",
+                "title": "Value Supported by Customer Continuity",
+                "so_what": (
+                    "Customer tenure shows a strong relationship with repeat purchasing, "
+                    "indicating that value is sustained by long-term customer continuity."
+                ),
+            })
+
         # =================================================
         # RISK — CHURN & STABILITY
         # =================================================
