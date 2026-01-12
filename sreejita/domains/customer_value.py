@@ -154,6 +154,7 @@ class CustomerValueDomain(BaseDomain):
                 resolve_column(df, "customer_id")
                 or resolve_column(df, "customer")
                 or resolve_column(df, "user_id")
+                or resolve_column(df, "customerid")
             ),
 
             # ---------------- ECONOMIC VALUE ----------------
@@ -170,6 +171,8 @@ class CustomerValueDomain(BaseDomain):
             
             "total_spend": (
                 resolve_column(df, "total_spend")
+                or resolve_column(df, "totalspend")
+                or resolve_column(df, "spend")
                 or resolve_column(df, "lifetime_spend")
                 or resolve_column(df, "sales_amount")
                 or _resolve_any(df, [
@@ -183,6 +186,8 @@ class CustomerValueDomain(BaseDomain):
             "total_purchases": (
                 resolve_column(df, "total_purchases")
                 or resolve_column(df, "purchase_count")
+                or resolve_column(df, "annualfrequency")
+                or resolve_column(df, "purchase_frequency")
                 or resolve_column(df, "order_count")
                 or resolve_column(df, "annual_frequency")   # ✅ ADD
                 or _resolve_any(df, ["frequency", "orders_per_year"])
@@ -192,6 +197,7 @@ class CustomerValueDomain(BaseDomain):
             # ---------------- LOYALTY & TENURE ----------------
             "tenure": (
                 resolve_column(df, "tenure")
+                or resolve_column(df, "tenureyears")
                 or resolve_column(df, "tenure_years")
                 or _resolve_any(df, [
                     "customer_tenure",
@@ -203,6 +209,7 @@ class CustomerValueDomain(BaseDomain):
 
             "loyalty_tier": (
                 resolve_column(df, "loyalty_tier")
+                or resolve_column(df, "loyaltytier")
                 or resolve_column(df, "tier")
                 or resolve_column(df, "membership_level")
             ),
@@ -210,6 +217,7 @@ class CustomerValueDomain(BaseDomain):
             # ---------------- RISK & STABILITY ----------------
             "churn_risk": (
                 resolve_column(df, "churn_risk")
+                or resolve_column(df, "churnriskscore")
                 or resolve_column(df, "churn_risk_score")
                 or resolve_column(df, "attrition_risk")
                 or _resolve_any(df, [
@@ -238,9 +246,16 @@ class CustomerValueDomain(BaseDomain):
                 or resolve_column(df, "income")
             ),
 
+            referrals": (
+                resolve_column(df, "referrals")
+                or resolve_column(df, "referral_count")
+            ),
+
             "recency_days": (
                 resolve_column(df, "days_since_last_purchase")
                 or resolve_column(df, "recency_days")
+                or resolve_column(df, "dayssincelastpurchase")
+                or resolve_column(df, "recencydays")
             ),
         }
 
@@ -254,6 +269,7 @@ class CustomerValueDomain(BaseDomain):
             "tenure",
             "recency_days",
             "churn_risk",
+            "referrals",
             "age",
             "income",
         }
