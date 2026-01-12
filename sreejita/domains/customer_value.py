@@ -302,15 +302,18 @@ class CustomerValueDomain(BaseDomain):
         # DATA COMPLETENESS (RAW VALUE SIGNAL COVERAGE)
         # -------------------------------------------------
         raw_signal_keys = {
+            # CORE VALUE
             "clv",
             "total_spend",
             "total_purchases",
+        
+            # CORE LOYALTY
             "tenure",
             "loyalty_tier",
-            "recency_days",
+        
+            # CORE RISK (OPTION A)
             "churn_risk",
-            "preferred_channel",
-            "email_opt_in",
+            "recency_days",
         }
 
         present = 0
