@@ -298,24 +298,26 @@ class CustomerValueDomain(BaseDomain):
                 })
             df[opt_col] = pd.to_numeric(s, errors="coerce").clip(0, 1)
 
-        # -------------------------------------------------
-        # DATA COMPLETENESS (RAW VALUE SIGNAL COVERAGE)
-        # -------------------------------------------------
         # ---------------------------------------------
         # DATA COMPLETENESS — ANALYTIC SIGNALS ONLY
+        # (ROBUST TO camelCase / PascalCase)
         # ---------------------------------------------
         analytic_signal_keys = {
-            "clv",
-            "total_spend",
-            "total_purchases",
-            "tenure",
-            "churn_risk",
-            "recency_days",
+            "clv": ["clv", "customer_lifetime_value"],
+            "total_spend": ["total_spend", "totalspend", "total_spend", "lifetime_spend"],
+            "total_purchases": ["total_purchases", "annualfrequency", "purchase_count"],
+            "tenure": ["tenure", "tenureyears", "tenure_years"],
+            "churn_risk": ["churn_risk", "churnriskscore", "churn_risk_score"],
+            "recency_days": ["recency_days", "dayssincelastpurchase", "days_since_last_purchase"],
         }
         
         present = 0
-        for k in analytic_signal_keys:
-            col = self.cols.get(k)
+        
+        for key, candidates in analytic_signal_keys.items():
+            col = (
+                self.cols.get(key)
+                or _resolve_any(df, candidates)
+            )
             if col and col in df.columns and df[col].notna().any():
                 present += 1
         
@@ -323,7 +325,7 @@ class CustomerValueDomain(BaseDomain):
             present / max(len(analytic_signal_keys), 1),
             2,
         )
-
+        
         return df
 
     # -------------------------------------------------
