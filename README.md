@@ -6,7 +6,7 @@
 
 **Universal Data Analytics & Reporting Engine with Pluggable Domain Modules**
 
-**Version:** 1.9.5
+**Version:** 3.5.x
 **Status:** Deterministic Decision Reports
 **Maintained by:** Sreejita Data Labs
 
